@@ -1,0 +1,3 @@
+include README.md
+include local_ai/examples/*.jinja 
+include local_ai/examples/*.gbnf
