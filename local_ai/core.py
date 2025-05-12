@@ -428,10 +428,11 @@ class LocalAIManager:
             "--no-webui",
             "-ngl", "-1",
             "--no-mmap",
-            "--mlock"
+            "--mlock",
+            "--jinja"
         ]
         
         if template_path:
-            command.extend(["--jinja", "--chat-template-file", template_path])
+            command.extend(["--chat-template-file", template_path])
             
         return command
