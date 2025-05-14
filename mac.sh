@@ -52,36 +52,32 @@ log_message "Homebrew found at $BREW_PREFIX. PATH updated for this session."
 PYTHON_CMD=""
 log_message "Searching for suitable Python (>= 3.11) in PATH..."
 
-# Find all python3* executables in PATH
-PYTHON_CANDIDATES=$(compgen -c | grep -E '^python3(\\.\\d+)?$' | sort -u)
+# Find all python3* executables in PATH and select the highest version >= 3.11
+HIGHEST_VERSION=""
+HIGHEST_CMD=""
+PYTHON_CANDIDATES=$(compgen -c | grep -E '^python3(\.[0-9]+)?$' | sort -u)
 for candidate in $PYTHON_CANDIDATES; do
     if command_exists "$candidate"; then
         VERSION=$($candidate --version 2>&1 | awk '{print $2}')
         MAJOR=$(echo "$VERSION" | cut -d. -f1)
         MINOR=$(echo "$VERSION" | cut -d. -f2)
-        if [ "$MAJOR" -gt 3 ] || { [ "$MAJOR" -eq 3 ] && [ "$MINOR" -ge 11 ]; }; then
-            log_message "Found suitable Python: $candidate ($VERSION)"
-            PYTHON_CMD="$candidate"
-            break
+        if [ "$MAJOR" -eq 3 ] && [ "$MINOR" -ge 11 ]; then
+            # Compare versions to select the highest
+            if [[ -z "$HIGHEST_VERSION" ]] || [[ $(printf '%s\n' "$VERSION" "$HIGHEST_VERSION" | sort -V | tail -n1) == "$VERSION" ]]; then
+                HIGHEST_VERSION="$VERSION"
+                HIGHEST_CMD="$candidate"
+            fi
         fi
     fi
 done
 
+if [ -n "$HIGHEST_CMD" ]; then
+    log_message "Found suitable Python: $HIGHEST_CMD ($HIGHEST_VERSION)"
+    PYTHON_CMD="$HIGHEST_CMD"
+fi
+
 if [ -z "$PYTHON_CMD" ]; then
-    log_message "No suitable Python found. Will check Homebrew Python..."
-    PYTHON_CMD="$BREW_PREFIX/bin/python3"  # Default to Homebrew Python
-    if ! "$PYTHON_CMD" --version &>/dev/null; then
-        log_message "Installing Python via Homebrew (requires >= 3.11)..."
-        brew install python || handle_error $? "Failed to install Python"
-    fi
-    log_message "Verifying Homebrew Python version..."
-    VERSION=$("$PYTHON_CMD" --version 2>&1 | awk '{print $2}')
-    MAJOR=$(echo "$VERSION" | cut -d. -f1)
-    MINOR=$(echo "$VERSION" | cut -d. -f2)
-    if [ "$MAJOR" -lt 3 ] || { [ "$MAJOR" -eq 3 ] && [ "$MINOR" -lt 11 ]; }; then
-        handle_error 1 "Homebrew Python version is < 3.11. Aborting."
-    fi
-    log_message "Homebrew Python version is $VERSION."
+    handle_error 1 "No suitable Python (>= 3.11) found in PATH. Please install Python 3.11 or higher."
 fi
 
 log_message "Using Python at: $(which $PYTHON_CMD)"
