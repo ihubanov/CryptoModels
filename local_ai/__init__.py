@@ -11,17 +11,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 """Local AI - A library to manage local AI models."""
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 
 # Import template functions for easier access
 
 
 COMMAND_DIRS = [
-    "/usr/local/bin",
-    os.path.join(os.path.expanduser("~"), "homebrew", "bin"),
     "/opt/homebrew/bin",
-    "/usr/bin",
-    "/bin"
+    os.path.join(os.path.expanduser("~"), "homebrew", "bin"),
 ]
 
 # Get the current PATH
