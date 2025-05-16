@@ -178,6 +178,8 @@ class LocalAIManager:
 
             if "gemma" in folder_name.lower():
                 template_path = self._get_model_template_path("gemma")
+                # Gemma models are memory intensive, so we reduce the context length
+                context_length = context_length // 2
                 running_ai_command = self._build_ai_command(
                     local_model_path, local_ai_port, host, context_length, template_path
                 )
