@@ -177,26 +177,26 @@ class LocalAIManager:
                     time.sleep(5)  # Delay between retries
 
             if "gemma" in folder_name.lower():
-                template_path = self._get_model_template_path("gemma")
+                template_path, best_practice_path = self._get_family_template_and_practice("gemma")
                 # Gemma models are memory intensive, so we reduce the context length
                 context_length = context_length // 2
                 running_ai_command = self._build_ai_command(
                     local_model_path, local_ai_port, host, context_length, template_path
                 )
             elif "qwen25" in folder_name.lower():
-                template_path = self._get_model_template_path("qwen25")
+                template_path, best_practice_path = self._get_family_template_and_practice("qwen25")
                 running_ai_command = self._build_ai_command(
-                    local_model_path, local_ai_port, host, context_length, template_path
+                    local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
                 )
             elif "qwen3" in folder_name.lower():
-                template_path = self._get_model_template_path("qwen3")
+                template_path, best_practice_path = self._get_family_template_and_practice("qwen3")
                 running_ai_command = self._build_ai_command(
-                    local_model_path, local_ai_port, host, context_length, template_path
+                    local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
                 )
             elif "llama" in folder_name.lower():
-                template_path = self._get_model_template_path("llama")
+                template_path, best_practice_path = self._get_family_template_and_practice("llama")
                 running_ai_command = self._build_ai_command(
-                    local_model_path, local_ai_port, host, context_length, template_path
+                    local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
                 )
             else:
                 running_ai_command = self._build_ai_command(
