@@ -1,4 +1,5 @@
 import os
+import json
 import time
 import pickle
 import psutil
@@ -102,6 +103,17 @@ class LocalAIManager:
             logger.error(f"Error restarting AI service: {str(e)}", exc_info=True)
             return False
 
+    def _get_family_template_and_practice(self, folder_name: str):
+        """Helper to get template and best practice paths based on folder name."""
+        families = ["gemma", "qwen25", "qwen3", "llama"]
+        for family in families:
+            if family in folder_name.lower():
+                return (
+                    self._get_model_template_path(family),
+                    self._get_model_best_practice_path(family)
+                )
+        return (None, None)
+
     def start(self, hash: str, port: int = 11434, host: str = "0.0.0.0", context_length: int = 32768) -> bool:
         """
         Start the local AI service in the background.
@@ -140,28 +152,16 @@ class LocalAIManager:
             if not os.path.exists(local_model_path):
                 raise ModelNotFoundError(f"Model file not found at: {local_model_path}")
 
-            if not os.path.exists(local_projector_path):
-                service_metadata = {
-                    "hash": hash,
-                    "port": local_ai_port,  # Local AI server port
-                    "local_text_path": local_model_path,
-                    "app_port": port,  # FastAPI port
-                    "context_length": context_length,
-                    "last_activity": time.time()
-                }
-                service_metadata["multimodal"] = False
-                service_metadata["local_projector_path"] = None
-            else:
-                service_metadata = {
-                    "hash": hash,
-                    "port": local_ai_port,  # Local AI server port
-                    "local_text_path": local_model_path,
-                    "app_port": port,  # FastAPI port
-                    "context_length": context_length,
-                    "last_activity": time.time()
-                }
-                service_metadata["multimodal"] = True
-                service_metadata["local_projector_path"] = local_projector_path
+            service_metadata = {
+                "hash": hash,
+                "port": local_ai_port,  # Local AI server port
+                "local_text_path": local_model_path,
+                "app_port": port,  # FastAPI port
+                "context_length": context_length,
+                "last_activity": time.time(),
+                "multimodal": os.path.exists(local_projector_path),
+                "local_projector_path": local_projector_path if os.path.exists(local_projector_path) else None
+            }
 
             filecoin_url = f"https://gateway.lighthouse.storage/ipfs/{hash}"
             folder_name = ""
@@ -264,7 +264,7 @@ class LocalAIManager:
 
             logger.info(f"Service started on port {port} for model: {hash}")
 
-            service_metadata["pid"] =ai_process.pid
+            service_metadata["pid"] = ai_process.pid
             service_metadata["app_pid"] = apis_process.pid
             projector_path = f"{local_model_path}-projector"    
             if os.path.exists(projector_path):
@@ -405,19 +405,21 @@ class LocalAIManager:
 
     def _get_model_template_path(self, model_family: str) -> str:
         """Get the template path for a specific model family."""
-        template_mapping = {
-            "gemma": "gemma3_template.jinja",
-            "qwen25": "qwen25_template.jinja",
-            "qwen3": "qwen3_template.jinja",
-            "llama": "llama31_template.jinja"
-        }
-        
-        for key, template in template_mapping.items():
-            if key in model_family.lower():
-                return pkg_resources.resource_filename("local_ai", f"examples/{template}")
-        return None
+        chat_template_path = pkg_resources.resource_filename("local_ai", f"examples/templates/{model_family}.jinja")
+        # check if the template file exists
+        if not os.path.exists(chat_template_path):
+            return None
+        return chat_template_path
 
-    def _build_ai_command(self, model_path: str, port: int, host: str, context_length: int, template_path: Optional[str] = None) -> list:
+    def _get_model_best_practice_path(self, model_family: str) -> str:
+        """Get the best practices for a specific model family."""
+        best_practice_path = pkg_resources.resource_filename("local_ai", f"examples/best_practices/{model_family}.json")
+        # check if the best practices file exists
+        if not os.path.exists(best_practice_path):
+            return None
+        return best_practice_path
+
+    def _build_ai_command(self, model_path: str, port: int, host: str, context_length: int, template_path: Optional[str] = None, best_practice_path: Optional[str] = None) -> list:
         """Build the AI command with common parameters."""
         command = [
             self.llama_server_path,
@@ -436,5 +438,10 @@ class LocalAIManager:
         
         if template_path:
             command.extend(["--chat-template-file", template_path])
-            
+        
+        if best_practice_path:
+            with open(best_practice_path, "r") as f:
+                best_practice = json.load(f)
+                for key, value in best_practice.items():
+                    command.extend([f"--{key}", str(value)])
         return command
