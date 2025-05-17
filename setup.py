@@ -7,8 +7,8 @@ setup(
     packages=find_packages(),
     package_data={
         "local_ai": [
-            "examples/*.jinja",
-            "examples/*.gbnf"
+            "examples/templates/*.jinja",
+            "examples/best_practices/*.json",
         ],
     },
     include_package_data=True,
