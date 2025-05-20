@@ -113,6 +113,18 @@ class LocalAIManager:
                     self._get_model_best_practice_path(family)
                 )
         return (None, None)
+    
+    def _retry_request_json(self, url, retries=3, delay=5, timeout=10):
+        """Utility to retry a GET request for JSON data."""
+        for attempt in range(retries):
+            try:
+                response = requests.get(url, timeout=timeout)
+                if response.status_code == 200:
+                    return response.json()
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"Attempt {attempt+1} failed for {url}: {e}")
+                time.sleep(delay)
+        return None
 
     def start(self, hash: str, port: int = 11434, host: str = "0.0.0.0", context_length: int = 32768) -> bool:
         """
@@ -144,9 +156,9 @@ class LocalAIManager:
             local_ai_port = port + 1  # Local AI server port
             if model_running:
                 if model_running == hash:
-                    logger.warning(f"Model '{hash}' already running on port {local_ai_port}")
+                    logger.warning(f"Model '{hash}' already running on port {port}")
                     return True
-                logger.info(f"Stopping existing model '{model_running}' on port {local_ai_port}")
+                logger.info(f"Stopping existing model '{model_running}' on port {port}")
                 self.stop()
 
             if not os.path.exists(local_model_path):
@@ -163,18 +175,33 @@ class LocalAIManager:
                 "local_projector_path": local_projector_path if os.path.exists(local_projector_path) else None
             }
 
-            filecoin_url = f"https://gateway.lighthouse.storage/ipfs/{hash}"
-            folder_name = ""
-            for attempt in range(3):
+            # Get the directory of the model file
+            model_dir = Path(local_model_path).parent
+            metadata_file = os.path.join(model_dir, f"{hash}.json")
+
+            logger.info(f"metadata_file: {metadata_file}")
+
+            # Check if metadata file exists
+            if os.path.exists(metadata_file):
                 try:
-                    response = requests.get(filecoin_url, timeout=10)
-                    if response.status_code == 200:
-                        response_json = response.json()
-                        service_metadata["family"] = response_json.get("family", "")
-                        folder_name = response_json["folder_name"]
-                        break
-                except requests.exceptions.RequestException:
-                    time.sleep(5)  # Delay between retries
+                    with open(metadata_file, "r") as f:
+                        metadata = json.load(f)
+                        service_metadata["family"] = metadata.get("family", "")
+                        folder_name = metadata.get("folder_name", "")
+                        required_vram = metadata.get("ram", 1.0)
+                        logger.info(f"Loaded metadata from {metadata_file}")
+                except Exception as e:
+                    logger.error(f"Error loading metadata file: {e}")
+                    metadata_file = None
+
+            # Only fetch from Filecoin if we don't have metadata
+            if not metadata_file:
+                filecoin_url = f"https://gateway.lighthouse.storage/ipfs/{hash}"
+                folder_name = ""
+                response_json = self._retry_request_json(filecoin_url, retries=3, delay=5, timeout=10)
+                folder_name = response_json.get("folder_name", "")
+                service_metadata["family"] = response_json.get("family", "")
+                logger.info(f"Loaded metadata from {filecoin_url}")
 
             if "gemma" in folder_name.lower():
                 template_path, best_practice_path = self._get_family_template_and_practice("gemma")

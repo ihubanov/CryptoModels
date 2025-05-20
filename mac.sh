@@ -1,6 +1,16 @@
 #!/bin/bash
 set -o pipefail
 
+# Check internet connectivity
+check_internet() {
+    log_message "Checking internet connectivity..."
+    if ! ping -c 1 -t 5 8.8.8.8 &>/dev/null && ! ping -c 1 -t 5 1.1.1.1 &>/dev/null; then
+        log_error "No internet connection detected. Please check your connection and try again."
+        exit 1
+    fi
+    log_message "Internet connection verified."
+}
+
 # Logging functions
 log_message() {
     local message="$1"
@@ -37,6 +47,9 @@ command_exists() {
 
 export PATH="/opt/homebrew/bin/:$PATH"
 export PATH="$HOME/homebrew/bin:$PATH"
+
+# Check internet connectivity before proceeding
+check_internet
 
 # Step 1: Ensure Homebrew is installed and set PATH
 if ! command_exists brew; then

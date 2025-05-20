@@ -18,7 +18,7 @@ import subprocess
 import signal
 import requests
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from functools import lru_cache
 
