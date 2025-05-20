@@ -176,7 +176,7 @@ class LocalAIManager:
             }
 
             # Get the directory of the model file
-            model_dir = Path(local_model_path).parent
+            model_dir = os.path.dirname(local_model_path)
             metadata_file = os.path.join(model_dir, f"{hash}.json")
 
             logger.info(f"metadata_file: {metadata_file}")
@@ -198,7 +198,12 @@ class LocalAIManager:
                 response_json = self._retry_request_json(filecoin_url, retries=3, delay=5, timeout=10)
                 folder_name = response_json.get("folder_name", "")
                 service_metadata["family"] = response_json.get("family", "")
-                logger.info(f"Loaded metadata from {filecoin_url}")
+                try:
+                    with open(metadata_file, "w") as f:
+                        json.dump(response_json, f)
+                    logger.info(f"Saved metadata to {metadata_file}")
+                except Exception as e:
+                    logger.error(f"Error saving metadata file: {e}")
 
             if "gemma" in folder_name.lower():
                 template_path, best_practice_path = self._get_family_template_and_practice("gemma")
