@@ -180,6 +180,7 @@ class LocalAIManager:
             metadata_file = os.path.join(model_dir, f"{hash}.json")
 
             logger.info(f"metadata_file: {metadata_file}")
+            folder_name = ""
 
             # Check if metadata file exists
             if os.path.exists(metadata_file):
@@ -188,16 +189,12 @@ class LocalAIManager:
                         metadata = json.load(f)
                         service_metadata["family"] = metadata.get("family", "")
                         folder_name = metadata.get("folder_name", "")
-                        required_vram = metadata.get("ram", 1.0)
                         logger.info(f"Loaded metadata from {metadata_file}")
                 except Exception as e:
                     logger.error(f"Error loading metadata file: {e}")
                     metadata_file = None
-
-            # Only fetch from Filecoin if we don't have metadata
-            if not metadata_file:
+            else:
                 filecoin_url = f"https://gateway.lighthouse.storage/ipfs/{hash}"
-                folder_name = ""
                 response_json = self._retry_request_json(filecoin_url, retries=3, delay=5, timeout=10)
                 folder_name = response_json.get("folder_name", "")
                 service_metadata["family"] = response_json.get("family", "")
