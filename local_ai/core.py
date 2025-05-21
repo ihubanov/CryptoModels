@@ -61,7 +61,7 @@ class LocalAIManager:
         while time.time() - start_time < timeout:
             try:
                 status = requests.get(health_check_url, timeout=5)
-                if status.status_code == 200 and (status.json().get("status") == "ok" or status.json().get("status") == "starting"):
+                if status.status_code == 200 and (status.json().get("status") == "ok"):
                     logger.debug(f"Service healthy at {health_check_url}")
                     return True
             except requests.exceptions.RequestException as e:
@@ -357,7 +357,7 @@ class LocalAIManager:
                     pass
             
                 try:
-                    app_status = session.get(f"http://localhost:{app_port}/v1/health", timeout=2)
+                    app_status = session.get(f"http://localhost:{app_port}/health", timeout=2)
                     api_healthy = app_status.status_code == 200
                 except requests.exceptions.RequestException:
                     pass

@@ -659,17 +659,7 @@ async def health():
     Returns a simple status to indicate the service is running.
     This endpoint bypasses the request queue for immediate response.
     """
-    # Invalidate the service port cache periodically
-    get_cached_service_port.cache_clear()
-    
-    # Check if the service info is set
-    if not hasattr(app.state, "service_info"):
-        return {"status": "starting", "message": "Service info not set yet"}
-    
-    # Update the last request time
-    app.state.last_request_time = time.time()
-    
-    return {"status": "ok", "service": app.state.service_info.get("family", "unknown")}
+    return {"status": "ok"}
 
 
 @app.post("/update")
