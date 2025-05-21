@@ -5,8 +5,7 @@ set -o pipefail
 check_internet() {
     log_message "Checking internet connectivity..."
     if ! ping -c 1 -t 5 8.8.8.8 &>/dev/null && ! ping -c 1 -t 5 1.1.1.1 &>/dev/null; then
-        log_error "No internet connection detected. Please check your connection and try again."
-        exit 1
+        exit 0
     fi
     log_message "Internet connection verified."
 }
@@ -174,7 +173,7 @@ if pip show local-ai &>/dev/null; then
         log_message "Latest version: $REMOTE_VERSION"
         
         # Compare versions
-        if [ "$INSTALLED_VERSION" != "$REMOTE_VERSION" ]; then
+        if [ "$(printf '%s\n' "$INSTALLED_VERSION" "$REMOTE_VERSION" | sort -V | head -n1)" = "$INSTALLED_VERSION" ] && [ "$INSTALLED_VERSION" != "$REMOTE_VERSION" ]; then
             log_message "New version available. Updating..."
             pip uninstall local-ai -y || handle_error $? "Failed to uninstall local-ai"
             pip install -q git+https://github.com/eternalai-org/local-ai.git || handle_error $? "Failed to update local-ai toolkit"
