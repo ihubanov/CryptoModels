@@ -337,44 +337,9 @@ class LocalAIManager:
         try:
             # Load service info from pickle file
             with open(self.pickle_file, "rb") as f:
-                service_info = pickle.load(f)
-            
-            model_hash = service_info.get("hash")
-            app_port = service_info.get("app_port")
-            local_ai_port = service_info.get("port")
-            context_length = service_info.get("context_length")
-            
-            # Check both services with minimal timeout
-            local_ai_healthy = False
-            api_healthy = False
-            
-            # Use a single session for connection pooling
-            with requests.Session() as session:
-                try:
-                    local_ai_status = session.get(f"http://localhost:{local_ai_port}/health", timeout=2)
-                    local_ai_healthy = local_ai_status.status_code == 200
-                except requests.exceptions.RequestException:
-                    pass
-            
-                try:
-                    app_status = session.get(f"http://localhost:{app_port}/health", timeout=2)
-                    api_healthy = app_status.status_code == 200
-                except requests.exceptions.RequestException:
-                    pass
-
-            if local_ai_healthy and api_healthy:
-                return model_hash
-                
-            logger.warning(f"Service not healthy: Local AI {local_ai_healthy}, API {api_healthy}")
-            self.stop()  
-            try:
-                logger.info("Restarting service...")  
-                if self.start(model_hash, app_port, context_length=context_length):
-                    return model_hash
-                return None
-            except Exception as e:
-                logger.error(f"Failed to restart service: {str(e)}")
-                return None
+                service_info = pickle.load(f)   
+            model_hash = service_info.get("hash")      
+            return model_hash
 
         except Exception as e:
             logger.error(f"Error getting running model: {str(e)}")
