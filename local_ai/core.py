@@ -4,6 +4,7 @@ import time
 import pickle
 import psutil
 import asyncio
+import socket
 import requests
 import subprocess
 from pathlib import Path
@@ -38,6 +39,12 @@ class LocalAIManager:
         self.llama_server_path = os.getenv("LLAMA_SERVER")
         if not self.llama_server_path or not os.path.exists(self.llama_server_path):
             raise LocalAIServiceError("llama-server executable not found in LLAMA_SERVER or PATH")
+        
+    def _get_free_port(self) -> int:
+        """Get a free port number."""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("", 0))
+            return s.getsockname()[1]
 
     def _wait_for_service(self, port: int, timeout: int = 300) -> bool:
         """
@@ -153,7 +160,7 @@ class LocalAIManager:
             local_model_path = asyncio.run(download_model_from_filecoin_async(hash))
             local_projector_path = local_model_path + "-projector"
             model_running = self.get_running_model()
-            local_ai_port = port + 1  # Local AI server port
+            local_ai_port = self._get_free_port()
             if model_running:
                 if model_running == hash:
                     logger.warning(f"Model '{hash}' already running on port {port}")
