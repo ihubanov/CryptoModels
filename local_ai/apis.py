@@ -214,26 +214,6 @@ class ServiceHandler:
         request_dict = request.model_dump() if hasattr(request, "model_dump") else request.dict()
         
         if request.stream:
-            if request.tools:
-                # For streaming with tools, we need to get the non-streaming response first
-                # and then simulate streaming from it
-                stream_request = request_dict.copy()
-                stream_request["stream"] = False  # Get non-streaming response first
-                
-                # Make a non-streaming API call
-                response_data = await ServiceHandler._make_api_call(port, "/v1/chat/completions", stream_request)
-                
-                # Return a simulated streaming response
-                return StreamingResponse(
-                    ServiceHandler._fake_stream_with_tools(response_data, request.model),
-                    media_type="text/event-stream",
-                    headers={
-                        "Cache-Control": "no-cache",
-                        "Connection": "keep-alive",
-                        "X-Accel-Buffering": "no"
-                    }
-                )
-            
             # Return a streaming response for non-tool requests
             return StreamingResponse(
                 ServiceHandler._stream_generator(port, request_dict),
