@@ -114,21 +114,8 @@ else
 fi
 
 # Step 5: Install llama.cpp
-log_message "Checking for llama.cpp installation..."
-if command_exists llama; then
-    log_message "llama.cpp is installed. Checking for updates..."
-    if brew outdated | grep -q "llama.cpp"; then
-        log_message "Upgrading llama.cpp..."
-        brew upgrade llama.cpp || handle_error $? "Failed to upgrade llama.cpp"
-        log_message "llama.cpp upgraded successfully."
-    else
-        log_message "llama.cpp is up to date."
-    fi
-else
-    log_message "Installing llama.cpp..."
-    brew install llama.cpp || handle_error $? "Failed to install llama.cpp"
-    log_message "llama.cpp installed successfully."
-fi
+log_message "Installing llama.cpp..."
+brew install llama.cpp.rb || handle_error $? "Failed to install llama.cpp"
 
 log_message "Verifying llama.cpp version..."
 hash -r
