@@ -374,26 +374,47 @@ class LocalAIManager:
             app_port = service_info.get("app_port")
 
             logger.info(f"Stopping AI service '{hash}' running on port {app_port} (PID: {app_pid})...")
+            
+            def terminate_process(pid, process_name, max_retries=3):
+                """Helper function to terminate a process with retries."""
+                if not psutil.pid_exists(pid):
+                    return True
                 
-            # Terminate process by PID
-            if psutil.pid_exists(pid):
-                process = psutil.Process(pid)
-                process.terminate()
-                process.wait(timeout=120)  # Allow process to shut down gracefully
+                for attempt in range(max_retries):
+                    try:
+                        process = psutil.Process(pid)
+                        process.terminate()
+                        process.wait(timeout=30)  # Reduced timeout per attempt
+                        
+                        if not process.is_running():
+                            return True
+                            
+                        logger.warning(f"Process {process_name} (PID: {pid}) did not terminate on attempt {attempt + 1}, forcing kill.")
+                        process.kill()
+                        process.wait(timeout=10)
+                        
+                        if not process.is_running():
+                            return True
+                            
+                        time.sleep(1)  # Wait before next retry
+                    except psutil.NoSuchProcess:
+                        return True
+                    except Exception as e:
+                        logger.error(f"Error terminating {process_name} (PID: {pid}) on attempt {attempt + 1}: {str(e)}")
+                        time.sleep(1)  # Wait before next retry
                 
-                if process.is_running():  # Force kill if still alive
-                    logger.warning("Process did not terminate, forcing kill.")
-                    process.kill()
+                logger.error(f"Failed to terminate {process_name} (PID: {pid}) after {max_retries} attempts")
+                return False
 
-            # Terminate FastAPI app by PIDd
-            if psutil.pid_exists(app_pid):
-                app_process = psutil.Process(app_pid)
-                app_process.terminate()
-                app_process.wait(timeout=120)  # Allow process to shut down gracefully
-                
-                if app_process.is_running():  # Force kill if still alive
-                    logger.warning("API process did not terminate, forcing kill.")
-                    app_process.kill()
+            # Terminate AI process
+            if not terminate_process(pid, "AI service"):
+                logger.error("Failed to terminate AI service process")
+                return False
+
+            # Terminate FastAPI app
+            if not terminate_process(app_pid, "API service"):
+                logger.error("Failed to terminate API service process")
+                return False
 
             # Remove the tracking file
             os.remove(self.pickle_file)
