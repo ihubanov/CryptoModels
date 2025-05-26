@@ -95,8 +95,7 @@ class ChatCompletionRequestBase(BaseModel):
     presence_penalty: Optional[float] = Field(1.5, ge=-2, le=2, description="Presence penalty")
     stop: Optional[List[str]] = Field(None, description="Stop sequences")
     seed: Optional[int] = Field(0, description="Random seed for generation")
-    json_schema: Optional[Dict[str, Any]] = Field(None, description="JSON schema for the response")
-
+    
     @validator("messages")
     def check_messages_not_empty(cls, v: List[Message]) -> List[Message]:
         """Ensure that the messages list is not empty and validate message structure."""
