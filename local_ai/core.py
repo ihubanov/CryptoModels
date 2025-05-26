@@ -328,8 +328,12 @@ class LocalAIManager:
         
     def _dump_running_service(self, metadata: dict):
         """Dump the running service details to a file."""
-        with open(self.pickle_file, "wb") as f:
-            pickle.dump(metadata, f)
+        try:
+            with open(self.pickle_file, "wb") as f:
+                pickle.dump(metadata, f)
+        except Exception as e:
+            logger.error(f"Error dumping running service: {str(e)}", exc_info=True)
+            return False
 
     def get_running_model(self) -> Optional[str]:
         """
@@ -415,9 +419,14 @@ class LocalAIManager:
             if not terminate_process(app_pid, "API service"):
                 logger.error("Failed to terminate API service process")
                 return False
+            
+            try:
+                # remove the pickle file
+                os.remove(self.pickle_file)
+            except Exception as e:
+                logger.error(f"Error removing pickle file: {str(e)}")
+                return False
 
-            # Remove the tracking file
-            os.remove(self.pickle_file)
             logger.info("AI service stopped successfully.")
             return True
 
