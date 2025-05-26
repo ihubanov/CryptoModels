@@ -1,15 +1,6 @@
 #!/bin/bash
 set -o pipefail
 
-# Check internet connectivity
-check_internet() {
-    log_message "Checking internet connectivity..."
-    if ! ping -c 1 -t 5 8.8.8.8 &>/dev/null && ! ping -c 1 -t 5 1.1.1.1 &>/dev/null; then
-        exit 0
-    fi
-    log_message "Internet connection verified."
-}
-
 # Logging functions
 log_message() {
     local message="$1"

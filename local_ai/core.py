@@ -462,7 +462,6 @@ class LocalAIManager:
             "--pooling", "mean",
             "--no-webui",
             "-ngl", "-1",
-            "-ub", "8192",
             "--no-mmap",
             "--mlock",
             "--jinja"
