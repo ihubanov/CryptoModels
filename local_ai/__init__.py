@@ -2,6 +2,8 @@ import os
 import shutil
 import logging
 from pathlib import Path
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
 
 # Configure logging
 logging.basicConfig(
@@ -11,7 +13,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 """Local AI - A library to manage local AI models."""
-__version__ = "0.1.5"
+__version__ = "0.1.6"
 
 # Import template functions for easier access
 
