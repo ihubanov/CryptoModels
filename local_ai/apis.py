@@ -208,8 +208,46 @@ class ServiceHandler:
         port = await ServiceHandler.get_service_port()
         if request.is_vision_request():
             if not app.state.service_info["multimodal"]:
-                raise HTTPException(status_code=400, detail="Vision-based requests are not supported for this model")
-            request.fix_messages()
+                if request.stream:
+                    content = "Unfortunately, I'm not equipped to interpret images at this time. Please provide a text description if possible."
+                    async def error_stream():
+                        chunk = {
+                            "id": f"chatcmpl-{uuid.uuid4().hex}",
+                            "choices": [{
+                                "delta": {
+                                    "content": content
+                                },
+                                "finish_reason": "stop",
+                                "index": 0
+                            }],
+                            "created": int(time.time()),
+                            "model": request.model,
+                            "object": "chat.completion.chunk"
+                        }
+                        yield f"data: {json.dumps(chunk)}\n\n"
+                    return StreamingResponse(
+                        error_stream(),
+                        media_type="text/event-stream"
+                    )
+                else:
+                    error_response = {
+                        "choices": [{
+                            "message": {
+                                "role": "assistant",
+                                "content": content
+                            },
+                            "finish_reason": "stop"
+                        }]
+                    }
+                    return ChatCompletionResponse(
+                        id=f"chatcmpl-{uuid.uuid4().hex}",
+                        object="chat.completion",
+                        created=int(time.time()),
+                        model=request.model,
+                        choices=error_response["choices"]
+                    )
+                
+        request.fix_messages()
         # Convert to dict, supporting both Pydantic v1 and v2
         request_dict = request.model_dump() if hasattr(request, "model_dump") else request.dict()
         

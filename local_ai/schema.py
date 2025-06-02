@@ -86,15 +86,8 @@ class ChatCompletionRequestBase(BaseModel):
     messages: List[Message] = Field(..., description="List of messages in the conversation")
     tools: Optional[List[Dict[str, Any]]] = Field(None, description="Available tools for the model")
     tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(None, description="Tool choice configuration")
-    max_tokens: Optional[int] = Field(4096, ge=1, description="Maximum number of tokens to generate")
-    temperature: Optional[float] = Field(0.7, ge=0, le=2, description="Sampling temperature")
-    top_p: Optional[float] = Field(0.8, ge=0, le=1, description="Nucleus sampling parameter")
-    top_k: Optional[int] = Field(20, ge=1, le=100, description="Top-k sampling parameter")
-    min_p: Optional[float] = Field(0.0, ge=0, le=1, description="Minimum probability parameter")
-    frequency_penalty: Optional[float] = Field(0.0, ge=-2, le=2, description="Frequency penalty")
-    presence_penalty: Optional[float] = Field(1.5, ge=-2, le=2, description="Presence penalty")
-    stop: Optional[List[str]] = Field(None, description="Stop sequences")
-    seed: Optional[int] = Field(0, description="Random seed for generation")
+    max_tokens: Optional[int] = Field(8192, ge=1, description="Maximum number of tokens to generate")
+    seed: Optional[int] = Field(None, description="Random seed for generation")
     
     @validator("messages")
     def check_messages_not_empty(cls, v: List[Message]) -> List[Message]:
@@ -139,7 +132,7 @@ class ChatCompletionRequest(ChatCompletionRequestBase):
     Model for non-streaming chat completion requests.
     """
     stream: bool = Field(False, description="Whether to stream the response")
-    chat_template_kwargs: Optional[ChatTemplateKwargs] = Field(ChatTemplateKwargs(), description="Chat template kwargs")
+    # chat_template_kwargs: Optional[ChatTemplateKwargs] = Field(ChatTemplateKwargs(), description="Chat template kwargs")
 
     def fix_messages(self) -> None:
         """Fix the messages list to ensure proper formatting and ordering."""
