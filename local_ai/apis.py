@@ -208,8 +208,8 @@ class ServiceHandler:
         port = await ServiceHandler.get_service_port()
         if request.is_vision_request():
             if not app.state.service_info["multimodal"]:
+                content = "Unfortunately, I'm not equipped to interpret images at this time. Please provide a text description if possible."
                 if request.stream:
-                    content = "Unfortunately, I'm not equipped to interpret images at this time. Please provide a text description if possible."
                     async def error_stream():
                         chunk = {
                             "id": f"chatcmpl-{uuid.uuid4().hex}",
