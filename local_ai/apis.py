@@ -21,6 +21,8 @@ from functools import lru_cache
 
 # Import schemas from schema.py
 from local_ai.schema import (
+    Choice,
+    Message,
     ChatCompletionRequest,
     ChatCompletionResponse,
     EmbeddingRequest,
@@ -230,21 +232,21 @@ class ServiceHandler:
                         media_type="text/event-stream"
                     )
                 else:
-                    error_response = {
-                        "choices": [{
-                            "message": {
-                                "role": "assistant",
-                                "content": content
-                            },
-                            "finish_reason": "stop"
-                        }]
-                    }
                     return ChatCompletionResponse(
                         id=f"chatcmpl-{uuid.uuid4().hex}",
                         object="chat.completion",
                         created=int(time.time()),
                         model=request.model,
-                        choices=error_response["choices"]
+                        choices=[
+                            Choice(
+                                finish_reason="stop",
+                                index=0,
+                                message= Message(
+                                    role="assistant",
+                                    content=content
+                                )
+                            )
+                        ]
                     )
                 
         request.fix_messages()
