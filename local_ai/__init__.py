@@ -13,7 +13,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 """Local AI - A library to manage local AI models."""
-__version__ = "0.1.7"
+__version__ = "0.1.8"
 
 # Import template functions for easier access
 

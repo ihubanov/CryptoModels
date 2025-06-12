@@ -460,7 +460,9 @@ class LocalAIManager:
             "-ngl", "-1",
             "--no-mmap",
             "--mlock",
-            "--jinja"
+            "--jinja",
+            "--reasoning-format", "none",
+            "--reasoning-budget", "1000"
         ]
         
         if template_path:

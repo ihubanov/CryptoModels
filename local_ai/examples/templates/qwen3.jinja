@@ -12,7 +12,7 @@
 {%- else %}
     {%- if messages[0].role == 'system' %}
         {{- '<|im_start|>system\n' + messages[0].content + '<|im_end|>\n' }}
-    {%- endif %}
+    {%- endif %}x
 {%- endif %}
 
 {%- set ns = namespace(multi_step_tool=true, last_query_index=0) %}
@@ -83,5 +83,7 @@
 
 {%- if add_generation_prompt %}
     {{- '<|im_start|>assistant\n' }}
-    {{- '<think>\n\n</think>\n\n' }}
+    {%- if enable_thinking is defined and enable_thinking is false %}
+        {{- '<think>\n\n</think>\n\n' }}
+    {%- endif %}
 {%- endif %}
