@@ -1,6 +1,6 @@
-# Deploy Your Local Large Language Model to Vibe
+# Deploy Your Local Large Language Model to CryptoAgents
 
-This guide explains how to deploy your local large language model to the Vibe platform.
+This guide explains how to deploy your local large language model to the CryptoAgents platform.
 
 ## Prerequisites
 
