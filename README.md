@@ -2,6 +2,16 @@
 
 This guide will help you deploy your local AI models to the CryptoAgents platform using decentralized infrastructure. Whether you're a developer or AI enthusiast, you'll learn how to run your models securely and efficiently.
 
+## 📑 Table of Contents
+- [Key Features](#-key-features)
+- [Before You Start](#-before-you-start)
+- [Getting Started](#️-getting-started)
+- [Running Models](#-running-models)
+- [Using the API](#-using-the-api)
+- [Advanced Usage](#advanced-usage)
+- [Additional Information](#-additional-information)
+- [Need Help?](#-need-help)
+
 ## 🌟 Key Features
 
 - **Decentralized Deployment**: Run your models on a distributed network
@@ -12,11 +22,16 @@ This guide will help you deploy your local AI models to the CryptoAgents platfor
 - **Automatic Retries**: Robust error handling for network issues
 - **Metadata Management**: Comprehensive model information tracking
 
-## 📋 Before You Start
+##  Before You Start
 
-Make sure you have:
+### Prerequisites
 1. A model in `gguf` format (compatible with `llama.cpp`)
 2. A [Lighthouse](https://lighthouse.storage/) account and API key
+
+### System Requirements
+- macOS or Linux operating system
+- Sufficient RAM for your chosen model (see model specifications below)
+- Stable internet connection for model uploads
 
 ## 🛠️ Getting Started
 
@@ -36,9 +51,7 @@ source local_ai/bin/activate
 ```
 > **Remember**: Activate this environment each time you use the `local-ai` tools
 
-### Verification
-
-Verify your installation:
+2. Verify your installation:
 ```bash
 local-ai --version
 ```
@@ -47,7 +60,7 @@ local-ai --version
 
 ### Available Pre-uploaded Models
 
-We've prepared several models for you to test with:
+We've prepared several models for you to test with. Each model is listed with its specifications and command to run.
 
 #### 🔤 Qwen3 Series
 [Learn more about Qwen3](https://qwenlm.github.io/blog/qwen3/)
@@ -92,6 +105,8 @@ We've prepared several models for you to test with:
 - Command: `local-ai start --hash bafkreihi2cbsgja5dwa5nsuixicx2x3gbcnh7gsocxbmjxegtewoq2syve`
 
 ## 💻 Using the API
+
+The API follows the OpenAI-compatible format, making it easy to integrate with existing applications.
 
 ### Text Chat Example
 ```bash
@@ -161,7 +176,7 @@ Use the [GGUF parser](https://www.npmjs.com/package/@huggingface/gguf) to estima
 npx @huggingface/gguf qwen3-8b-q8/qwen3-8b-q8 --context 32768
 ```
 
-#### Upload Command
+#### Upload Commands
 
 **Basic Upload:**
 ```bash
@@ -182,7 +197,7 @@ local-ai upload \
   --max-retries 20
 ```
 
-#### Upload Command Options
+#### Upload Options
 
 | Option | Description | Default | Required |
 |--------|-------------|---------|----------|
@@ -194,7 +209,7 @@ local-ai upload \
 | `--threads` | Number of compression threads | 16 | ❌ |
 | `--max-retries` | Maximum upload retry attempts | 20 | ❌ |
 
-#### Upload Process Details
+#### Upload Process
 
 The upload process involves several steps:
 
@@ -205,18 +220,13 @@ The upload process involves several steps:
 5. **Metadata Generation**: A metadata file is created with upload information and model details
 6. **IPFS Storage**: All files are stored on IPFS via Lighthouse.storage
 
-#### Example Output
-
-After a successful upload, you'll receive:
-- **CID (Content Identifier)**: Used to reference your uploaded model
-- **Metadata file**: Contains detailed information about the upload
-- **Upload statistics**: File sizes, upload speeds, and timing information
-
-#### Troubleshooting Upload Issues
+#### Troubleshooting
 
 **Common Issues:**
 - **Missing API Key**: Ensure `LIGHTHOUSE_API_KEY` is set in your environment
 - **Network Issues**: The system will automatically retry failed uploads
+- **Insufficient RAM**: Check the model's RAM requirements before uploading
+- **Invalid File Format**: Ensure the model is in GGUF format
 
 ## 📚 Additional Information
 
