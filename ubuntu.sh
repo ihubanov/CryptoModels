@@ -73,7 +73,16 @@ log_message "Python setup complete."
 # Step 2: Install all required packages at once
 log_message "Installing required packages..."
 if command -v apt-get &> /dev/null; then
-    sudo apt-get update && sudo apt-get install -y pigz cmake libcurl4-openssl-dev python3-venv python3-pip
+    sudo apt-get update && sudo apt-get install -y \
+        pigz \
+        cmake \
+        libcurl4-openssl-dev \
+        python3-venv \
+        python3-pip \
+        build-essential \
+        git \
+        ninja-build \
+        nvidia-cuda-toolkit
 elif command -v yum &> /dev/null; then
     sudo yum install -y pigz cmake libcurl-openssl-dev python3-venv python3-pip
 elif command -v dnf &> /dev/null; then
@@ -84,131 +93,90 @@ else
 fi
 log_message "All required packages installed successfully"
 
-# Step 3: Check Docker installation
-if ! command -v docker &> /dev/null; then
-    log_message "Docker is not installed, installing..."
-    sudo apt-get install -y docker.io
+# Step 3: Check for GPU offloading setup
+log_message "Checking for GPU offloading setup..."
+if command_exists prime-run; then
+    log_message "NVIDIA Prime setup detected (prime-run available)"
+    PRIME_RUN_AVAILABLE=true
+elif command_exists optirun; then
+    log_message "Optimus setup detected (optirun available)"
+    OPTIRUN_AVAILABLE=true
+elif command_exists primusrun; then
+    log_message "Optimus setup detected (primusrun available)"
+    PRIMUSRUN_AVAILABLE=true
 else
-    log_message "Docker is already installed"
+    log_message "No GPU offloading setup detected, using direct GPU access"
+    PRIME_RUN_AVAILABLE=false
+    OPTIRUN_AVAILABLE=false
+    PRIMUSRUN_AVAILABLE=false
 fi
 
-# Step 4: Check NVIDIA Container Toolkit
-if ! command -v nvidia-container-toolkit &> /dev/null; then
-    log_message "NVIDIA Container Toolkit is not installed, installing..."
-    
-    # Detect package manager and install appropriate repository
-    if command -v apt-get &> /dev/null; then
-        # For DEB-based systems (Ubuntu/Debian)
-        log_message "Setting up NVIDIA repository for DEB-based system..."
-        
-        # Download and add GPG key
-        if ! curl -s -L https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --yes --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg; then
-            log_error "Failed to download NVIDIA GPG key"
-            exit 1
-        fi
-        
-        # Download and configure repository
-        if ! curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
-            sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
-            sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list > /dev/null; then
-            log_error "Failed to configure NVIDIA repository"
-            exit 1
-        fi
-        
-        # Update package list and install toolkit
-        log_message "Installing NVIDIA Container Toolkit..."
-        if ! sudo apt-get update; then
-            log_error "Failed to update package lists"
-            exit 1
-        fi
-        
-        # Install with verbose output
-        if ! sudo apt-get install -y nvidia-container-toolkit 2>&1 | tee /tmp/nvidia-install.log; then
-            log_error "Failed to install NVIDIA Container Toolkit. Installation log:"
-            cat /tmp/nvidia-install.log
-            exit 1
-        fi
-        
-        # Verify installation
-        if ! command -v nvidia-ctk &> /dev/null; then
-            log_error "nvidia-ctk command not found after installation. Installation log:"
-            cat /tmp/nvidia-install.log
-            exit 1
-        fi
-        
-        log_message "NVIDIA Container Toolkit installation verified"
-        
-    elif command -v yum &> /dev/null || command -v dnf &> /dev/null; then
-        # For RPM-based systems (RHEL/Fedora)
-        log_message "Setting up NVIDIA repository for RPM-based system..."
-        
-        # Download and configure repository
-        if ! curl -s -L https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo | \
-            sudo tee /etc/yum.repos.d/nvidia-container-toolkit.repo > /dev/null; then
-            log_error "Failed to configure NVIDIA repository"
-            exit 1
-        fi
-        
-        # Install toolkit
-        log_message "Installing NVIDIA Container Toolkit..."
-        if command -v dnf &> /dev/null; then
-            if ! sudo dnf install -y nvidia-container-toolkit; then
-                log_error "Failed to install NVIDIA Container Toolkit"
-                exit 1
-            fi
-        else
-            if ! sudo yum install -y nvidia-container-toolkit; then
-                log_error "Failed to install NVIDIA Container Toolkit"
-                exit 1
-            fi
-        fi
-    else
-        log_error "Unsupported package manager. Only apt-get (DEB) and yum/dnf (RPM) are supported."
-        exit 1
-    fi
-    
-    # Configure Docker to use NVIDIA runtime
-    log_message "Configuring Docker to use NVIDIA runtime..."
-    if ! command -v nvidia-ctk &> /dev/null; then
-        log_error "nvidia-ctk command not found. Installation may have failed."
-        exit 1
-    fi
-    
-    if ! sudo nvidia-ctk runtime configure --runtime=docker; then
-        log_error "Failed to configure Docker runtime"
-        exit 1
-    fi
-    
-    # Restart Docker
-    log_message "Restarting Docker service..."
-    if ! sudo systemctl restart docker; then
-        log_error "Failed to restart Docker service"
-        exit 1
-    fi
-    
-    log_message "NVIDIA Container Toolkit installed and configured successfully"
-else
-    log_message "NVIDIA Container Toolkit is already installed"
-fi
-
-# Step 5: Pull llama-server cuda image
+# Step 4: Pull llama-server cuda image
 log_message "Pulling llama-server cuda image..."
-docker pull lmsysorg/sglang:latest
+if ! docker pull ghcr.io/ggerganov/llama.cpp:server-cuda; then
+    handle_error 1 "Failed to pull llama.cpp server Docker image"
+fi
 
-# Step 6: Create llama-server wrapper script
+# Step 5: Create llama-server wrapper script
 log_message "Creating llama-server wrapper script..."
 LLAMA_WRAPPER_DIR="$HOME/.local/bin"
 mkdir -p "$LLAMA_WRAPPER_DIR"
 
-cat > "$LLAMA_WRAPPER_DIR/llama-server" << 'EOF'
+# After venv creation and activation
+PYTHON_VERSION=$($PYTHON_CMD -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')")
+VENV_SITE_PACKAGES="$(pwd)/local_ai/lib/${PYTHON_VERSION}/site-packages"
+TEMPLATES_DIR="$VENV_SITE_PACKAGES/local_ai/examples/templates"
+
+# Get the user's home directory for the absolute path expected by the Python code
+USER_HOME="$HOME"
+ABS_TEMPLATE_PATH="$USER_HOME/.local/lib/${PYTHON_VERSION}/site-packages/local_ai/examples/templates"
+
+cat > "$LLAMA_WRAPPER_DIR/llama-server" << EOF
 #!/bin/bash
 # Wrapper script to run llama-server using Docker
-docker run --rm -it \
-    --gpus all \
-    -p 11434:11434 \
-    -v "$(pwd):/app" \
-    lmsysorg/sglang:latest \
-    llama-server "$@"
+
+MODELS_DIR="$(pwd)/llms-storage"
+TEMPLATES_DIR="$TEMPLATES_DIR"
+
+# Default port
+PORT=11434
+prev=""
+for arg in "\$@"; do
+    if [[ "\$prev" == "--port" ]]; then
+        PORT="\$arg"
+    fi
+    prev="\$arg"
+done
+
+# Check for GPU offloading setup
+if command -v prime-run >/dev/null 2>&1; then
+    echo "Info: NVIDIA Prime setup detected, using prime-run for GPU access"
+    GPU_ACCESS="prime-run"
+elif command -v optirun >/dev/null 2>&1; then
+    echo "Info: Optimus setup detected, using optirun for GPU access"
+    GPU_ACCESS="optirun"
+elif command -v primusrun >/dev/null 2>&1; then
+    echo "Info: Optimus setup detected, using primusrun for GPU access"
+    GPU_ACCESS="primusrun"
+else
+    GPU_ACCESS="direct"
+fi
+
+# Mount model and template dirs at all needed paths
+MODEL_MOUNT="-v \$MODELS_DIR:/models -v \$MODELS_DIR:\$MODELS_DIR"
+TEMPLATE_MOUNT="-v \$TEMPLATES_DIR:/templates -v \$TEMPLATES_DIR:\$TEMPLATES_DIR -v \$TEMPLATES_DIR:$ABS_TEMPLATE_PATH"
+
+DOCKER_RUN="docker run --rm -it --gpus all -p \$PORT:\$PORT \$MODEL_MOUNT \$TEMPLATE_MOUNT ghcr.io/ggerganov/llama.cpp:server-cuda \$@"
+
+if [ "\$GPU_ACCESS" = "prime-run" ]; then
+    prime-run \$DOCKER_RUN
+elif [ "\$GPU_ACCESS" = "optirun" ]; then
+    optirun \$DOCKER_RUN
+elif [ "\$GPU_ACCESS" = "primusrun" ]; then
+    primusrun \$DOCKER_RUN
+else
+    \$DOCKER_RUN
+fi
 EOF
 
 chmod +x "$LLAMA_WRAPPER_DIR/llama-server"
@@ -228,7 +196,7 @@ if ! command -v llama-server &> /dev/null; then
 fi
 log_message "llama-server command is now available"
 
-# Step 7: Create and activate virtual environment
+# Step 6: Create and activate virtual environment
 log_message "Creating virtual environment 'local_ai'..."
 "$PYTHON_CMD" -m venv local_ai || handle_error $? "Failed to create virtual environment"
 
@@ -236,41 +204,38 @@ log_message "Activating virtual environment..."
 source local_ai/bin/activate || handle_error $? "Failed to activate virtual environment"
 log_message "Virtual environment activated."
 
-# Step 8: Install local-ai toolkit
+# Step 8: Install local-ai toolkit (with version check and update logic)
 log_message "Setting up local-ai toolkit..."
 if pip show local-ai &>/dev/null; then
     log_message "local-ai is installed. Checking for updates..."
-    
     # Get installed version
     INSTALLED_VERSION=$(pip show local-ai | grep Version | awk '{print $2}')
     log_message "Current version: $INSTALLED_VERSION"
-    
     # Get remote version (from GitHub repository without installing)
     log_message "Checking latest version from repository..."
     TEMP_VERSION_FILE=$(mktemp)
     if curl -s https://raw.githubusercontent.com/eternalai-org/local-ai/main/local_ai/__init__.py | grep -o "__version__ = \"[0-9.]*\"" | cut -d'"' -f2 > "$TEMP_VERSION_FILE"; then
         REMOTE_VERSION=$(cat "$TEMP_VERSION_FILE")
         rm "$TEMP_VERSION_FILE"
-        
         log_message "Latest version: $REMOTE_VERSION"
-        
+        # Compare versions
         if [ "$(printf '%s\n' "$INSTALLED_VERSION" "$REMOTE_VERSION" | sort -V | head -n1)" = "$INSTALLED_VERSION" ] && [ "$INSTALLED_VERSION" != "$REMOTE_VERSION" ]; then
             log_message "New version available. Updating..."
-            pip uninstall local-ai -y || handle_error $? "Failed to uninstall local-ai"
-            pip install -q git+https://github.com/eternalai-org/local-ai.git || handle_error $? "Failed to update local-ai toolkit"
+            pip uninstall --break-system-packages local-ai -y || handle_error $? "Failed to uninstall local-ai"
+            pip install --break-system-packages -q git+https://github.com/eternalai-org/local-ai.git || handle_error $? "Failed to update local-ai toolkit"
             log_message "local-ai toolkit updated to version $REMOTE_VERSION."
         else
             log_message "Already running the latest version. No update needed."
         fi
     else
         log_message "Could not check latest version. Proceeding with update to be safe..."
-        pip uninstall local-ai -y || handle_error $? "Failed to uninstall local-ai"
-        pip install -q git+https://github.com/eternalai-org/local-ai.git || handle_error $? "Failed to update local-ai toolkit"
+        pip uninstall --break-system-packages local-ai -y || handle_error $? "Failed to uninstall local-ai"
+        pip install --break-system-packages -q git+https://github.com/eternalai-org/local-ai.git || handle_error $? "Failed to update local-ai toolkit"
         log_message "local-ai toolkit updated."
     fi
 else
     log_message "Installing local-ai toolkit..."
-    pip install -q git+https://github.com/eternalai-org/local-ai.git || handle_error $? "Failed to install local-ai toolkit"
+    pip install --break-system-packages -q git+https://github.com/eternalai-org/local-ai.git || handle_error $? "Failed to install local-ai toolkit"
     log_message "local-ai toolkit installed."
 fi
 
