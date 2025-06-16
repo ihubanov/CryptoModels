@@ -9,6 +9,12 @@ This guide will help you deploy your local AI models to the CryptoAgents platfor
 - **OpenAI Compatibility**: Use familiar API endpoints
 - **Multi-Model Support**: Works with both text and vision models
 
+## 📋 Before You Start
+
+Make sure you have:
+1. A model in `gguf` format (compatible with `llama.cpp`)
+2. A [Lighthouse](https://lighthouse.storage/) account and API key
+
 ## 🛠️ Getting Started
 
 ### Installation
@@ -26,6 +32,13 @@ bash mac.sh
 source local_ai/bin/activate
 ```
 > **Remember**: Activate this environment each time you use the `local-ai` tools
+
+### Verification
+
+Verify your installation:
+```bash
+local-ai --version
+```
 
 ## 🚀 Running Models
 
@@ -118,6 +131,89 @@ curl -X POST http://localhost:8080/v1/chat/completions \
     "max_tokens": 4096
 }'
 ```
+
+## Advanced Usage
+
+### Uploading Custom Models
+
+You can use `local-ai upload` to upload your own `gguf` models downloaded from [Huggingface](https://huggingface.co/) for deploying to the CryptoAgents platform.
+
+#### Model Preparation
+
+1. **Download the model**: Download the `.gguf` file from Huggingface (e.g., [`Qwen3-8B-Q8_0.gguf`](https://huggingface.co/Qwen/Qwen3-8B-GGUF/blob/main/Qwen3-8B-Q8_0.gguf))
+2. **Create a folder**: Create a folder with a descriptive name (e.g., `qwen3-8b-q8`)
+3. **Rename the file**: Place the model file in the folder and rename it to match the folder name **without** the `.gguf` extension
+
+**Example Structure:**
+```
+qwen3-8b-q8/
+└── qwen3-8b-q8  # Note: no .gguf extension
+```
+
+#### Estimating RAM Requirements
+
+Use the [GGUF parser](https://www.npmjs.com/package/@huggingface/gguf) to estimate RAM usage:
+
+```bash
+npx @huggingface/gguf qwen3-8b-q8/qwen3-8b-q8 --context 32768
+```
+
+#### Upload Command
+
+**Basic Upload:**
+```bash
+export LIGHTHOUSE_API_KEY=your_api_key
+local-ai upload --folder-name qwen3-8b-q8
+```
+
+**Advanced Upload with Metadata:**
+```bash
+export LIGHTHOUSE_API_KEY=your_api_key
+local-ai upload \
+  --folder-name qwen3-8b-q8 \
+  --ram 12 \
+  --hf-repo Qwen/Qwen3-8B-GGUF \
+  --hf-file Qwen3-8B-Q8_0.gguf \
+  --zip-chunk-size 512 \
+  --threads 16 \
+  --max-retries 20
+```
+
+#### Upload Command Options
+
+| Option | Description | Default | Required |
+|--------|-------------|---------|----------|
+| `--folder-name` | Folder containing the model files | - | ✅ |
+| `--ram` | RAM usage in GB at 32768 context length | - | ❌ |
+| `--hf-repo` | Hugging Face repository (e.g., `Qwen/Qwen3-8B-GGUF`) | - | ❌ |
+| `--hf-file` | Original Hugging Face filename | - | ❌ |
+| `--zip-chunk-size` | Compression chunk size in MB | 512 | ❌ |
+| `--threads` | Number of compression threads | 16 | ❌ |
+| `--max-retries` | Maximum upload retry attempts | 20 | ❌ |
+
+#### Upload Process Details
+
+The upload process involves several steps:
+
+1. **Compression**: The model folder is compressed using `tar` and `pigz` for optimal compression
+2. **Chunking**: Large files are split into chunks (default: 512MB) for reliable uploads
+3. **Parallel Upload**: Multiple chunks are uploaded simultaneously for faster transfer
+4. **Retry Logic**: Failed uploads are automatically retried up to 20 times
+5. **Metadata Generation**: A metadata file is created with upload information and model details
+6. **IPFS Storage**: All files are stored on IPFS via Lighthouse.storage
+
+#### Example Output
+
+After a successful upload, you'll receive:
+- **CID (Content Identifier)**: Used to reference your uploaded model
+- **Metadata file**: Contains detailed information about the upload
+- **Upload statistics**: File sizes, upload speeds, and timing information
+
+#### Troubleshooting Upload Issues
+
+**Common Issues:**
+- **Missing API Key**: Ensure `LIGHTHOUSE_API_KEY` is set in your environment
+- **Network Issues**: The system will automatically retry failed uploads
 
 ## 📚 Additional Information
 
