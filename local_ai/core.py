@@ -7,7 +7,6 @@ import asyncio
 import socket
 import requests
 import subprocess
-import json_repair
 import pkg_resources
 from pathlib import Path
 from loguru import logger
