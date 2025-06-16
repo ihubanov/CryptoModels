@@ -8,6 +8,9 @@ This guide will help you deploy your local AI models to the CryptoAgents platfor
 - **Secure Storage**: Store models using IPFS/Filecoin
 - **OpenAI Compatibility**: Use familiar API endpoints
 - **Multi-Model Support**: Works with both text and vision models
+- **Parallel Processing**: Efficient model compression and upload
+- **Automatic Retries**: Robust error handling for network issues
+- **Metadata Management**: Comprehensive model information tracking
 
 ## 📋 Before You Start
 
@@ -225,13 +228,42 @@ After a successful upload, you'll receive:
 - Choose quantization levels (Q4, Q6, Q8) based on your hardware capabilities
 - Higher quantization (Q8) offers better quality but requires more resources
 - Lower quantization (Q4) is more efficient but may affect model performance
+- Monitor system resources during model operation
+- Use appropriate context lengths for your use case
 
 ### Security
 - All models are stored on IPFS with content addressing
 - This ensures model integrity and secure distribution
+- API keys are stored securely in environment variables
+- Models are verified before deployment
+
+### Best Practices
+1. **Model Selection**
+   - Choose models based on your hardware capabilities
+   - Consider quantization levels for optimal performance
+   - Test models locally before deployment
+
+2. **Resource Management**
+   - Monitor RAM usage during model operation
+   - Adjust context length based on available memory
+   - Use appropriate batch sizes for your use case
+
+3. **API Usage**
+   - Implement proper error handling
+   - Use appropriate timeouts for requests
+   - Cache responses when possible
+   - Monitor API usage and performance
+
+4. **Deployment**
+   - Test models thoroughly before production use
+   - Keep track of model versions and CIDs
+   - Document model configurations and requirements
+   - Regular backups of model metadata
 
 ## 🆘 Need Help?
 
 - Visit our website: [eternalai.org](https://eternalai.org)
 - Join our community: [Discord](https://discord.gg/YphRKtSFqS)
 - Check our documentation for detailed guides and tutorials
+- Report issues on our GitHub repository
+- Contact support for enterprise assistance
