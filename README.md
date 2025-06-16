@@ -9,12 +9,6 @@ This guide will help you deploy your local AI models to the CryptoAgents platfor
 - **OpenAI Compatibility**: Use familiar API endpoints
 - **Multi-Model Support**: Works with both text and vision models
 
-## 📋 Before You Start
-
-Make sure you have:
-1. A model in `gguf` format (compatible with `llama.cpp`)
-2. A [Lighthouse](https://lighthouse.storage/) account and API key
-
 ## 🛠️ Getting Started
 
 ### Installation
@@ -44,18 +38,18 @@ We've prepared several models for you to test with:
 
 | Model | Size | RAM Required | CID | Command |
 |-------|------|--------------|-----|---------|
-| Qwen3-4B-Q8 | 4.28GB | 9.5 GB | `bafkreiekokvzioogj5hoxgxlorqvbw2ed3w4mwieium5old5jq3iubixza` | `local-ai start --hash bafkreiekokvzioogj5hoxgxlorqvbw2ed3w4mwieium5old5jq3iubixza` |
-| Qwen3-8B-Q6 | 6.21GB | 12 GB | `bafkreid5z4lddvv4qbgdlz2nqo6eumxwetwmkpesrumisx72k3ahq73zpy` | `local-ai start --hash bafkreid5z4lddvv4qbgdlz2nqo6eumxwetwmkpesrumisx72k3ahq73zpy` |
-| Qwen3-14B-Q8 | 15.7GB | 19.5 GB | `bafkreiclwlxc56ppozipczuwkmgnlrxrerrvaubc5uhvfs3g2hp3lftrwm` | `local-ai start --hash bafkreiclwlxc56ppozipczuwkmgnlrxrerrvaubc5uhvfs3g2hp3lftrwm` |
+| Qwen3-4B-Q8 | 4.28 GB | 9.5 GB | `bafkreiekokvzioogj5hoxgxlorqvbw2ed3w4mwieium5old5jq3iubixza` | `local-ai start --hash bafkreiekokvzioogj5hoxgxlorqvbw2ed3w4mwieium5old5jq3iubixza` |
+| Qwen3-8B-Q6 | 6.21 GB | 12 GB | `bafkreid5z4lddvv4qbgdlz2nqo6eumxwetwmkpesrumisx72k3ahq73zpy` | `local-ai start --hash bafkreid5z4lddvv4qbgdlz2nqo6eumxwetwmkpesrumisx72k3ahq73zpy` |
+| Qwen3-14B-Q8 | 15.7 GB | 19.5 GB | `bafkreiclwlxc56ppozipczuwkmgnlrxrerrvaubc5uhvfs3g2hp3lftrwm` | `local-ai start --hash bafkreiclwlxc56ppozipczuwkmgnlrxrerrvaubc5uhvfs3g2hp3lftrwm` |
 
 #### 👁️ Gemma3 Series (Vision Support)
 [Learn more about Gemma3](https://deepmind.google/models/gemma/gemma-3/)
 
 | Model | Size | RAM Required | CID | Command |
 |-------|------|--------------|-----|---------|
-| Gemma-4B-IT-Q4 | 3.16GB | 7.9 GB | `bafkreiaevddz5ssjnbkmdrl6dzw5sugwirzi7wput7z2ttcwnvj2wiiw5q` | `local-ai start --hash bafkreiaevddz5ssjnbkmdrl6dzw5sugwirzi7wput7z2ttcwnvj2wiiw5q` |
-| Gemma-12B-IT-Q4 | 8.07GB | 21.46 GB | `bafkreic2bkjuu3fvdoxnvusdt4in6fa6lubzhtjtmcp2zvokvfjpyndakq` | `local-ai start --hash bafkreic2bkjuu3fvdoxnvusdt4in6fa6lubzhtjtmcp2zvokvfjpyndakq` |
-| Gemma-27B-IT-Q4 | 17.2GB | 38.0 GB | `bafkreihi2cbsgja5dwa5nsuixicx2x3gbcnh7gsocxbmjxegtewoq2syve` | `local-ai start --hash bafkreihi2cbsgja5dwa5nsuixicx2x3gbcnh7gsocxbmjxegtewoq2syve` |
+| Gemma-4B-IT-Q4 | 3.16 GB | 7.9 GB | `bafkreiaevddz5ssjnbkmdrl6dzw5sugwirzi7wput7z2ttcwnvj2wiiw5q` | `local-ai start --hash bafkreiaevddz5ssjnbkmdrl6dzw5sugwirzi7wput7z2ttcwnvj2wiiw5q` |
+| Gemma-12B-IT-Q4 | 8.07 GB | 21.46 GB | `bafkreic2bkjuu3fvdoxnvusdt4in6fa6lubzhtjtmcp2zvokvfjpyndakq` | `local-ai start --hash bafkreic2bkjuu3fvdoxnvusdt4in6fa6lubzhtjtmcp2zvokvfjpyndakq` |
+| Gemma-27B-IT-Q4 | 17.2 GB | 38.0 GB | `bafkreihi2cbsgja5dwa5nsuixicx2x3gbcnh7gsocxbmjxegtewoq2syve` | `local-ai start --hash bafkreihi2cbsgja5dwa5nsuixicx2x3gbcnh7gsocxbmjxegtewoq2syve` |
 
 ## 💻 Using the API
 
