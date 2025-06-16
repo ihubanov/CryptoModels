@@ -36,20 +36,44 @@ We've prepared several models for you to test with:
 #### 🔤 Qwen3 Series
 [Learn more about Qwen3](https://qwenlm.github.io/blog/qwen3/)
 
-| Model | Size | RAM Required | CID | Command |
-|-------|------|--------------|-----|---------|
-| Qwen3-4B-Q8 | 4.28 GB | 9.5 GB | `bafkreiekokvzioogj5hoxgxlorqvbw2ed3w4mwieium5old5jq3iubixza` | `local-ai start --hash bafkreiekokvzioogj5hoxgxlorqvbw2ed3w4mwieium5old5jq3iubixza` |
-| Qwen3-8B-Q6 | 6.21 GB | 12 GB | `bafkreid5z4lddvv4qbgdlz2nqo6eumxwetwmkpesrumisx72k3ahq73zpy` | `local-ai start --hash bafkreid5z4lddvv4qbgdlz2nqo6eumxwetwmkpesrumisx72k3ahq73zpy` |
-| Qwen3-14B-Q8 | 15.7 GB | 19.5 GB | `bafkreiclwlxc56ppozipczuwkmgnlrxrerrvaubc5uhvfs3g2hp3lftrwm` | `local-ai start --hash bafkreiclwlxc56ppozipczuwkmgnlrxrerrvaubc5uhvfs3g2hp3lftrwm` |
+**Qwen3-4B-Q8**
+- Size: 4.28 GB
+- RAM Required: 9.5 GB
+- CID: `bafkreiekokvzioogj5hoxgxlorqvbw2ed3w4mwieium5old5jq3iubixza`
+- Command: `local-ai start --hash bafkreiekokvzioogj5hoxgxlorqvbw2ed3w4mwieium5old5jq3iubixza`
+
+**Qwen3-8B-Q6**
+- Size: 6.21 GB
+- RAM Required: 12 GB
+- CID: `bafkreid5z4lddvv4qbgdlz2nqo6eumxwetwmkpesrumisx72k3ahq73zpy`
+- Command: `local-ai start --hash bafkreid5z4lddvv4qbgdlz2nqo6eumxwetwmkpesrumisx72k3ahq73zpy`
+
+**Qwen3-14B-Q8**
+- Size: 15.7 GB
+- RAM Required: 19.5 GB
+- CID: `bafkreiclwlxc56ppozipczuwkmgnlrxrerrvaubc5uhvfs3g2hp3lftrwm`
+- Command: `local-ai start --hash bafkreiclwlxc56ppozipczuwkmgnlrxrerrvaubc5uhvfs3g2hp3lftrwm`
 
 #### 👁️ Gemma3 Series (Vision Support)
 [Learn more about Gemma3](https://deepmind.google/models/gemma/gemma-3/)
 
-| Model | Size | RAM Required | CID | Command |
-|-------|------|--------------|-----|---------|
-| Gemma-4B-IT-Q4 | 3.16 GB | 7.9 GB | `bafkreiaevddz5ssjnbkmdrl6dzw5sugwirzi7wput7z2ttcwnvj2wiiw5q` | `local-ai start --hash bafkreiaevddz5ssjnbkmdrl6dzw5sugwirzi7wput7z2ttcwnvj2wiiw5q` |
-| Gemma-12B-IT-Q4 | 8.07 GB | 21.46 GB | `bafkreic2bkjuu3fvdoxnvusdt4in6fa6lubzhtjtmcp2zvokvfjpyndakq` | `local-ai start --hash bafkreic2bkjuu3fvdoxnvusdt4in6fa6lubzhtjtmcp2zvokvfjpyndakq` |
-| Gemma-27B-IT-Q4 | 17.2 GB | 38.0 GB | `bafkreihi2cbsgja5dwa5nsuixicx2x3gbcnh7gsocxbmjxegtewoq2syve` | `local-ai start --hash bafkreihi2cbsgja5dwa5nsuixicx2x3gbcnh7gsocxbmjxegtewoq2syve` |
+**Gemma-4B-IT-Q4**
+- Size: 3.16 GB
+- RAM Required: 7.9 GB
+- CID: `bafkreiaevddz5ssjnbkmdrl6dzw5sugwirzi7wput7z2ttcwnvj2wiiw5q`
+- Command: `local-ai start --hash bafkreiaevddz5ssjnbkmdrl6dzw5sugwirzi7wput7z2ttcwnvj2wiiw5q`
+
+**Gemma-12B-IT-Q4**
+- Size: 8.07 GB
+- RAM Required: 21.46 GB
+- CID: `bafkreic2bkjuu3fvdoxnvusdt4in6fa6lubzhtjtmcp2zvokvfjpyndakq`
+- Command: `local-ai start --hash bafkreic2bkjuu3fvdoxnvusdt4in6fa6lubzhtjtmcp2zvokvfjpyndakq`
+
+**Gemma-27B-IT-Q4**
+- Size: 17.2 GB
+- RAM Required: 38.0 GB
+- CID: `bafkreihi2cbsgja5dwa5nsuixicx2x3gbcnh7gsocxbmjxegtewoq2syve`
+- Command: `local-ai start --hash bafkreihi2cbsgja5dwa5nsuixicx2x3gbcnh7gsocxbmjxegtewoq2syve`
 
 ## 💻 Using the API
 
