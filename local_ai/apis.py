@@ -14,10 +14,11 @@ import uuid
 import subprocess
 import signal
 import requests
+import psutil
 from pathlib import Path
+from typing import Dict, Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from functools import lru_cache
 
 # Import schemas from schema.py
 from local_ai.schema import (
@@ -39,133 +40,258 @@ app = FastAPI()
 IDLE_TIMEOUT = 600  # 10 minutes in seconds
 UNLOAD_CHECK_INTERVAL = 60  # Check every 60 seconds
 SERVICE_START_TIMEOUT = 60  # Maximum time to wait for service to start
-POOL_CONNECTIONS = 1000  # Increased from 100 to handle more concurrent connections
-POOL_KEEPALIVE = 60  # Increased from 20 to reduce connection churn
+POOL_CONNECTIONS = 100  # Reduced from 1000 for better resource usage
+POOL_KEEPALIVE = 20  # Reduced from 60 to prevent resource waste
 HTTP_TIMEOUT = 300.0  # Default timeout for HTTP requests in seconds
 STREAM_TIMEOUT = 300.0  # Default timeout for streaming requests in seconds
 MAX_RETRIES = 3  # Maximum number of retries for failed requests
 RETRY_DELAY = 1.0  # Delay between retries in seconds
+MAX_QUEUE_SIZE = 100  # Reduced from 1000 for better memory usage
+HEALTH_CHECK_INTERVAL = 1  # Health check interval in seconds
+STREAM_CHUNK_SIZE = 8192  # Chunk size for streaming responses
 
-# Cache for service port to avoid repeated lookups
-@lru_cache(maxsize=1)
-def get_cached_service_port():
-    """
-    Retrieve the port of the underlying service from the app's state with caching.
-    The cache is invalidated when the service info is updated.
-    """
-    if not hasattr(app.state, "service_info") or "port" not in app.state.service_info:
-        logger.error("Service information not set")
+# Utility functions
+def get_service_info() -> Dict[str, Any]:
+    """Get service info from app state with error handling."""
+    if not hasattr(app.state, "service_info") or not app.state.service_info:
         raise HTTPException(status_code=503, detail="Service information not set")
-    return app.state.service_info["port"]
+    return app.state.service_info
 
-# Add request caching
-@lru_cache(maxsize=1000)
-def cache_request(request_data: str) -> str:
-    """
-    Cache request data to avoid processing duplicate requests.
-    """
-    return request_data
+def get_service_port() -> int:
+    """Get service port with caching and error handling."""
+    service_info = get_service_info()
+    if "port" not in service_info:
+        raise HTTPException(status_code=503, detail="Service port not configured")
+    return service_info["port"]
+
+def convert_request_to_dict(request) -> Dict[str, Any]:
+    """Convert request object to dictionary, supporting both Pydantic v1 and v2."""
+    return request.model_dump() if hasattr(request, "model_dump") else request.dict()
+
+def generate_request_id() -> str:
+    """Generate a short request ID for tracking."""
+    return str(uuid.uuid4())[:8]
+
+def generate_chat_completion_id() -> str:
+    """Generate a chat completion ID."""
+    return f"chatcmpl-{uuid.uuid4().hex}"
 
 # Service Functions
 class ServiceHandler:
-    """
-    Handler class for making requests to the underlying service.
-    """
-    @staticmethod
-    async def get_service_port() -> int:
-        """
-        Retrieve the port of the underlying service from the app's state.
-        """
-        try:
-            return get_cached_service_port()
-        except HTTPException:
-            # If cache lookup fails, try direct lookup
-            if not hasattr(app.state, "service_info") or "port" not in app.state.service_info:
-                logger.error("Service information not set")
-                raise HTTPException(status_code=503, detail="Service information not set")
-            return app.state.service_info["port"]
+    """Handler class for making requests to the underlying service."""
     
     @staticmethod
-    async def kill_ai_server():
-        """
-        Kill the AI server process if it's running.
-        """
+    async def kill_ai_server() -> bool:
+        """Kill the AI server process if it's running."""
         try:
-            # Get the PID from the service info
-            if not hasattr(app.state, "service_info") or "pid" not in app.state.service_info:
+            
+            service_info = get_service_info()
+            if "pid" not in service_info:
                 logger.warning("No PID found in service info, cannot kill AI server")
                 return False
                 
-            pid = app.state.service_info["pid"]
+            pid = service_info["pid"]
             logger.info(f"Attempting to kill AI server with PID {pid}")
             
-            # Try to kill the process group (more reliable than just the process)
-            try:
-                # First try to get the process group ID
-                pgid = os.getpgid(pid)
-                # Kill the entire process group
-                os.killpg(pgid, signal.SIGTERM)
-                logger.info(f"Successfully sent SIGTERM to process group {pgid}")
-            except (ProcessLookupError, OSError) as e:
-                logger.warning(f"Could not kill process group: {e}")
-                # Fall back to killing just the process
-                os.kill(pid, signal.SIGTERM)
-                logger.info(f"Successfully sent SIGTERM to process {pid}")
+            # Check if process exists and get its status
+            if not psutil.pid_exists(pid):
+                logger.info(f"Process {pid} not found, assuming already stopped")
+                service_info.pop("pid", None)
+                return True
             
-            # Wait a moment and check if the process is still running
-            await asyncio.sleep(2)
+            # Get process object and check its status
             try:
-                os.kill(pid, 0)  # Check if process exists
-                # If we get here, the process is still running, try SIGKILL
+                process = psutil.Process(pid)
+                status = process.status()
+                if status == psutil.STATUS_ZOMBIE:
+                    logger.info(f"Process {pid} is already zombie, cleaning up")
+                    service_info.pop("pid", None)
+                    return True
+                elif status in [psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
+                    logger.info(f"Process {pid} is already dead/stopped")
+                    service_info.pop("pid", None)
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                logger.info(f"Process {pid} no longer accessible, assuming stopped")
+                service_info.pop("pid", None)
+                return True
+            
+            # First attempt: Graceful termination
+            success = False
+            timeout = 15  # Total timeout for graceful termination
+            
+            try:
+                # Try to get all child processes first
+                children = []
+                try:
+                    parent = psutil.Process(pid)
+                    children = parent.children(recursive=True)
+                    logger.debug(f"Found {len(children)} child processes for AI server")
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+                
+                # Try process group termination first
+                try:
+                    pgid = os.getpgid(pid)
+                    logger.debug(f"Sending SIGTERM to process group {pgid}")
+                    os.killpg(pgid, signal.SIGTERM)
+                    logger.info(f"Successfully sent SIGTERM to process group {pgid}")
+                except (ProcessLookupError, OSError, PermissionError) as e:
+                    logger.debug(f"Process group termination failed: {e}")
+                    # Fall back to individual process termination
+                    try:
+                        parent = psutil.Process(pid)
+                        parent.terminate()
+                        logger.info(f"Successfully sent SIGTERM to process {pid}")
+                        
+                        # Also terminate children individually if group kill failed
+                        for child in children:
+                            try:
+                                child.terminate()
+                                logger.debug(f"Terminated child process {child.pid}")
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                pass
+                    except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                        logger.warning(f"Could not terminate process {pid}: {e}")
+                        service_info.pop("pid", None)
+                        return True  # Process might already be gone
+
+                # Wait for graceful termination
+                start_time = time.time()
+                check_interval = 0.5
+                while time.time() - start_time < timeout:
+                    try:
+                        if not psutil.pid_exists(pid):
+                            logger.info(f"AI server process terminated gracefully")
+                            success = True
+                            break
+                        
+                        # Check if it's a zombie that needs cleanup
+                        try:
+                            process = psutil.Process(pid)
+                            if process.status() == psutil.STATUS_ZOMBIE:
+                                logger.info(f"AI server became zombie, considering it stopped")
+                                success = True
+                                break
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            success = True
+                            break
+                            
+                        await asyncio.sleep(check_interval)
+                    except Exception:
+                        # If we can't check, assume it's gone
+                        success = True
+                        break
+                
+                if success:
+                    service_info.pop("pid", None)
+                    return True
+                    
+            except Exception as e:
+                logger.error(f"Error during graceful termination: {e}")
+            
+            # Second attempt: Force termination
+            if not success and psutil.pid_exists(pid):
                 logger.warning(f"Process {pid} still running after SIGTERM, sending SIGKILL")
-                os.kill(pid, signal.SIGKILL)
-            except ProcessLookupError:
-                # Process is already gone, which is good
-                pass
-                
-            # Remove the PID from service info
-            if hasattr(app.state, "service_info"):
-                app.state.service_info.pop("pid", None)
-                
-            return True
+                try:
+                    # Get fresh list of children
+                    children = []
+                    try:
+                        parent = psutil.Process(pid)
+                        children = parent.children(recursive=True)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+                    
+                    # Try process group kill first
+                    try:
+                        pgid = os.getpgid(pid)
+                        os.killpg(pgid, signal.SIGKILL)
+                        logger.info(f"Successfully sent SIGKILL to process group {pgid}")
+                    except (ProcessLookupError, OSError, PermissionError):
+                        # Fall back to individual process kill
+                        try:
+                            parent = psutil.Process(pid)
+                            parent.kill()
+                            logger.info(f"Successfully sent SIGKILL to process {pid}")
+                            
+                            # Kill children individually
+                            for child in children:
+                                try:
+                                    child.kill()
+                                    logger.debug(f"Killed child process {child.pid}")
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    pass
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            logger.info(f"Process disappeared during force kill")
+                            service_info.pop("pid", None)
+                            return True
+                    
+                    # Wait for force termination
+                    force_timeout = 10  # Max 10 seconds for force kill
+                    start_time = time.time()
+                    while time.time() - start_time < force_timeout:
+                        if not psutil.pid_exists(pid):
+                            logger.info(f"AI server killed successfully")
+                            success = True
+                            break
+                        await asyncio.sleep(0.2)
+                    
+                    # Final check
+                    if psutil.pid_exists(pid):
+                        try:
+                            process = psutil.Process(pid)
+                            status = process.status()
+                            if status == psutil.STATUS_ZOMBIE:
+                                logger.warning(f"AI server is zombie but considered stopped")
+                                success = True
+                            else:
+                                logger.error(f"Failed to kill AI server (PID: {pid}), status: {status}")
+                                return False
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            success = True
+                    else:
+                        success = True
+                        
+                except Exception as e:
+                    logger.error(f"Error force-killing AI server (PID: {pid}): {str(e)}")
+                    return False
+            
+            # Clean up service info
+            if success:
+                service_info.pop("pid", None)
+                logger.info("AI server stopped successfully")
+                return True
+            else:
+                logger.error("Failed to stop AI server")
+                return False
+            
         except Exception as e:
             logger.error(f"Error killing AI server: {str(e)}", exc_info=True)
             return False
     
     @staticmethod
-    async def reload_ai_server(service_start_timeout: int = SERVICE_START_TIMEOUT):
-        """
-        Reload the AI server process.
-        
-        Args:
-            service_start_timeout: Maximum time in seconds to wait for the service to start
-            
-        Returns:
-            bool: True if the service was successfully started, False otherwise
-        """
+    async def reload_ai_server(service_start_timeout: int = SERVICE_START_TIMEOUT) -> bool:
+        """Reload the AI server process."""
         try:
-            # Get the command to start AI server from the service info
-            if not hasattr(app.state, "service_info") or "running_ai_command" not in app.state.service_info:
+            service_info = get_service_info()
+            if "running_ai_command" not in service_info:
                 logger.error("No running_ai_command found in service info, cannot reload AI server")
                 return False
                 
-            running_ai_command = app.state.service_info["running_ai_command"]
+            running_ai_command = service_info["running_ai_command"]
             logger.info(f"Reloading AI server with command: {running_ai_command}")
 
             logs_dir = Path("logs")
-            # Ensure logs directory exists
             logs_dir.mkdir(exist_ok=True)
             
-            # Set up log file
             ai_log_stderr = logs_dir / "ai.log"
-            ai_process = None
             
             try:
                 with open(ai_log_stderr, 'w') as stderr_log:
                     ai_process = subprocess.Popen(
                         running_ai_command,
                         stderr=stderr_log,
-                        preexec_fn=os.setsid  # Run in a new process group
+                        preexec_fn=os.setsid
                     )
                 logger.info(f"AI logs written to {ai_log_stderr}")
             except Exception as e:
@@ -173,9 +299,8 @@ class ServiceHandler:
                 return False
             
             # Wait for the process to start by checking the health endpoint
-            port = app.state.service_info["port"]
+            port = service_info["port"]
             start_time = time.time()
-            health_check_interval = 1  # Check every second
             
             while time.time() - start_time < service_start_timeout:
                 try:
@@ -183,78 +308,68 @@ class ServiceHandler:
                     if response.status_code == 200:
                         logger.info(f"Service health check passed after {time.time() - start_time:.2f}s")
                         break
-                except (requests.RequestException, ConnectionError) as e:
-                    # Just wait and try again
-                    await asyncio.sleep(health_check_interval)
+                except (requests.RequestException, ConnectionError):
+                    await asyncio.sleep(HEALTH_CHECK_INTERVAL)
             
             # Check if the process is running
             if ai_process.poll() is None:
-                # Process is running, update the PID in service info
-                if hasattr(app.state, "service_info"):
-                    app.state.service_info["pid"] = ai_process.pid
+                service_info["pid"] = ai_process.pid
                 logger.info(f"Successfully reloaded AI server with PID {ai_process.pid}")
                 return True
             else:
-                # Process failed to start
                 logger.error(f"Failed to reload AI server: Process exited with code {ai_process.returncode}")
                 return False
+                
         except Exception as e:
             logger.error(f"Error reloading AI server: {str(e)}", exc_info=True)
             return False
     
     @staticmethod
+    def _create_vision_error_response(request: ChatCompletionRequest, content: str):
+        """Create error response for vision requests when multimodal is not supported."""
+        if request.stream:
+            async def error_stream():
+                chunk = {
+                    "id": generate_chat_completion_id(),
+                    "choices": [{
+                        "delta": {"content": content},
+                        "finish_reason": "stop",
+                        "index": 0
+                    }],
+                    "created": int(time.time()),
+                    "model": request.model,
+                    "object": "chat.completion.chunk"
+                }
+                yield f"data: {json.dumps(chunk)}\n\n"
+            return StreamingResponse(error_stream(), media_type="text/event-stream")
+        else:
+            return ChatCompletionResponse(
+                id=generate_chat_completion_id(),
+                object="chat.completion",
+                created=int(time.time()),
+                model=request.model,
+                choices=[Choice(
+                    finish_reason="stop",
+                    index=0,
+                    message=Message(role="assistant", content=content)
+                )]
+            )
+    
+    @staticmethod
     async def generate_text_response(request: ChatCompletionRequest):
-        """
-        Generate a response for chat completion requests, supporting both streaming and non-streaming.
-        """
-        port = await ServiceHandler.get_service_port()
+        """Generate a response for chat completion requests, supporting both streaming and non-streaming."""
+        port = get_service_port()
+        
         if request.is_vision_request():
-            if not app.state.service_info["multimodal"]:
+            service_info = get_service_info()
+            if not service_info.get("multimodal", False):
                 content = "Unfortunately, I'm not equipped to interpret images at this time. Please provide a text description if possible."
-                if request.stream:
-                    async def error_stream():
-                        chunk = {
-                            "id": f"chatcmpl-{uuid.uuid4().hex}",
-                            "choices": [{
-                                "delta": {
-                                    "content": content
-                                },
-                                "finish_reason": "stop",
-                                "index": 0
-                            }],
-                            "created": int(time.time()),
-                            "model": request.model,
-                            "object": "chat.completion.chunk"
-                        }
-                        yield f"data: {json.dumps(chunk)}\n\n"
-                    return StreamingResponse(
-                        error_stream(),
-                        media_type="text/event-stream"
-                    )
-                else:
-                    return ChatCompletionResponse(
-                        id=f"chatcmpl-{uuid.uuid4().hex}",
-                        object="chat.completion",
-                        created=int(time.time()),
-                        model=request.model,
-                        choices=[
-                            Choice(
-                                finish_reason="stop",
-                                index=0,
-                                message= Message(
-                                    role="assistant",
-                                    content=content
-                                )
-                            )
-                        ]
-                    )
+                return ServiceHandler._create_vision_error_response(request, content)
                 
         request.fix_messages()
-        # Convert to dict, supporting both Pydantic v1 and v2
-        request_dict = request.model_dump() if hasattr(request, "model_dump") else request.dict()
+        request_dict = convert_request_to_dict(request)
         
         if request.stream:
-            # Return a streaming response for non-tool requests
             return StreamingResponse(
                 ServiceHandler._stream_generator(port, request_dict),
                 media_type="text/event-stream"
@@ -262,9 +377,8 @@ class ServiceHandler:
 
         # Make a non-streaming API call
         response_data = await ServiceHandler._make_api_call(port, "/v1/chat/completions", request_dict)
-        assert isinstance(response_data, dict), "Response data must be a dictionary"
         return ChatCompletionResponse(
-            id=response_data.get("id", f"chatcmpl-{uuid.uuid4().hex}"),
+            id=response_data.get("id", generate_chat_completion_id()),
             object=response_data.get("object", "chat.completion"),
             created=response_data.get("created", int(time.time())),
             model=request.model,
@@ -273,14 +387,10 @@ class ServiceHandler:
     
     @staticmethod
     async def generate_embeddings_response(request: EmbeddingRequest):
-        """
-        Generate a response for embedding requests.
-        """
-        port = await ServiceHandler.get_service_port()
-        # Convert to dict, supporting both Pydantic v1 and v2
-        request_dict = request.model_dump() if hasattr(request, "model_dump") else request.dict()
+        """Generate a response for embedding requests."""
+        port = get_service_port()
+        request_dict = convert_request_to_dict(request)
         response_data = await ServiceHandler._make_api_call(port, "/v1/embeddings", request_dict)
-        assert isinstance(response_data, dict), "Response data must be a dictionary"
         return EmbeddingResponse(
             object=response_data.get("object", "list"),
             data=response_data.get("data", []),
@@ -288,12 +398,8 @@ class ServiceHandler:
         )
     
     @staticmethod
-    async def _make_api_call(port: int, endpoint: str, data: dict) -> dict:
-        """
-        Make a non-streaming API call to the specified endpoint and return the JSON response.
-        Includes retry logic for transient errors.
-        """
-        
+    async def _make_api_call(port: int, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Make a non-streaming API call to the specified endpoint and return the JSON response."""
         try:
             response = await app.state.client.post(
                 f"http://localhost:{port}{endpoint}", 
@@ -305,25 +411,20 @@ class ServiceHandler:
             if response.status_code != 200:
                 error_text = response.text
                 logger.error(f"Error: {response.status_code} - {error_text}")
-                # Don't retry client errors (4xx), only server errors (5xx)
                 if response.status_code < 500:
                     raise HTTPException(status_code=response.status_code, detail=error_text)
-            else:
-                return response.json()
+            
+            return response.json()
+            
         except httpx.TimeoutException as e:
             raise HTTPException(status_code=504, detail=str(e))
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
-
     
     @staticmethod
-    async def _stream_generator(port: int, data: dict):
-        """
-        Generator for streaming responses from the service.
-        Yields chunks of data as they are received, formatted for SSE (Server-Sent Events).
-        """
+    async def _stream_generator(port: int, data: Dict[str, Any]):
+        """Generator for streaming responses from the service."""
         try:
-            # Use a larger chunk size for better performance
             async with app.state.client.stream(
                 "POST", 
                 f"http://localhost:{port}/v1/chat/completions", 
@@ -331,14 +432,14 @@ class ServiceHandler:
                 timeout=STREAM_TIMEOUT
             ) as response:
                 if response.status_code != 200:
-                    error_text = await response.text()
-                    error_msg = f"data: {{\"error\":{{\"message\":\"{error_text}\",\"code\":{response.status_code}}}}}\n\n"
-                    logger.error(f"Streaming error: {response.status_code} - {error_text}")
+                    error_text = await response.aread()
+                    error_msg = f"data: {{\"error\":{{\"message\":\"{error_text.decode()}\",\"code\":{response.status_code}}}}}\n\n"
+                    logger.error(f"Streaming error: {response.status_code} - {error_text.decode()}")
                     yield error_msg
                     return
                 
                 buffer = ""
-                async for chunk in response.aiter_bytes():
+                async for chunk in response.aiter_bytes(chunk_size=STREAM_CHUNK_SIZE):
                     buffer += chunk.decode('utf-8')
                     while '\n' in buffer:
                         line, buffer = buffer.split('\n', 1)
@@ -355,13 +456,10 @@ class ServiceHandler:
 
 # Request Processor
 class RequestProcessor:
-    """
-    Class for processing requests sequentially using a queue.
-    Ensures that only one request is processed at a time to accommodate limitations
-    of backends like llama-server that can only handle one request at a time.
-    """
-    queue = asyncio.Queue(maxsize=1000)  # Added maxsize to prevent memory issues
-    processing_lock = asyncio.Lock()  # Lock to ensure only one request is processed at a time
+    """Process requests sequentially using a queue to accommodate single-threaded backends."""
+    
+    queue = asyncio.Queue(maxsize=MAX_QUEUE_SIZE)
+    processing_lock = asyncio.Lock()
     
     # Define which endpoints need to be processed sequentially
     MODEL_ENDPOINTS = {
@@ -369,16 +467,25 @@ class RequestProcessor:
         "/v1/embeddings": (EmbeddingRequest, ServiceHandler.generate_embeddings_response),
         "/chat/completions": (ChatCompletionRequest, ServiceHandler.generate_text_response),
         "/embeddings": (EmbeddingRequest, ServiceHandler.generate_embeddings_response),
-    }  # Mapping of endpoints to their request models and handlers
+    }
     
     @staticmethod
-    async def process_request(endpoint: str, request_data: dict):
-        """
-        Process a request by adding it to the queue and waiting for the result.
-        This ensures requests are processed in order, one at a time.
-        Returns a Future that will be resolved with the result.
-        """
-        request_id = str(uuid.uuid4())[:8]  # Generate a short request ID for tracking
+    async def _ensure_server_running(request_id: str) -> bool:
+        """Ensure the AI server is running, reload if necessary."""
+        try:
+            service_info = get_service_info()
+            if "pid" not in service_info:
+                logger.info(f"[{request_id}] AI server not running, reloading...")
+                return await ServiceHandler.reload_ai_server()
+            return True
+        except HTTPException:
+            logger.info(f"[{request_id}] Service info not available, attempting reload...")
+            return False
+    
+    @staticmethod
+    async def process_request(endpoint: str, request_data: Dict[str, Any]):
+        """Process a request by adding it to the queue and waiting for the result."""
+        request_id = generate_request_id()
         queue_size = RequestProcessor.queue.qsize()
         
         logger.info(f"[{request_id}] Adding request to queue for endpoint {endpoint} (queue size: {queue_size})")
@@ -387,15 +494,12 @@ class RequestProcessor:
         app.state.last_request_time = time.time()
         
         # Check if we need to reload the AI server
-        if hasattr(app.state, "service_info") and "pid" not in app.state.service_info:
-            logger.info(f"[{request_id}] AI server not running, reloading...")
-            await ServiceHandler.reload_ai_server()
+        await RequestProcessor._ensure_server_running(request_id)
         
         start_wait_time = time.time()
         future = asyncio.Future()
         await RequestProcessor.queue.put((endpoint, request_data, future, request_id, start_wait_time))
         
-        # Wait for the future to be resolved
         logger.info(f"[{request_id}] Waiting for result from endpoint {endpoint}")
         result = await future
         
@@ -405,21 +509,13 @@ class RequestProcessor:
         return result
     
     @staticmethod
-    async def process_direct(endpoint: str, request_data: dict):
-        """
-        Process a request directly without queueing.
-        Use this for administrative endpoints that don't require model access.
-        """
-        request_id = str(uuid.uuid4())[:8]  # Generate a short request ID for tracking
+    async def process_direct(endpoint: str, request_data: Dict[str, Any]):
+        """Process a request directly without queueing for administrative endpoints."""
+        request_id = generate_request_id()
         logger.info(f"[{request_id}] Processing direct request for endpoint {endpoint}")
         
-        # Update the last request time
         app.state.last_request_time = time.time()
-        
-        # Check if we need to reload the AI server
-        if hasattr(app.state, "service_info") and "pid" not in app.state.service_info:
-            logger.info(f"[{request_id}] AI server not running, reloading...")
-            await ServiceHandler.reload_ai_server()
+        await RequestProcessor._ensure_server_running(request_id)
         
         start_time = time.time()
         if endpoint in RequestProcessor.MODEL_ENDPOINTS:
@@ -435,13 +531,9 @@ class RequestProcessor:
             logger.error(f"[{request_id}] Endpoint not found: {endpoint}")
             raise HTTPException(status_code=404, detail="Endpoint not found")
     
-    # Global worker function
     @staticmethod
     async def worker():
-        """
-        Worker function to process requests from the queue sequentially.
-        Only one request is processed at a time.
-        """
+        """Worker function to process requests from the queue sequentially."""
         logger.info("Request processor worker started")
         processed_count = 0
         
@@ -456,7 +548,6 @@ class RequestProcessor:
                 logger.info(f"[{request_id}] Processing request from queue for endpoint {endpoint} "
                            f"(wait time: {wait_time:.2f}s, queue size: {queue_size}, processed: {processed_count})")
                 
-                # Use the lock to ensure only one request is processed at a time
                 async with RequestProcessor.processing_lock:
                     processing_start = time.time()
                     
@@ -487,46 +578,40 @@ class RequestProcessor:
                 
             except asyncio.CancelledError:
                 logger.info("Worker task cancelled, exiting")
-                break  # Exit the loop when the task is canceled
+                break
             except Exception as e:
                 logger.error(f"Worker error: {str(e)}")
-                # Continue working, don't crash the worker
 
-# Unload checker task
+# Background Tasks
 async def unload_checker():
-    """
-    Periodically check if the AI server has been idle for too long and unload it if needed.
-    """
+    """Periodically check if the AI server has been idle for too long and unload it if needed."""
     logger.info("Unload checker task started")
     
     while True:
         try:
-            # Wait for the check interval
-            await asyncio.sleep(UNLOAD_CHECK_INTERVAL)   
-            # Check if the service is running and has been idle for too long
-            if (hasattr(app.state, "service_info") and 
-                "pid" in app.state.service_info and 
-                hasattr(app.state, "last_request_time")):
-                
-                idle_time = time.time() - app.state.last_request_time
-                
-                if idle_time > IDLE_TIMEOUT:
-                    logger.info(f"AI server has been idle for {idle_time:.2f}s, unloading...")
-                    await ServiceHandler.kill_ai_server()
+            await asyncio.sleep(UNLOAD_CHECK_INTERVAL)
+            try:
+                service_info = get_service_info()
+                if ("pid" in service_info and hasattr(app.state, "last_request_time")):
+                    idle_time = time.time() - app.state.last_request_time
+                    logger.info(f"Unload checker task, last request time: {app.state.last_request_time}")
+                    
+                    if idle_time > IDLE_TIMEOUT:
+                        logger.info(f"AI server has been idle for {idle_time:.2f}s, unloading...")
+                        await ServiceHandler.kill_ai_server()
+            except HTTPException:
+                pass  # Service info not available, continue checking
             
         except asyncio.CancelledError:
             logger.info("Unload checker task cancelled")
             break
         except Exception as e:
             logger.error(f"Error in unload checker task: {str(e)}", exc_info=True)
-            # Continue running despite errors
 
 # Performance monitoring middleware
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
-    """
-    Middleware that adds a header with the processing time for the request.
-    """
+    """Middleware that adds a header with the processing time for the request."""
     start_time = time.time()
     response = await call_next(request)
     process_time = time.time() - start_time
@@ -536,9 +621,7 @@ async def add_process_time_header(request: Request, call_next):
 # Lifecycle Events
 @app.on_event("startup")
 async def startup_event():
-    """
-    Startup event handler: initialize the HTTP client and start the worker task.
-    """
+    """Startup event handler: initialize the HTTP client and start the worker task."""
     # Create an asynchronous HTTP client with optimized connection pooling
     limits = httpx.Limits(
         max_connections=POOL_CONNECTIONS,
@@ -557,28 +640,38 @@ async def startup_event():
     # Initialize the last request time
     app.state.last_request_time = time.time()
     
-    # Start the worker
+    # Start background tasks
     app.state.worker_task = asyncio.create_task(RequestProcessor.worker())
-    
-    # Start the unload checker task
     app.state.unload_checker_task = asyncio.create_task(unload_checker())
     
     logger.info("Service started successfully")
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """
-    Clean up resources when the application shuts down.
-    """
+    """Clean up resources when the application shuts down."""
     # Cancel background tasks
-    if hasattr(app.state, "worker_task"):
-        app.state.worker_task.cancel()
-    if hasattr(app.state, "unload_checker_task"):
-        app.state.unload_checker_task.cancel()
+    tasks_to_cancel = []
+    for task_attr in ["worker_task", "unload_checker_task"]:
+        if hasattr(app.state, task_attr):
+            task = getattr(app.state, task_attr)
+            task.cancel()
+            tasks_to_cancel.append(task)
+    
+    # Wait for tasks to complete cancellation
+    if tasks_to_cancel:
+        await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
     
     # Kill the AI server if it's running
-    if hasattr(app.state, "service_info") and "pid" in app.state.service_info:
-        await ServiceHandler.kill_ai_server()
+    try:
+        service_info = get_service_info()
+        if "pid" in service_info:
+            await ServiceHandler.kill_ai_server()
+    except HTTPException:
+        pass  # Service info not available
+    
+    # Close HTTP client
+    if hasattr(app.state, "client"):
+        await app.state.client.aclose()
     
     logger.info("Service shutdown complete")
 
@@ -586,63 +679,36 @@ async def shutdown_event():
 @app.get("/health")
 @app.get("/v1/health")
 async def health():
-    """
-    Health check endpoint.
-    Returns a simple status to indicate the service is running.
-    This endpoint bypasses the request queue for immediate response.
-    """
+    """Health check endpoint that bypasses the request queue for immediate response."""
     return {"status": "ok"}
 
-
 @app.post("/update")
-async def update(request: dict):
-    """
-    Update the service information in the app's state.
-    Stores the provided request data for use in determining the service port.
-    This endpoint bypasses the request queue for immediate response.
-    """
+async def update(request: Dict[str, Any]):
+    """Update the service information in the app's state."""
     app.state.service_info = request
-    # Invalidate the cache when service info is updated
-    get_cached_service_port.cache_clear()
     return {"status": "ok", "message": "Service info updated successfully"}
 
-# Modified endpoint handlers for model-based endpoints
+# Model-based endpoints that use the request queue
 @app.post("/chat/completions")
 async def chat_completions(request: ChatCompletionRequest):
-    """
-    Endpoint for chat completion requests.
-    Uses the request queue to ensure only one model request is processed at a time.
-    """
-    # Convert to dict, supporting both Pydantic v1 and v2
-    request_dict = request.model_dump() if hasattr(request, "model_dump") else request.dict()
+    """Endpoint for chat completion requests."""
+    request_dict = convert_request_to_dict(request)
     return await RequestProcessor.process_request("/chat/completions", request_dict)
 
 @app.post("/embeddings")
 async def embeddings(request: EmbeddingRequest):
-    """
-    Endpoint for embedding requests.
-    Uses the request queue to ensure only one model request is processed at a time.
-    """
-    # Convert to dict, supporting both Pydantic v1 and v2
-    request_dict = request.model_dump() if hasattr(request, "model_dump") else request.dict()
+    """Endpoint for embedding requests."""
+    request_dict = convert_request_to_dict(request)
     return await RequestProcessor.process_request("/embeddings", request_dict)
 
 @app.post("/v1/chat/completions")
 async def v1_chat_completions(request: ChatCompletionRequest):
-    """
-    Endpoint for chat completion requests (v1 API).
-    Uses the request queue to ensure only one model request is processed at a time.
-    """
-    # Convert to dict, supporting both Pydantic v1 and v2
-    request_dict = request.model_dump() if hasattr(request, "model_dump") else request.dict()
+    """Endpoint for chat completion requests (v1 API)."""
+    request_dict = convert_request_to_dict(request)
     return await RequestProcessor.process_request("/v1/chat/completions", request_dict)
 
 @app.post("/v1/embeddings")
 async def v1_embeddings(request: EmbeddingRequest):
-    """
-    Endpoint for embedding requests (v1 API).
-    Uses the request queue to ensure only one model request is processed at a time.
-    """
-    # Convert to dict, supporting both Pydantic v1 and v2
-    request_dict = request.model_dump() if hasattr(request, "model_dump") else request.dict()
+    """Endpoint for embedding requests (v1 API)."""
+    request_dict = convert_request_to_dict(request)
     return await RequestProcessor.process_request("/v1/embeddings", request_dict)
