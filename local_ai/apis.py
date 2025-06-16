@@ -14,6 +14,7 @@ import uuid
 import subprocess
 import signal
 import requests
+import psutil
 from pathlib import Path
 from typing import Dict, Any
 from fastapi import FastAPI, HTTPException, Request
@@ -83,6 +84,7 @@ class ServiceHandler:
     async def kill_ai_server() -> bool:
         """Kill the AI server process if it's running."""
         try:
+            
             service_info = get_service_info()
             if "pid" not in service_info:
                 logger.warning("No PID found in service info, cannot kill AI server")
@@ -91,29 +93,177 @@ class ServiceHandler:
             pid = service_info["pid"]
             logger.info(f"Attempting to kill AI server with PID {pid}")
             
-            # Try to kill the process group (more reliable than just the process)
-            try:
-                pgid = os.getpgid(pid)
-                os.killpg(pgid, signal.SIGTERM)
-                logger.info(f"Successfully sent SIGTERM to process group {pgid}")
-            except (ProcessLookupError, OSError) as e:
-                logger.warning(f"Could not kill process group: {e}")
-                # Fall back to killing just the process
-                os.kill(pid, signal.SIGTERM)
-                logger.info(f"Successfully sent SIGTERM to process {pid}")
+            # Check if process exists and get its status
+            if not psutil.pid_exists(pid):
+                logger.info(f"Process {pid} not found, assuming already stopped")
+                service_info.pop("pid", None)
+                return True
             
-            # Wait and check if the process is still running
-            await asyncio.sleep(2)
+            # Get process object and check its status
             try:
-                os.kill(pid, 0)  # Check if process exists
-                logger.warning(f"Process {pid} still running after SIGTERM, sending SIGKILL")
-                os.kill(pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass  # Process is already gone
+                process = psutil.Process(pid)
+                status = process.status()
+                if status == psutil.STATUS_ZOMBIE:
+                    logger.info(f"Process {pid} is already zombie, cleaning up")
+                    service_info.pop("pid", None)
+                    return True
+                elif status in [psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
+                    logger.info(f"Process {pid} is already dead/stopped")
+                    service_info.pop("pid", None)
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                logger.info(f"Process {pid} no longer accessible, assuming stopped")
+                service_info.pop("pid", None)
+                return True
+            
+            # First attempt: Graceful termination
+            success = False
+            timeout = 15  # Total timeout for graceful termination
+            
+            try:
+                # Try to get all child processes first
+                children = []
+                try:
+                    parent = psutil.Process(pid)
+                    children = parent.children(recursive=True)
+                    logger.debug(f"Found {len(children)} child processes for AI server")
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
                 
-            # Remove the PID from service info
-            service_info.pop("pid", None)
-            return True
+                # Try process group termination first
+                try:
+                    pgid = os.getpgid(pid)
+                    logger.debug(f"Sending SIGTERM to process group {pgid}")
+                    os.killpg(pgid, signal.SIGTERM)
+                    logger.info(f"Successfully sent SIGTERM to process group {pgid}")
+                except (ProcessLookupError, OSError, PermissionError) as e:
+                    logger.debug(f"Process group termination failed: {e}")
+                    # Fall back to individual process termination
+                    try:
+                        parent = psutil.Process(pid)
+                        parent.terminate()
+                        logger.info(f"Successfully sent SIGTERM to process {pid}")
+                        
+                        # Also terminate children individually if group kill failed
+                        for child in children:
+                            try:
+                                child.terminate()
+                                logger.debug(f"Terminated child process {child.pid}")
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                pass
+                    except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                        logger.warning(f"Could not terminate process {pid}: {e}")
+                        service_info.pop("pid", None)
+                        return True  # Process might already be gone
+
+                # Wait for graceful termination
+                start_time = time.time()
+                check_interval = 0.5
+                while time.time() - start_time < timeout:
+                    try:
+                        if not psutil.pid_exists(pid):
+                            logger.info(f"AI server process terminated gracefully")
+                            success = True
+                            break
+                        
+                        # Check if it's a zombie that needs cleanup
+                        try:
+                            process = psutil.Process(pid)
+                            if process.status() == psutil.STATUS_ZOMBIE:
+                                logger.info(f"AI server became zombie, considering it stopped")
+                                success = True
+                                break
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            success = True
+                            break
+                            
+                        await asyncio.sleep(check_interval)
+                    except Exception:
+                        # If we can't check, assume it's gone
+                        success = True
+                        break
+                
+                if success:
+                    service_info.pop("pid", None)
+                    return True
+                    
+            except Exception as e:
+                logger.error(f"Error during graceful termination: {e}")
+            
+            # Second attempt: Force termination
+            if not success and psutil.pid_exists(pid):
+                logger.warning(f"Process {pid} still running after SIGTERM, sending SIGKILL")
+                try:
+                    # Get fresh list of children
+                    children = []
+                    try:
+                        parent = psutil.Process(pid)
+                        children = parent.children(recursive=True)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+                    
+                    # Try process group kill first
+                    try:
+                        pgid = os.getpgid(pid)
+                        os.killpg(pgid, signal.SIGKILL)
+                        logger.info(f"Successfully sent SIGKILL to process group {pgid}")
+                    except (ProcessLookupError, OSError, PermissionError):
+                        # Fall back to individual process kill
+                        try:
+                            parent = psutil.Process(pid)
+                            parent.kill()
+                            logger.info(f"Successfully sent SIGKILL to process {pid}")
+                            
+                            # Kill children individually
+                            for child in children:
+                                try:
+                                    child.kill()
+                                    logger.debug(f"Killed child process {child.pid}")
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    pass
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            logger.info(f"Process disappeared during force kill")
+                            service_info.pop("pid", None)
+                            return True
+                    
+                    # Wait for force termination
+                    force_timeout = 10  # Max 10 seconds for force kill
+                    start_time = time.time()
+                    while time.time() - start_time < force_timeout:
+                        if not psutil.pid_exists(pid):
+                            logger.info(f"AI server killed successfully")
+                            success = True
+                            break
+                        await asyncio.sleep(0.2)
+                    
+                    # Final check
+                    if psutil.pid_exists(pid):
+                        try:
+                            process = psutil.Process(pid)
+                            status = process.status()
+                            if status == psutil.STATUS_ZOMBIE:
+                                logger.warning(f"AI server is zombie but considered stopped")
+                                success = True
+                            else:
+                                logger.error(f"Failed to kill AI server (PID: {pid}), status: {status}")
+                                return False
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            success = True
+                    else:
+                        success = True
+                        
+                except Exception as e:
+                    logger.error(f"Error force-killing AI server (PID: {pid}): {str(e)}")
+                    return False
+            
+            # Clean up service info
+            if success:
+                service_info.pop("pid", None)
+                logger.info("AI server stopped successfully")
+                return True
+            else:
+                logger.error("Failed to stop AI server")
+                return False
             
         except Exception as e:
             logger.error(f"Error killing AI server: {str(e)}", exc_info=True)
@@ -440,11 +590,11 @@ async def unload_checker():
     while True:
         try:
             await asyncio.sleep(UNLOAD_CHECK_INTERVAL)
-            
             try:
                 service_info = get_service_info()
                 if ("pid" in service_info and hasattr(app.state, "last_request_time")):
                     idle_time = time.time() - app.state.last_request_time
+                    logger.info(f"Unload checker task, last request time: {app.state.last_request_time}")
                     
                     if idle_time > IDLE_TIMEOUT:
                         logger.info(f"AI server has been idle for {idle_time:.2f}s, unloading...")
