@@ -7,10 +7,11 @@ import asyncio
 import socket
 import requests
 import subprocess
+import json_repair
+import pkg_resources
 from pathlib import Path
 from loguru import logger
 from typing import Optional, Dict, Any
-import pkg_resources
 from local_ai.download import download_model_from_filecoin_async
 
 class LocalAIServiceError(Exception):
@@ -368,63 +369,246 @@ class LocalAIManager:
             with open(self.pickle_file, "rb") as f:
                 service_info = pickle.load(f)
             
-            hash = service_info.get("hash")
+            hash_val = service_info.get("hash")
             pid = service_info.get("pid")
             app_pid = service_info.get("app_pid")
             app_port = service_info.get("app_port")
+            local_ai_port = service_info.get("port")
 
-            logger.info(f"Stopping AI service '{hash}' running on port {app_port} (PID: {app_pid})...")
+            logger.info(f"Stopping AI service '{hash_val}' running on port {app_port} (AI PID: {pid}, API PID: {app_pid})...")
             
-            def terminate_process(pid, process_name, max_retries=3):
-                """Helper function to terminate a process with retries."""
-                if not psutil.pid_exists(pid):
+            def terminate_process_group(pid, process_name, timeout=15):
+                """
+                Terminate a process and its entire process group.
+                Returns True if successful, False otherwise.
+                """
+                if not pid:
+                    logger.warning(f"No PID provided for {process_name}")
                     return True
                 
-                for attempt in range(max_retries):
+                import signal
+                    
+                try:
+                    # Check if process exists and get its status
+                    if not psutil.pid_exists(pid):
+                        logger.info(f"Process {process_name} (PID: {pid}) not found, assuming already stopped")
+                        return True
+                    
+                    # Get process object and check its status
                     try:
                         process = psutil.Process(pid)
-                        process.terminate()
-                        process.wait(timeout=30)  # Reduced timeout per attempt
-                        
-                        if not process.is_running():
+                        status = process.status()
+                        if status == psutil.STATUS_ZOMBIE:
+                            logger.info(f"Process {process_name} (PID: {pid}) is already zombie, cleaning up")
                             return True
-                            
-                        logger.warning(f"Process {process_name} (PID: {pid}) did not terminate on attempt {attempt + 1}, forcing kill.")
-                        process.kill()
-                        process.wait(timeout=10)
-                        
-                        if not process.is_running():
+                        elif status in [psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
+                            logger.info(f"Process {process_name} (PID: {pid}) is already dead/stopped")
                             return True
-                            
-                        time.sleep(1)  # Wait before next retry
-                    except psutil.NoSuchProcess:
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        logger.info(f"Process {process_name} (PID: {pid}) no longer accessible, assuming stopped")
                         return True
+                    
+                    logger.info(f"Terminating {process_name} (PID: {pid})...")
+                    
+                    # First attempt: Graceful termination
+                    success = False
+                    try:
+                        # Try to get all child processes first
+                        children = []
+                        try:
+                            parent = psutil.Process(pid)
+                            children = parent.children(recursive=True)
+                            logger.debug(f"Found {len(children)} child processes for {process_name}")
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
+                        
+                        # Try process group termination first
+                        try:
+                            pgid = os.getpgid(pid)
+                            logger.debug(f"Sending SIGTERM to process group {pgid} for {process_name}")
+                            os.killpg(pgid, signal.SIGTERM)
+                            logger.info(f"Successfully sent SIGTERM to process group {pgid}")
+                        except (ProcessLookupError, OSError, PermissionError) as e:
+                            logger.debug(f"Process group termination failed for {process_name}: {e}")
+                            # Fall back to individual process termination
+                            try:
+                                parent = psutil.Process(pid)
+                                parent.terminate()
+                                logger.info(f"Successfully sent SIGTERM to process {pid}")
+                                
+                                # Also terminate children individually if group kill failed
+                                for child in children:
+                                    try:
+                                        child.terminate()
+                                        logger.debug(f"Terminated child process {child.pid}")
+                                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                        pass
+                            except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                                logger.warning(f"Could not terminate {process_name} (PID: {pid}): {e}")
+                                return True  # Process might already be gone
+
+                        # Wait for graceful termination
+                        start_time = time.time()
+                        while time.time() - start_time < timeout:
+                            try:
+                                if not psutil.pid_exists(pid):
+                                    logger.info(f"{process_name} terminated gracefully")
+                                    success = True
+                                    break
+                                
+                                # Check if it's a zombie that needs cleanup
+                                try:
+                                    process = psutil.Process(pid)
+                                    if process.status() == psutil.STATUS_ZOMBIE:
+                                        logger.info(f"{process_name} became zombie, considering it stopped")
+                                        success = True
+                                        break
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    success = True
+                                    break
+                                    
+                                time.sleep(0.5)
+                            except Exception:
+                                # If we can't check, assume it's gone
+                                success = True
+                                break
+                        
+                        if success:
+                            return True
+                            
                     except Exception as e:
-                        logger.error(f"Error terminating {process_name} (PID: {pid}) on attempt {attempt + 1}: {str(e)}")
-                        time.sleep(1)  # Wait before next retry
+                        logger.error(f"Error during graceful termination of {process_name}: {e}")
+                    
+                    # Second attempt: Force termination
+                    if not success and psutil.pid_exists(pid):
+                        logger.warning(f"{process_name} (PID: {pid}) still running after SIGTERM, sending SIGKILL")
+                        try:
+                            # Get fresh list of children
+                            children = []
+                            try:
+                                parent = psutil.Process(pid)
+                                children = parent.children(recursive=True)
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                pass
+                            
+                            # Try process group kill first
+                            try:
+                                pgid = os.getpgid(pid)
+                                os.killpg(pgid, signal.SIGKILL)
+                                logger.info(f"Successfully sent SIGKILL to process group {pgid}")
+                            except (ProcessLookupError, OSError, PermissionError):
+                                # Fall back to individual process kill
+                                try:
+                                    parent = psutil.Process(pid)
+                                    parent.kill()
+                                    logger.info(f"Successfully sent SIGKILL to process {pid}")
+                                    
+                                    # Kill children individually
+                                    for child in children:
+                                        try:
+                                            child.kill()
+                                            logger.debug(f"Killed child process {child.pid}")
+                                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                            pass
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    logger.info(f"{process_name} disappeared during force kill")
+                                    return True
+                            
+                            # Wait for force termination
+                            force_timeout = min(timeout // 2, 10)  # Max 10 seconds for force kill
+                            start_time = time.time()
+                            while time.time() - start_time < force_timeout:
+                                if not psutil.pid_exists(pid):
+                                    logger.info(f"{process_name} killed successfully")
+                                    return True
+                                time.sleep(0.2)
+                            
+                            # Final check
+                            if psutil.pid_exists(pid):
+                                try:
+                                    process = psutil.Process(pid)
+                                    status = process.status()
+                                    if status == psutil.STATUS_ZOMBIE:
+                                        logger.warning(f"{process_name} is zombie but considered stopped")
+                                        return True
+                                    else:
+                                        logger.error(f"Failed to kill {process_name} (PID: {pid}), status: {status}")
+                                        return False
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    return True
+                            else:
+                                return True
+                                
+                        except Exception as e:
+                            logger.error(f"Error force-killing {process_name} (PID: {pid}): {str(e)}")
+                            return False
+                    
+                    return success
                 
-                logger.error(f"Failed to terminate {process_name} (PID: {pid}) after {max_retries} attempts")
-                return False
+                except Exception as e:
+                    logger.error(f"Unexpected error terminating {process_name} (PID: {pid}): {str(e)}")
+                    return False
 
-            # Terminate AI process
-            if not terminate_process(pid, "AI service"):
-                logger.error("Failed to terminate AI service process")
-                return False
-
-            # Terminate FastAPI app
-            if not terminate_process(app_pid, "API service"):
-                logger.error("Failed to terminate API service process")
-                return False
+            # Track termination success
+            ai_stopped = terminate_process_group(pid, "AI service")
+            api_stopped = terminate_process_group(app_pid, "API service")
             
+            # Give processes time to clean up
+            time.sleep(2)
+            
+            # Verify ports are freed with retry logic
+            ports_freed = True
+            max_port_check_retries = 5
+            
+            for port, service_name in [(app_port, "API"), (local_ai_port, "AI")]:
+                if not port:
+                    continue
+                    
+                port_freed = False
+                for retry in range(max_port_check_retries):
+                    try:
+                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                            s.settimeout(2)
+                            result = s.connect_ex(('localhost', port))
+                            if result != 0:  # Connection failed, port is free
+                                port_freed = True
+                                break
+                            else:
+                                logger.debug(f"{service_name} port {port} still in use, retry {retry + 1}/{max_port_check_retries}")
+                                time.sleep(1)
+                    except Exception as e:
+                        logger.debug(f"Port check error for {port}: {e}")
+                        port_freed = True  # Assume port is free if we can't check
+                        break
+                
+                if not port_freed:
+                    logger.warning(f"{service_name} port {port} still appears to be in use after multiple checks")
+                    ports_freed = False
+            
+            # Clean up the pickle file
+            pickle_removed = True
             try:
-                # remove the pickle file
-                os.remove(self.pickle_file)
+                if os.path.exists(self.pickle_file):
+                    os.remove(self.pickle_file)
+                    logger.info("Service metadata file removed")
+                else:
+                    logger.debug("Service metadata file already removed")
             except Exception as e:
                 logger.error(f"Error removing pickle file: {str(e)}")
-                return False
+                pickle_removed = False
 
-            logger.info("AI service stopped successfully.")
-            return True
+            # Determine overall success
+            success = ai_stopped and api_stopped and pickle_removed
+            
+            if success:
+                logger.info("AI service stopped successfully.")
+                if not ports_freed:
+                    logger.warning("Service stopped but some ports may still be in use temporarily")
+            else:
+                logger.error("AI service stop completed with some failures")
+                logger.error(f"AI stopped: {ai_stopped}, API stopped: {api_stopped}, pickle removed: {pickle_removed}")
+            
+            return success
 
         except Exception as e:
             logger.error(f"Error stopping AI service: {str(e)}", exc_info=True)
