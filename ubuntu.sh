@@ -5,8 +5,9 @@ set -o pipefail
 # Logs informational messages with a specific format.
 log_message() {
     local message="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     if [[ -n "${message// }" ]]; then
-        echo "[LAUNCHER_LOGGER] [MODEL_INSTALL_LLAMA] --message \"$message\""
+        echo "[$timestamp] [INFO] [MODEL_INSTALL_LLAMA] $message"
     fi
 }
 
@@ -14,8 +15,43 @@ log_message() {
 # Logs error messages with a specific format.
 log_error() {
     local message="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     if [[ -n "${message// }" ]]; then
-        echo "[LAUNCHER_LOGGER] [MODEL_INSTALL_LLAMA] --error \"$message\"" >&2
+        echo "[$timestamp] [ERROR] [MODEL_INSTALL_LLAMA] $message" >&2
+    fi
+}
+
+# Function: log_success
+# Logs success messages with a specific format.
+log_success() {
+    local message="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    if [[ -n "${message// }" ]]; then
+        echo "[$timestamp] [SUCCESS] [MODEL_INSTALL_LLAMA] $message"
+    fi
+}
+
+# Function: log_warning
+# Logs warning messages with a specific format.
+log_warning() {
+    local message="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    if [[ -n "${message// }" ]]; then
+        echo "[$timestamp] [WARNING] [MODEL_INSTALL_LLAMA] $message" >&2
+    fi
+}
+
+# Function: log_section
+# Logs section headers with a specific format.
+log_section() {
+    local message="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    if [[ -n "${message// }" ]]; then
+        echo
+        echo "[$timestamp] [SECTION] [MODEL_INSTALL_LLAMA] =========================================="
+        echo "[$timestamp] [SECTION] [MODEL_INSTALL_LLAMA] $message"
+        echo "[$timestamp] [SECTION] [MODEL_INSTALL_LLAMA] =========================================="
+        echo
     fi
 }
 
@@ -26,7 +62,7 @@ handle_error() {
     local error_msg=$2
     log_error "$error_msg (Exit code: $exit_code)"
     if [[ -n "$VIRTUAL_ENV" ]]; then
-        log_message "Deactivating virtual environment..."
+        log_warning "Deactivating virtual environment due to error..."
         deactivate 2>/dev/null || true
     fi
     exit $exit_code
@@ -38,92 +74,58 @@ command_exists() {
     command -v "$1" &> /dev/null
 }
 
-# Function: check_internet
-# Checks for internet connectivity before proceeding.
-check_internet() {
-    log_message "Checking internet connectivity with ping..."
-    if ! ping -c 1 -W 2 www.google.com > /dev/null 2>&1; then
-        log_error "No internet connection detected (ping failed). Please check your network and try again."
-        # Print debug info
-        ping -c 1 -W 2 www.google.com
-        exit 1
-    fi
-    log_message "Internet connectivity confirmed (ping successful)."
-}
-
 # Function: check_docker
 # Checks if Docker is installed and available.
 check_docker() {
+    log_section "Checking Docker Installation"
     if ! command_exists docker; then
         log_error "Docker is not installed or not available in PATH. Please install Docker and try again."
         exit 1
     fi
-    log_message "Docker is installed."
+    log_success "Docker is installed and available."
 }
 
 # Function: check_apt_get
 # Checks if apt-get is available.
 check_apt_get() {
+    log_section "Checking Package Manager"
     if ! command_exists apt-get; then
         log_error "apt-get is not available. This script requires Ubuntu or a compatible system."
         exit 1
     fi
-    log_message "apt-get is available."
+    log_success "apt-get package manager is available."
 }
 
 # Function: check_sudo
 # Checks if the user has sudo privileges.
 check_sudo() {
+    log_section "Checking Sudo Privileges"
     if ! sudo -n true 2>/dev/null; then
         log_error "This script requires sudo privileges. Please run as a user with sudo access."
         exit 1
     fi
-    log_message "Sudo privileges confirmed."
+    log_success "Sudo privileges confirmed."
 }
 
 # Function: check_python_installable
-# Checks if a suitable Python 3.11+ is present or installable via apt.
+# Checks if a suitable Python 3 is present (uses system python3, installs if missing).
 check_python_installable() {
-    log_message "Checking for suitable Python (>= 3.11) in PATH..."
-    HIGHEST_VERSION=""
-    HIGHEST_CMD=""
-    PYTHON_CANDIDATES=$(compgen -c | grep -E '^python3(\.[0-9]+)?$' | sort -u)
-    for candidate in $PYTHON_CANDIDATES; do
-        if command_exists "$candidate"; then
-            VERSION=$($candidate --version 2>&1 | awk '{print $2}')
-            MAJOR=$(echo "$VERSION" | cut -d. -f1)
-            MINOR=$(echo "$VERSION" | cut -d. -f2)
-            if [ "$MAJOR" -eq 3 ] && [ "$MINOR" -ge 11 ]; then
-                if [[ -z "$HIGHEST_VERSION" ]] || [[ $(printf '%s\n' "$VERSION" "$HIGHEST_VERSION" | sort -V | tail -n1) == "$VERSION" ]]; then
-                    HIGHEST_VERSION="$VERSION"
-                    HIGHEST_CMD="$candidate"
-                fi
-            fi
-        fi
-    done
-    if [ -n "$HIGHEST_CMD" ]; then
-        log_message "Found suitable Python: $HIGHEST_CMD ($HIGHEST_VERSION)"
-        PYTHON_CMD="$HIGHEST_CMD"
-        PYTHON_INSTALL_NEEDED=0
+    log_section "Checking Python Installation"
+    log_message "Searching for system python3..."
+    if command_exists python3; then
+        PYTHON_CMD="python3"
+        PYTHON_VERSION=$($PYTHON_CMD --version 2>&1)
+        log_success "Found system python3: $PYTHON_CMD ($PYTHON_VERSION)"
     else
-        log_message "No suitable Python (>= 3.11) found. Checking apt for installable versions..."
-        AVAILABLE_PYTHONS=$(apt-cache search '^python3\.[0-9]+$' | awk '{print $1}' | grep -E '^python3\.[0-9]+$' | sort -V)
-        HIGHEST_AVAILABLE=""
-        for pkg in $AVAILABLE_PYTHONS; do
-            VERSION=$(echo "$pkg" | grep -oE '[0-9]+\.[0-9]+')
-            MAJOR=$(echo "$VERSION" | cut -d. -f1)
-            MINOR=$(echo "$VERSION" | cut -d. -f2)
-            if [ "$MAJOR" -eq 3 ] && [ "$MINOR" -ge 11 ]; then
-                HIGHEST_AVAILABLE="$pkg"
-            fi
-        done
-        if [ -n "$HIGHEST_AVAILABLE" ]; then
-            log_message "Will install $HIGHEST_AVAILABLE via apt."
-            PYTHON_CMD="/usr/bin/$HIGHEST_AVAILABLE"
-            PYTHON_INSTALL_NEEDED=1
-            PYTHON_PKG_TO_INSTALL="$HIGHEST_AVAILABLE"
+        log_warning "python3 not found. Attempting to install python3..."
+        log_message "Updating package lists and installing python3..."
+        sudo apt-get update && sudo apt-get install -y python3 python3-venv python3-pip || handle_error $? "Failed to install python3."
+        if command_exists python3; then
+            PYTHON_CMD="python3"
+            PYTHON_VERSION=$($PYTHON_CMD --version 2>&1)
+            log_success "Successfully installed python3: $PYTHON_CMD ($PYTHON_VERSION)"
         else
-            handle_error 1 "No suitable Python (>= 3.11) found or available for installation. Please install Python 3.11 or higher."
+            handle_error 1 "python3 installation failed. Please install python3 manually."
         fi
     fi
 }
@@ -131,13 +133,12 @@ check_python_installable() {
 # Function: preflight_checks
 # Runs all pre-installation checks and prints a summary.
 preflight_checks() {
-    log_message "Running preflight checks..."
-    check_internet
+    log_section "Running Preflight Checks"
     check_docker
     check_apt_get
     check_sudo
     check_python_installable
-    log_message "All preflight checks passed."
+    log_success "All preflight checks passed successfully."
     echo
     echo "========================================="
     echo "Preflight checks summary:"
