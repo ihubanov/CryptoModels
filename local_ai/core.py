@@ -640,7 +640,7 @@ class LocalAIManager:
             "-fa",
             "--pooling", "mean",
             "--no-webui",
-            "-ngl", "-1",
+            "-ngl", "9999",
             "--no-mmap",
             "--mlock",
             "--jinja",
