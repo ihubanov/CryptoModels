@@ -168,7 +168,22 @@ else
 fi
 
 # Step 3: Check jetson-containers
-if ! command_exists jetson-containers; then
+if command_exists jetson-containers; then
+    JETSON_CONTAINERS_PATH="$(jetson-containers root 2>/dev/null)"
+    if [ -d "$JETSON_CONTAINERS_PATH/.git" ]; then
+        pushd "$JETSON_CONTAINERS_PATH"
+        git reset --hard HEAD
+        git clean -fd
+        git pull
+        popd
+    else
+        log_message "Could not find .git directory in $JETSON_CONTAINERS_PATH, skipping manual update."
+    fi
+    jetson-containers update || log_error "Failed to update jetson-containers."
+else
+    if [ -d jetson-containers ]; then
+        rm -rf jetson-containers || handle_error $? "Failed to remove existing jetson-containers directory."
+    fi
     log_message "Installing jetson-containers CLI..."
     git clone https://github.com/dusty-nv/jetson-containers
     bash jetson-containers/install.sh || handle_error $? "Failed to install jetson-containers"
@@ -212,21 +227,11 @@ cat > "$LLAMA_WRAPPER_DIR/llama-server" << EOF
 MODELS_DIR="$MODELS_DIR"
 TEMPLATES_DIR="$TEMPLATES_DIR"
 
-# Default port for the server.
-PORT=11434
-prev=""
-for arg in "\$@"; do
-    if [[ "\$prev" == "--port" ]]; then
-        PORT="\$arg"
-    fi
-    prev="\$arg"
-done
-
 # Mount model and template directories for Docker.
 MODEL_MOUNT="-v \$MODELS_DIR:\$MODELS_DIR"
 TEMPLATE_MOUNT="-v \$TEMPLATES_DIR:\$TEMPLATES_DIR"
 
-docker run --runtime nvidia -it --rm --network=host -p \$PORT:\$PORT \$MODEL_MOUNT \$TEMPLATE_MOUNT \$(autotag llama_cpp) llama-server "\$@"
+docker run --runtime nvidia -it --rm --network=host \$MODEL_MOUNT \$TEMPLATE_MOUNT \$(autotag llama_cpp) llama-server "\$@"
 EOF
 chmod +x "$LLAMA_WRAPPER_DIR/llama-server"
 log_message "llama-server wrapper created at $LLAMA_WRAPPER_DIR/llama-server"
