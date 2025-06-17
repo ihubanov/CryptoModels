@@ -158,14 +158,41 @@ You can use `local-ai upload` to upload your own `gguf` models downloaded from [
 
 #### Model Preparation
 
-1. **Download the model**: Download the `.gguf` file from Huggingface (e.g., [`Qwen3-8B-Q8_0.gguf`](https://huggingface.co/Qwen/Qwen3-8B-GGUF/blob/main/Qwen3-8B-Q8_0.gguf))
-2. **Create a folder**: Create a folder with a descriptive name (e.g., `qwen3-8b-q8`)
-3. **Rename the file**: Place the model file in the folder and rename it to match the folder name **without** the `.gguf` extension
+##### For Language Models (Text-to-Text)
 
-**Example Structure:**
+1. **Download the model**:
+   - Go to Huggingface and download your desired `.gguf` model
+   - Example: Download [`Qwen3-8B-Q8_0.gguf`](https://huggingface.co/Qwen/Qwen3-8B-GGUF/blob/main/Qwen3-8B-Q8_0.gguf)
+
+2. **Prepare the folder structure**:
+   - Create a new folder with a descriptive name (e.g., `qwen3-8b-q8`)
+   - Place the downloaded `.gguf` file inside this folder
+   - Rename the file to match the folder name, but **remove the `.gguf` extension**
+
+**Example Structure for Language Models:**
 ```
-qwen3-8b-q8/
-└── qwen3-8b-q8  # Note: no .gguf extension
+qwen3-8b-q8/              # Folder name
+└── qwen3-8b-q8          # File name (no .gguf extension)
+```
+
+##### For Vision Models (Image-Text-to-Text)
+
+1. **Download the model files**:
+   - Go to Huggingface and download both required files:
+     - The main model file (e.g., [`gemma-3-4b-it-q4_0.gguf`](https://huggingface.co/google/gemma-3-4b-it-qat-q4_0-gguf/blob/main/gemma-3-4b-it-q4_0.gguf))
+     - The projector file (e.g., [`mmproj-model-f16-4B.gguf`](https://huggingface.co/google/gemma-3-4b-it-qat-q4_0-gguf/blob/main/mmproj-model-f16-4B.gguf))
+
+2. **Prepare the folder structure**:
+   - Create a new folder with a descriptive name (e.g., `gemma-3-4b-it-q4`)
+   - Place both downloaded files inside this folder
+   - Rename the files to match the folder name, but **remove the `.gguf` extension**
+   - Add `-projector` suffix to the projector file
+
+**Example Structure for Vision Models:**
+```
+gemma-3-4b-it-q4/                    # Folder name
+├── gemma-3-4b-it-q4                # Main model file (no .gguf extension)
+└── gemma-3-4b-it-q4-projector      # Projector file (no .gguf extension)
 ```
 
 #### Estimating RAM Requirements
