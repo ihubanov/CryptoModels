@@ -38,9 +38,6 @@ command_exists() {
 export PATH="/opt/homebrew/bin/:$PATH"
 export PATH="$HOME/homebrew/bin:$PATH"
 
-# Check internet connectivity before proceeding
-check_internet
-
 # Step 1: Ensure Homebrew is installed and set PATH
 if ! command_exists brew; then
     log_error "Homebrew is not installed. Please install Homebrew first: https://brew.sh/"
