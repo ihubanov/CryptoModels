@@ -38,19 +38,6 @@ command_exists() {
     command -v "$1" &> /dev/null
 }
 
-# Function: check_internet
-# Checks for internet connectivity before proceeding.
-check_internet() {
-    log_message "Checking internet connectivity with ping..."
-    if ! ping -c 1 -W 2 www.google.com > /dev/null 2>&1; then
-        log_error "No internet connection detected (ping failed). Please check your network and try again."
-        # Print debug info
-        ping -c 1 -W 2 www.google.com
-        exit 1
-    fi
-    log_message "Internet connectivity confirmed (ping successful)."
-}
-
 # Function: check_apt_get
 # Checks if apt-get is available.
 check_apt_get() {
@@ -113,7 +100,6 @@ check_python_installable() {
 preflight_checks() {
     log_message "Running preflight checks..."
     check_jetson_device
-    check_internet
     check_apt_get
     check_sudo
     check_python_installable
