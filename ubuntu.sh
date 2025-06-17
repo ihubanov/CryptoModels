@@ -41,12 +41,14 @@ command_exists() {
 # Function: check_internet
 # Checks for internet connectivity before proceeding.
 check_internet() {
-    log_message "Checking internet connectivity..."
-    if ! curl -s --head https://www.google.com | grep "200 OK" > /dev/null; then
-        log_error "No internet connection detected. Please check your network and try again."
+    log_message "Checking internet connectivity with ping..."
+    if ! ping -c 1 -W 2 www.google.com > /dev/null 2>&1; then
+        log_error "No internet connection detected (ping failed). Please check your network and try again."
+        # Print debug info
+        ping -c 1 -W 2 www.google.com
         exit 1
     fi
-    log_message "Internet connectivity confirmed."
+    log_message "Internet connectivity confirmed (ping successful)."
 }
 
 # Function: check_docker
@@ -173,16 +175,20 @@ log_message "Python setup complete."
 # -----------------------------------------------------------------------------
 log_message "Installing required packages..."
 if command -v apt-get &> /dev/null; then
-    sudo apt-get update && sudo apt-get install -y \
-        pigz \
-        cmake \
-        libcurl4-openssl-dev \
-        python3-venv \
-        python3-pip \
-        build-essential \
-        git \
-        ninja-build \
-        nvidia-cuda-toolkit
+    REQUIRED_PACKAGES=(pigz cmake libcurl4-openssl-dev python3-venv python3-pip build-essential git ninja-build nvidia-cuda-toolkit)
+    MISSING_PACKAGES=()
+    for pkg in "${REQUIRED_PACKAGES[@]}"; do
+        if ! dpkg -s "$pkg" &> /dev/null; then
+            MISSING_PACKAGES+=("$pkg")
+        fi
+    done
+    if [ "${#MISSING_PACKAGES[@]}" -ne 0 ]; then
+        log_message "Installing missing packages: ${MISSING_PACKAGES[*]}"
+        sudo apt-get update
+        sudo apt-get install -y "${MISSING_PACKAGES[@]}" || handle_error $? "Failed to install required packages."
+    else
+        log_message "All required packages are already installed."
+    fi
 else
     log_error "No supported package manager found (apt-get)"
     exit 1
@@ -263,9 +269,8 @@ else
 fi
 
 # Mount model and template directories for Docker.
-# The following mounts may be redundant; comment out if not required by the container.
-MODEL_MOUNT="-v \$MODELS_DIR:/models" # -v \$MODELS_DIR:\$MODELS_DIR (possible redundant mount)
-TEMPLATE_MOUNT="-v \$TEMPLATES_DIR:/templates" # -v \$TEMPLATES_DIR:\$TEMPLATES_DIR -v \$TEMPLATES_DIR:$ABS_TEMPLATE_PATH (possible redundant mounts)
+MODEL_MOUNT="-v \$MODELS_DIR:\$MODELS_DIR"
+TEMPLATE_MOUNT="-v \$TEMPLATES_DIR:\$TEMPLATES_DIR"
 
 DOCKER_RUN="docker run --rm -it --gpus all -p \$PORT:\$PORT \$MODEL_MOUNT \$TEMPLATE_MOUNT ghcr.io/ggerganov/llama.cpp:server-cuda \$@"
 
@@ -298,7 +303,7 @@ update_shell_rc_path() {
             log_message "$LLAMA_WRAPPER_DIR already in PATH in $shell_rc. No update needed."
         else
             # Remove any previous lines that add $LLAMA_WRAPPER_DIR to PATH.
-            sed -i "/export PATH=\\\"$LLAMA_WRAPPER_DIR:\\\$PATH\\\"/d" "$shell_rc"
+            sed -i "\|export PATH=\"$LLAMA_WRAPPER_DIR:\$PATH\"|d" "$shell_rc"
             echo "$path_line" >> "$shell_rc"
             log_message "Updated PATH in $shell_rc."
         fi
@@ -317,15 +322,10 @@ if [[ ":$PATH:" != *":$LLAMA_WRAPPER_DIR:"* ]]; then
     else
         update_shell_rc_path "$HOME/.bashrc"
     fi
-    export PATH="$LLAMA_WRAPPER_DIR:$PATH"
+    # Set a flag to print an informative message at the end
+    PATH_UPDATE_NEEDED=1
     log_message "PATH updated for current session and future sessions."
 fi
-
-# Verify that llama-server is available in PATH.
-if ! command -v llama-server &> /dev/null; then
-    handle_error 1 "Failed to make llama-server available in PATH."
-fi
-log_message "llama-server command is now available."
 
 # -----------------------------------------------------------------------------
 # Step 7: Create and activate Python virtual environment
@@ -378,3 +378,12 @@ else
 fi
 
 log_message "Setup completed successfully."
+
+# At the end of the script, print an informative message if PATH was updated
+if [ "${PATH_UPDATE_NEEDED:-0}" = "1" ]; then
+    echo
+    echo "[INFO] The llama-server command directory was added to your PATH in your shell rc file."
+    echo "      To use it in this session, run: export PATH=\"$LLAMA_WRAPPER_DIR:\$PATH\""
+    echo "      Or restart your terminal or run: source ~/.bashrc (or ~/.zshrc)"
+    echo
+fi
