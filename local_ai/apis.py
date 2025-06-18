@@ -36,19 +36,19 @@ logger.setLevel(logging.INFO)
 
 app = FastAPI()
 
-# Constants for dynamic unload feature
+# Constants for dynamic unload feature - Optimized for performance
 IDLE_TIMEOUT = 600  # 10 minutes in seconds
-UNLOAD_CHECK_INTERVAL = 60  # Check every 60 seconds
-SERVICE_START_TIMEOUT = 60  # Maximum time to wait for service to start
-POOL_CONNECTIONS = 100  # Reduced from 1000 for better resource usage
-POOL_KEEPALIVE = 20  # Reduced from 60 to prevent resource waste
-HTTP_TIMEOUT = 300.0  # Default timeout for HTTP requests in seconds
-STREAM_TIMEOUT = 300.0  # Default timeout for streaming requests in seconds
-MAX_RETRIES = 3  # Maximum number of retries for failed requests
-RETRY_DELAY = 1.0  # Delay between retries in seconds
-MAX_QUEUE_SIZE = 100  # Reduced from 1000 for better memory usage
-HEALTH_CHECK_INTERVAL = 1  # Health check interval in seconds
-STREAM_CHUNK_SIZE = 8192  # Chunk size for streaming responses
+UNLOAD_CHECK_INTERVAL = 30  # Check every 30 seconds (reduced from 60)
+SERVICE_START_TIMEOUT = 45  # Reduced timeout for faster failure detection
+POOL_CONNECTIONS = 50  # Further optimized for better resource usage
+POOL_KEEPALIVE = 10  # Reduced keepalive to free connections faster
+HTTP_TIMEOUT = 180.0  # Reduced timeout for faster failure detection
+STREAM_TIMEOUT = 300.0  # Keep streaming timeout longer for large responses
+MAX_RETRIES = 2  # Reduced retries for faster failure handling
+RETRY_DELAY = 0.5  # Reduced delay between retries
+MAX_QUEUE_SIZE = 50  # Further reduced for better memory usage
+HEALTH_CHECK_INTERVAL = 0.5  # Faster health checks
+STREAM_CHUNK_SIZE = 16384  # Increased chunk size for better throughput
 
 # Utility functions
 def get_service_info() -> Dict[str, Any]:
@@ -366,7 +366,8 @@ class ServiceHandler:
                 content = "Unfortunately, I'm not equipped to interpret images at this time. Please provide a text description if possible."
                 return ServiceHandler._create_vision_error_response(request, content)
                 
-        request.fix_messages()
+        request.clean_messages()
+        request.enhance_tool_messages()
         request_dict = convert_request_to_dict(request)
         
         if request.stream:
@@ -414,7 +415,9 @@ class ServiceHandler:
                 if response.status_code < 500:
                     raise HTTPException(status_code=response.status_code, detail=error_text)
             
-            return response.json()
+            # Cache JSON parsing to avoid multiple calls
+            json_response = response.json()
+            return json_response
             
         except httpx.TimeoutException as e:
             raise HTTPException(status_code=504, detail=str(e))
@@ -438,17 +441,22 @@ class ServiceHandler:
                     yield error_msg
                     return
                 
-                buffer = ""
+                buffer = bytearray()  # Use bytearray for more efficient byte operations
                 async for chunk in response.aiter_bytes(chunk_size=STREAM_CHUNK_SIZE):
-                    buffer += chunk.decode('utf-8')
-                    while '\n' in buffer:
-                        line, buffer = buffer.split('\n', 1)
+                    buffer.extend(chunk)
+                    
+                    # Process complete lines
+                    while b'\n' in buffer:
+                        line_bytes, buffer = buffer.split(b'\n', 1)
+                        line = line_bytes.decode('utf-8')
                         if line.strip():
                             yield f"{line}\n\n"
                 
                 # Process any remaining data in the buffer
-                if buffer.strip():
-                    yield f"{buffer}\n\n"
+                if buffer:
+                    remaining = buffer.decode('utf-8').strip()
+                    if remaining:
+                        yield f"{remaining}\n\n"
                     
         except Exception as e:
             logger.error(f"Error during streaming: {e}")

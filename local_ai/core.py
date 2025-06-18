@@ -117,16 +117,21 @@ class LocalAIManager:
             self._get_model_best_practice_path(model_family)
         )
     
-    def _retry_request_json(self, url, retries=3, delay=5, timeout=10):
-        """Utility to retry a GET request for JSON data."""
+    def _retry_request_json(self, url, retries=2, delay=2, timeout=8):
+        """Utility to retry a GET request for JSON data with optimized parameters."""
+        backoff_delay = delay
         for attempt in range(retries):
             try:
                 response = requests.get(url, timeout=timeout)
                 if response.status_code == 200:
-                    return response.json()
+                    # Cache JSON parsing result
+                    json_data = response.json()
+                    return json_data
             except requests.exceptions.RequestException as e:
                 logger.warning(f"Attempt {attempt+1} failed for {url}: {e}")
-                time.sleep(delay)
+                if attempt < retries - 1:  # Don't sleep on last attempt
+                    time.sleep(backoff_delay)
+                    backoff_delay = min(backoff_delay * 1.5, 8)  # Exponential backoff with cap
         return None
 
     def start(self, hash: str, port: int = 11434, host: str = "0.0.0.0", context_length: int = 32768) -> bool:
@@ -446,8 +451,9 @@ class LocalAIManager:
                                 logger.warning(f"Could not terminate {process_name} (PID: {pid}): {e}")
                                 return True  # Process might already be gone
 
-                        # Wait for graceful termination
+                        # Wait for graceful termination with adaptive polling
                         start_time = time.time()
+                        poll_interval = 0.1  # Start with faster polling
                         while time.time() - start_time < timeout:
                             try:
                                 if not psutil.pid_exists(pid):
@@ -466,7 +472,9 @@ class LocalAIManager:
                                     success = True
                                     break
                                     
-                                time.sleep(0.5)
+                                time.sleep(poll_interval)
+                                # Gradually increase polling interval to reduce CPU usage
+                                poll_interval = min(poll_interval * 1.2, 0.5)
                             except Exception:
                                 # If we can't check, assume it's gone
                                 success = True
