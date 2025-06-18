@@ -69,23 +69,27 @@ def upload_folder_to_lighthouse(
         metadata["num_of_files"] = len(part_files)
         print(f"Uploading {len(part_files)} parts to Lighthouse.storage...")
 
-        # Parallel upload with retries
+        # Parallel upload with optimized retries
         errors = []
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             def upload_with_retry(part_path):
+                backoff_delay = 1  # Start with 1 second, exponential backoff
                 for attempt in range(max_retries):
                     file_info, error = upload_to_lighthouse(part_path)
                     if file_info:
                         return file_info, None
                     print(f"Retry {attempt + 1}/{max_retries} for {part_path}")
-                    time.sleep(2)
+                    # Exponential backoff instead of fixed delay
+                    time.sleep(min(backoff_delay, 8))  # Cap at 8 seconds
+                    backoff_delay *= 1.5
                 return None, f"Failed after {max_retries} attempts"
 
-            future_to_part = {
-                executor.submit(upload_with_retry, part): part for part in part_files
-            }
-            for future in as_completed(future_to_part):
-                part_path = future_to_part[future]
+            # Submit all uploads at once for better parallelism
+            futures = {executor.submit(upload_with_retry, part): part for part in part_files}
+            
+            # Process completed uploads as they finish
+            for future in as_completed(futures):
+                part_path = futures[future]
                 file_info, error = future.result()
                 if file_info:
                     metadata["files"].append(file_info)
