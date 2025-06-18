@@ -204,7 +204,7 @@ PYTHON_VERSION=$($PYTHON_CMD -c "import sys; print(f'python{sys.version_info.maj
 MODELS_DIR="$(pwd)/llms-storage"
 TEMPLATES_DIR="$(pwd)/local_ai/examples/templates"
 USER_HOME="$HOME"
-ABS_TEMPLATE_PATH="$USER_HOME/.local/lib/${PYTHON_VERSION}/site-packages/local_ai/examples/templates"
+ABS_TEMPLATE_PATH="$(pwd)/local_ai/lib/$PYTHON_VERSION/site-packages/local_ai/examples/templates"
 
 cat > "$LLAMA_WRAPPER_DIR/llama-server" << EOF
 #!/bin/bash
@@ -212,12 +212,14 @@ cat > "$LLAMA_WRAPPER_DIR/llama-server" << EOF
 
 MODELS_DIR="$MODELS_DIR"
 TEMPLATES_DIR="$TEMPLATES_DIR"
+ABS_TEMPLATE_PATH="$ABS_TEMPLATE_PATH"
 
 # Mount model and template directories for Docker.
 MODEL_MOUNT="-v \$MODELS_DIR:\$MODELS_DIR"
 TEMPLATE_MOUNT="-v \$TEMPLATES_DIR:\$TEMPLATES_DIR"
+ABS_TEMPLATE_PATH="-v \$ABS_TEMPLATE_PATH:\$ABS_TEMPLATE_PATH"
 
-docker run --runtime nvidia -it --rm --network=host \$MODEL_MOUNT \$TEMPLATE_MOUNT \$(autotag llama_cpp) llama-server "\$@"
+docker run --runtime nvidia -it --rm --network=host \$MODEL_MOUNT \$TEMPLATE_MOUNT \$ABS_TEMPLATE_PATH \$(autotag llama_cpp) llama-server "\$@"
 EOF
 chmod +x "$LLAMA_WRAPPER_DIR/llama-server"
 log_message "llama-server wrapper created at $LLAMA_WRAPPER_DIR/llama-server"
