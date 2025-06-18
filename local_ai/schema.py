@@ -54,9 +54,10 @@ class FunctionCall(BaseModel):
         """Validate that arguments is a valid JSON string."""
         try:
             import json
+            # Don't store the parsed result, just validate it's valid JSON
             json.loads(v)
             return v
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, TypeError):
             raise ValueError("arguments must be a valid JSON string")
 
 class ChatCompletionMessageToolCall(BaseModel):
@@ -95,29 +96,58 @@ class ChatCompletionRequestBase(BaseModel):
         if not v:
             raise ValueError("messages cannot be empty")
         
-        if len(v) > 100:  # OpenAI's limit is typically around 100 messages
+        msg_count = len(v)
+        if msg_count > 100:  # OpenAI's limit is typically around 100 messages
             raise ValueError("message history too long")
-            
-        valid_roles = {"user", "assistant", "system", "tool"}
-        for msg in v:
-            if msg.role not in valid_roles:
-                raise ValueError(f"invalid role: {msg.role}")
+        
+        # Pre-define set for O(1) lookup instead of creating it in loop    
+        valid_roles = frozenset({"user", "assistant", "system", "tool"})
+        
+        # Use any() with generator expression for early exit on invalid role
+        if any(msg.role not in valid_roles for msg in v):
+            # Only find the specific invalid role if validation fails
+            invalid_roles = [msg.role for msg in v if msg.role not in valid_roles]
+            raise ValueError(f"invalid role(s): {invalid_roles[0]}")
                 
         return v
 
     def is_vision_request(self) -> bool:
-        """Check if the request includes image content, indicating a vision-based request."""
-        import logging
-        logger = logging.getLogger(__name__)
-        
-        for message in self.messages:
-            if isinstance(message.content, list):
-                for item in message.content:
-                    if item.type == "image_url":
-                        logger.debug(f"Detected vision request with image: {item.image_url.url[:30]}...")
-                        return True
-        
-        logger.debug("No images detected, treating as text-only request")
+        """
+        Determines if the request is a vision request according to the OpenAI API standard.
+
+        In the OpenAI API, vision requests are characterized by message content items that include
+        a 'type' field set to 'image_url' and an accompanying 'image_url' field that may contain 
+        either an external URL or a base64-encoded data URI.
+
+        Returns:
+            bool: True if the final message contains any valid vision content with type 'image_url',
+                False otherwise.
+
+        Edge cases handled:
+            - Self.messages is None or empty
+            - Final message's content is not a list
+            - Items in content list missing 'type' or 'image_url'
+            - Items with 'type' not equal to 'image_url'
+            - Items with 'image_url' as None or empty
+        """
+        if not self.messages or not isinstance(self.messages, list):
+            return False
+
+        final_message = self.messages[-1]
+        content = getattr(final_message, "content", None)
+
+        if not isinstance(content, list):
+            return False
+
+        for item in content:
+            if not isinstance(item, dict) and not hasattr(item, "__dict__"):
+                continue
+            item_type = getattr(item, "type", None)
+            image_url = getattr(item, "image_url", None)
+
+            if item_type == "image_url" and image_url:
+                return True
+
         return False
     
 class ChatTemplateKwargs(BaseModel):
@@ -134,33 +164,53 @@ class ChatCompletionRequest(ChatCompletionRequestBase):
     stream: bool = Field(False, description="Whether to stream the response")
     # chat_template_kwargs: Optional[ChatTemplateKwargs] = Field(ChatTemplateKwargs(), description="Chat template kwargs")
 
-    def fix_messages(self) -> None:
+    def clean_messages(self) -> None:
         """Fix the messages list to ensure proper formatting and ordering."""
         def clean_special_box_text(input_text: str) -> str:
             return UNICODE_BOX_PATTERN.sub('', input_text).strip()
         
-        # Clean message contents
+        # Use a single pass with list comprehensions for better performance
+        system_messages = []
+        non_system_messages = []
+        
         for message in self.messages:
+            # Handle content cleaning
             if message.content is None:
                 message.content = ""
             elif isinstance(message.content, str):
                 message.content = clean_special_box_text(message.content)
             elif isinstance(message.content, list):
+                # More efficient iteration with enumerate
                 for item in message.content:
-                    if isinstance(item, dict) and item.get("type") == "text":
-                        item["text"] = clean_special_box_text(item.get("text", ""))
-        
-        # Sort messages by role
-        system_messages = []
-        non_system_messages = []
-        
-        for message in self.messages:
+                    if isinstance(item, dict) and item.get("type") == "text" and "text" in item:
+                        item["text"] = clean_special_box_text(item["text"])
+            
+            # Sort messages in the same loop to avoid second iteration
             if message.role == "system":
                 system_messages.append(message)
             else:
                 non_system_messages.append(message)
             
         self.messages = system_messages + non_system_messages
+
+    def enhance_tool_messages(self) -> None:
+        """
+        Fixes tool messages by converting list content to merged string content.
+        
+        This ensures tool messages have proper string content for processing.
+        """
+        # In-place modification instead of creating new list
+        for message in self.messages:
+            if message.role == "tool" and isinstance(message.content, list):
+                # Use list comprehension for better performance
+                merged_content = [
+                    content_item.text 
+                    for content_item in message.content 
+                    if hasattr(content_item, 'type') and content_item.type == "text" and hasattr(content_item, 'text') and content_item.text
+                ]
+                
+                # Join all content with newlines for better formatting
+                message.content = "\n".join(merged_content) if merged_content else ""
 
 class Choice(BaseModel):
     """
