@@ -38,12 +38,13 @@ def upload_to_lighthouse(file_path: Path):
         return None, str(e)
 
 def upload_folder_to_lighthouse(
-    folder_name: str, zip_chunk_size=512, max_retries=20, threads=16, max_workers=4, **kwargs
+    folder_path: str, zip_chunk_size=512, max_retries=20, threads=16, max_workers=4, **kwargs
 ):
     """
     Upload a folder to Lighthouse.storage by compressing it into parts and uploading in parallel.
     """
-    folder_path = Path(folder_name)
+    folder_path = Path(folder_path)
+    folder_name = folder_path.name
     if not os.path.exists(folder_path):
         raise FileNotFoundError(f"Folder not found: {folder_path}")
     
