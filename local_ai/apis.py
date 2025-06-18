@@ -48,7 +48,7 @@ MAX_RETRIES = 2  # Reduced retries for faster failure handling
 RETRY_DELAY = 0.5  # Reduced delay between retries
 MAX_QUEUE_SIZE = 50  # Further reduced for better memory usage
 HEALTH_CHECK_INTERVAL = 0.5  # Faster health checks
-STREAM_CHUNK_SIZE = 16384  # Increased chunk size for better throughput
+STREAM_CHUNK_SIZE = 8  # User-specified chunk size for minimal initial buffering
 
 # Utility functions
 def get_service_info() -> Dict[str, Any]:
@@ -443,6 +443,7 @@ class ServiceHandler:
                 
                 buffer = bytearray()  # Use bytearray for more efficient byte operations
                 async for chunk in response.aiter_bytes(chunk_size=STREAM_CHUNK_SIZE):
+                    logger.info(f"Raw AI service chunk: {chunk!r}")
                     buffer.extend(chunk)
                     
                     # Process complete lines
