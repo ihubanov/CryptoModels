@@ -155,6 +155,18 @@ class LocalAIManager:
         if not hash:
             raise ValueError("Filecoin hash is required to start the service")
 
+        # Check if the requested port is available before doing expensive operations
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(2)
+                result = s.connect_ex((host, port))
+                if result == 0:  # Connection successful, port is in use
+                    raise ServiceStartError(f"Port {port} is already in use on {host}")
+        except socket.error as e:
+            if "Connection refused" not in str(e):
+                raise ServiceStartError(f"Unable to check port {port} availability: {str(e)}")
+            # Connection refused means port is free, which is what we want
+
         try:
             logger.info(f"Starting local AI service for model with hash: {hash}")
             
