@@ -15,9 +15,9 @@ class Config:
     """
     Configuration class holding the default model names for different types of requests.
     """
-    TEXT_MODEL = "gpt-4-turbo"          # Default model for text-based chat completions
-    VISION_MODEL = "gpt-4-vision-preview"  # Model used for vision-based requests
-    EMBEDDING_MODEL = "text-embedding-ada-002"  # Model used for generating embeddings
+    TEXT_MODEL = "default-text-model"          # Default model for text-based chat completions
+    VISION_MODEL = "default-vision-model"  # Model used for vision-based requests
+    EMBEDDING_MODEL = "default-embedding-model"  # Model used for generating embeddings
 
 # Common models used in both streaming and non-streaming contexts
 class ImageUrl(BaseModel):
