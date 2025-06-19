@@ -25,7 +25,7 @@ def parse_args():
         "start", help="Start a local language model server"
     )
     start_command.add_argument(
-        "--hash", type=str, required=True,
+        "--hash", type=str, nargs='+', required=True,
         help="Filecoin hash of the model to start"
     )
     start_command.add_argument(

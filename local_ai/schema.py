@@ -83,7 +83,7 @@ class ChatCompletionRequestBase(BaseModel):
     """
     Base model for chat completion requests.
     """
-    model: str = Field(Config.TEXT_MODEL, description="Model to use for completion")
+    model: Optional[str] = Field(None, description="The ID of the model to use for this request. If None, a default model is used based on the request type (e.g., text or vision).")
     messages: List[Message] = Field(..., description="List of messages in the conversation")
     tools: Optional[List[Dict[str, Any]]] = Field(None, description="Available tools for the model")
     tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(None, description="Tool choice configuration")
@@ -228,7 +228,7 @@ class EmbeddingRequest(BaseModel):
     """
     Model for embedding requests.
     """
-    model: str = Field(Config.EMBEDDING_MODEL, description="Model to use for embedding")
+    model: Optional[str] = Field(None, description="The ID of the model to use for this request. If None, the default embedding model is used.")
     input: List[str] = Field(..., min_items=1, description="List of text inputs for embedding")
 
     @validator("input")
