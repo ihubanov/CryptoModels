@@ -78,7 +78,7 @@ def parse_args():
         help="Number of threads for compressing files"
     )
     upload_command.add_argument(
-        "--max-retries", type=int, default=20,
+        "--max-retries", type=int, default=5,
         help="Maximum number of retries for uploading files"
     )
     upload_command.add_argument(
