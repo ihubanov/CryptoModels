@@ -279,6 +279,8 @@ class LocalAIManager:
                 logger.error(f"Service failed to start within 600 seconds")
                 ai_process.terminate()
                 return False
+            
+            logger.info(f"[LOCAL-AI] Local AI service started on port {local_ai_port}")
 
             # start the FastAPI app in the background           
             uvicorn_command = [
