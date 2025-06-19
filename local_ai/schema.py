@@ -15,9 +15,9 @@ class Config:
     """
     Configuration class holding the default model names for different types of requests.
     """
-    TEXT_MODEL = "gpt-4-turbo"          # Default model for text-based chat completions
-    VISION_MODEL = "gpt-4-vision-preview"  # Model used for vision-based requests
-    EMBEDDING_MODEL = "text-embedding-ada-002"  # Model used for generating embeddings
+    TEXT_MODEL = "default-text-model"          # Default model for text-based chat completions
+    VISION_MODEL = "default-vision-model"  # Model used for vision-based requests
+    EMBEDDING_MODEL = "default-embedding-model"  # Model used for generating embeddings
 
 # Common models used in both streaming and non-streaming contexts
 class ImageUrl(BaseModel):
@@ -97,7 +97,7 @@ class ChatCompletionRequestBase(BaseModel):
             raise ValueError("messages cannot be empty")
         
         msg_count = len(v)
-        if msg_count > 100:  # OpenAI's limit is typically around 100 messages
+        if msg_count > 50:  # Local AI's limit is 50 messages
             raise ValueError("message history too long")
         
         # Pre-define set for O(1) lookup instead of creating it in loop    
@@ -149,12 +149,6 @@ class ChatCompletionRequestBase(BaseModel):
                 return True
 
         return False
-    
-class ChatTemplateKwargs(BaseModel):
-    """
-    Represents the arguments for a chat template.
-    """
-    enable_thinking: bool = Field(False, description="Whether to enable thinking mode")
 
 # Non-streaming request and response
 class ChatCompletionRequest(ChatCompletionRequestBase):
@@ -162,7 +156,6 @@ class ChatCompletionRequest(ChatCompletionRequestBase):
     Model for non-streaming chat completion requests.
     """
     stream: bool = Field(False, description="Whether to stream the response")
-    # chat_template_kwargs: Optional[ChatTemplateKwargs] = Field(ChatTemplateKwargs(), description="Chat template kwargs")
 
     def clean_messages(self) -> None:
         """Fix the messages list to ensure proper formatting and ordering."""
@@ -237,7 +230,6 @@ class EmbeddingRequest(BaseModel):
     """
     model: str = Field(Config.EMBEDDING_MODEL, description="Model to use for embedding")
     input: List[str] = Field(..., min_items=1, description="List of text inputs for embedding")
-    image_url: Optional[str] = Field(None, description="Image URL to embed")
 
     @validator("input")
     def validate_input(cls, v: List[str]) -> List[str]:

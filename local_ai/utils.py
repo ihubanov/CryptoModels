@@ -8,6 +8,9 @@ import shutil
 import tempfile
 import subprocess
 import asyncio
+import requests
+import time
+from loguru import logger
 from pathlib import Path
 
 def compress_folder(model_folder: str, zip_chunk_size: int = 128, threads: int = 1) -> str:
@@ -86,3 +89,25 @@ def check_downloading():
         with open(tracking_path, "rb") as f:
             downloading_files = pickle.load(f)
     return downloading_files
+
+
+def wait_for_health(port: int, timeout: int = 300) -> bool:
+    """
+    Wait for the service to become healthy.
+    """
+    health_check_url = f"http://localhost:{port}/health"
+    start_time = time.time()
+    wait_time = 1
+    while time.time() - start_time < timeout:
+        try:
+            status = requests.get(health_check_url, timeout=5)
+            if status.status_code == 200 and (status.json().get("status") == "ok"):
+                    logger.debug(f"Service healthy at {health_check_url}")
+                    return True
+        except requests.exceptions.RequestException as e:
+            last_error = str(e)
+            logger.debug(f"Health check failed: {last_error}")
+        time.sleep(wait_time)
+        wait_time = min(wait_time * 2, 60) 
+    return False
+    

@@ -11,6 +11,7 @@ import pkg_resources
 from pathlib import Path
 from loguru import logger
 from typing import Optional, Dict, Any
+from local_ai.utils import wait_for_health
 from local_ai.download import download_model_from_filecoin_async
 
 class LocalAIServiceError(Exception):
@@ -19,10 +20,6 @@ class LocalAIServiceError(Exception):
 
 class ServiceStartError(LocalAIServiceError):
     """Exception raised when service fails to start."""
-    pass
-
-class ServiceHealthError(LocalAIServiceError):
-    """Exception raised when service health check fails."""
     pass
 
 class ModelNotFoundError(LocalAIServiceError):
@@ -45,39 +42,6 @@ class LocalAIManager:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(("", 0))
             return s.getsockname()[1]
-
-    def _wait_for_service(self, port: int, timeout: int = 300) -> bool:
-        """
-        Wait for the AI service to become healthy.
-
-        Args:
-            port (int): Port number of the service.
-            timeout (int): Maximum time to wait in seconds (default: 300).
-
-        Returns:
-            bool: True if service is healthy, False otherwise.
-
-        Raises:
-            ServiceHealthError: If service fails to become healthy within timeout.
-        """
-        health_check_url = f"http://localhost:{port}/health"
-        start_time = time.time()
-        wait_time = 1  # Initial wait time in seconds
-        last_error = None
-        
-        while time.time() - start_time < timeout:
-            try:
-                status = requests.get(health_check_url, timeout=5)
-                if status.status_code == 200 and (status.json().get("status") == "ok"):
-                    logger.debug(f"Service healthy at {health_check_url}")
-                    return True
-            except requests.exceptions.RequestException as e:
-                last_error = str(e)
-                logger.debug(f"Health check failed: {last_error}")
-            time.sleep(wait_time)
-            wait_time = min(wait_time * 2, 60)  # Exponential backoff, max 60s
-            
-        raise ServiceHealthError(f"Service failed to become healthy within {timeout} seconds. Last error: {last_error}")
     
     def restart(self):
         """
@@ -154,6 +118,18 @@ class LocalAIManager:
         """
         if not hash:
             raise ValueError("Filecoin hash is required to start the service")
+
+        # Check if the requested port is available before doing expensive operations
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(2)
+                result = s.connect_ex((host, port))
+                if result == 0:  # Connection successful, port is in use
+                    raise ServiceStartError(f"Port {port} is already in use on {host}")
+        except socket.error as e:
+            if "Connection refused" not in str(e):
+                raise ServiceStartError(f"Unable to check port {port} availability: {str(e)}")
+            # Connection refused means port is free, which is what we want
 
         try:
             logger.info(f"Starting local AI service for model with hash: {hash}")
@@ -263,10 +239,12 @@ class LocalAIManager:
                 logger.error(f"Error starting AI service: {str(e)}", exc_info=True)
                 return False
     
-            if not self._wait_for_service(local_ai_port):
+            if not wait_for_health(local_ai_port):
                 logger.error(f"Service failed to start within 600 seconds")
                 ai_process.terminate()
                 return False
+            
+            logger.info(f"[LOCAL-AI] Local AI service started on port {local_ai_port}")
 
             # start the FastAPI app in the background           
             uvicorn_command = [
@@ -293,7 +271,7 @@ class LocalAIManager:
                 ai_process.terminate()
                 return False
             
-            if not self._wait_for_service(port):
+            if not wait_for_health(port):
                 logger.error(f"API service failed to start within 600 seconds")
                 ai_process.terminate()
                 apis_process.terminate()

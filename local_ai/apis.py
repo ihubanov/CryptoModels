@@ -17,6 +17,7 @@ import requests
 import psutil
 from pathlib import Path
 from typing import Dict, Any
+from local_ai.utils import wait_for_health
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
@@ -39,7 +40,7 @@ app = FastAPI()
 # Constants for dynamic unload feature - Optimized for performance
 IDLE_TIMEOUT = 600  # 10 minutes in seconds
 UNLOAD_CHECK_INTERVAL = 30  # Check every 30 seconds (reduced from 60)
-SERVICE_START_TIMEOUT = 45  # Reduced timeout for faster failure detection
+SERVICE_START_TIMEOUT = 120  # Reduced timeout for faster failure detection
 POOL_CONNECTIONS = 50  # Further optimized for better resource usage
 POOL_KEEPALIVE = 10  # Reduced keepalive to free connections faster
 HTTP_TIMEOUT = 180.0  # Reduced timeout for faster failure detection
@@ -47,7 +48,7 @@ STREAM_TIMEOUT = 300.0  # Keep streaming timeout longer for large responses
 MAX_RETRIES = 2  # Reduced retries for faster failure handling
 RETRY_DELAY = 0.5  # Reduced delay between retries
 MAX_QUEUE_SIZE = 50  # Further reduced for better memory usage
-HEALTH_CHECK_INTERVAL = 0.5  # Faster health checks
+HEALTH_CHECK_INTERVAL = 2  # Faster health checks
 STREAM_CHUNK_SIZE = 16384  # Increased chunk size for better throughput
 
 # Utility functions
@@ -300,16 +301,9 @@ class ServiceHandler:
             
             # Wait for the process to start by checking the health endpoint
             port = service_info["port"]
-            start_time = time.time()
-            
-            while time.time() - start_time < service_start_timeout:
-                try:
-                    response = requests.get(f"http://localhost:{port}/health", timeout=2)
-                    if response.status_code == 200:
-                        logger.info(f"Service health check passed after {time.time() - start_time:.2f}s")
-                        break
-                except (requests.RequestException, ConnectionError):
-                    await asyncio.sleep(HEALTH_CHECK_INTERVAL)
+            if not wait_for_health(port, timeout=service_start_timeout):
+                logger.error(f"AI server failed to start within {service_start_timeout} seconds")
+                return False
             
             # Check if the process is running
             if ai_process.poll() is None:
