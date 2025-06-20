@@ -7,7 +7,8 @@ import asyncio
 import socket
 import requests
 import subprocess
-import importlib.util
+# import pkg_resources # No longer used
+import importlib.util # Added
 from pathlib import Path
 from loguru import logger
 from typing import Optional, Dict, Any
@@ -36,7 +37,7 @@ class LocalAIManager:
         """Initialize the LocalAIManager."""
         self.pickle_file = Path(os.getenv("RUNNING_SERVICE_FILE", "running_service.pkl"))
         # Stores information about all loaded models, keyed by model hash
-        self.loaded_models: Dict[str, Dict[str, Any]] = {} 
+        self.loaded_models: Dict[str, Dict[str, Any]] = {}
         self.llama_server_path = os.getenv("LLAMA_SERVER")
         if not self.llama_server_path or not os.path.exists(self.llama_server_path):
             raise LocalAIServiceError("llama-server executable not found in LLAMA_SERVER or PATH")
@@ -70,7 +71,7 @@ class LocalAIManager:
             except Exception as e:
                 logger.error(f"Error loading running service from pickle: {str(e)}. Initializing empty loaded_models.")
                 self.loaded_models = {}
-        
+
     def _get_free_port(self) -> int:
         """Get a free port number."""
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -136,14 +137,14 @@ class LocalAIManager:
             if not self.loaded_models: # Assuming loaded_models was populated if pickle existed
                  logger.warning("No models were previously loaded to restart.")
                  return False
-            
+
             all_hashes_to_restart = list(self.loaded_models.keys())
             # Important: Need to store original ports and context lengths to restart them accurately.
             # This current restart will start them on new free ports.
             # A more robust restart would re-use previous ports if possible or specified.
             logger.info(f"Attempting to restart models: {all_hashes_to_restart}")
             self.stop() # Stop all current models
-            
+
             # This simplistic restart won't preserve original ports unless start() is modified
             # or we pass specific port configurations.
             # For now, let's assume start will assign new ports.
@@ -226,7 +227,7 @@ class LocalAIManager:
             try:
                 local_model_path = asyncio.run(download_model_from_filecoin_async(model_hash))
                 local_projector_path = local_model_path + "-projector"
-                
+
                 if not os.path.exists(local_model_path):
                     raise ModelNotFoundError(f"Model file not found at: {local_model_path} for hash {model_hash}")
 
@@ -235,7 +236,7 @@ class LocalAIManager:
                 fast_api_port = self._get_free_port()
                 while fast_api_port == llama_server_port: # Ensure different ports
                     fast_api_port = self._get_free_port()
-                
+
                 # In a multi-model setup, current_app_port should be unique for each FastAPI app.
                 # The CLI start command might need to pass a base_app_port or ports list.
                 # For now, let's use _get_free_port for the app_port as well.
@@ -268,7 +269,7 @@ class LocalAIManager:
                     except Exception as e:
                         logger.error(f"Error loading metadata file {metadata_file_path}: {e}")
                         # Fallback to default name if metadata read fails
-                        service_metadata_for_model["model_name"] = model_hash 
+                        service_metadata_for_model["model_name"] = model_hash
                 else:
                     # Fetch from Filecoin URL (assuming this returns necessary details)
                     filecoin_url = f"https://gateway.lighthouse.storage/ipfs/{model_hash}"
@@ -324,7 +325,7 @@ class LocalAIManager:
 
                 logger.info(f"Starting llama-server for {model_hash}: {' '.join(map(str,running_ai_command))}")
                 service_metadata_for_model["running_ai_command"] = running_ai_command
-                
+
                 os.makedirs("logs", exist_ok=True)
                 ai_log_stderr_path = Path(f"logs/ai_{model_hash}_{llama_server_port}.log")
                 ai_process = None
@@ -342,7 +343,7 @@ class LocalAIManager:
                     logger.error(f"llama-server for {model_hash} failed to start on port {llama_server_port}.")
                     if ai_process: ai_process.terminate()
                     continue # Next model
-                
+
                 service_metadata_for_model["pid"] = ai_process.pid
 
                 # Start the FastAPI app for this model
@@ -351,7 +352,7 @@ class LocalAIManager:
                 # The existing /update mechanism seems designed for a single global service.
                 # This will require significant changes to how local_ai.apis:app is structured or configured.
                 # For now, let's assume each FastAPI app can be configured via an /update call on its unique port.
-                
+
                 uvicorn_command = [
                     "uvicorn", "local_ai.apis:app", "--host", host,
                     "--port", str(app_port_for_this_model), "--log-level", "info"
@@ -375,9 +376,9 @@ class LocalAIManager:
                     if ai_process: ai_process.terminate()
                     if apis_process: apis_process.terminate()
                     continue # Next model
-                
+
                 service_metadata_for_model["app_pid"] = apis_process.pid
-                
+
                 # Update this specific FastAPI app instance
                 try:
                     update_url = f"http://localhost:{app_port_for_this_model}/update"
@@ -403,7 +404,7 @@ class LocalAIManager:
                 logger.error(f"Service start error for hash {model_hash}: {str(e)}")
             except Exception as e:
                 logger.error(f"Unexpected error starting service for hash {model_hash}: {str(e)}", exc_info=True)
-        
+
         if models_started_successfully > 0:
             self._dump_running_service() # Save all successfully started models
             return True
@@ -441,7 +442,7 @@ class LocalAIManager:
                             # If it's the old single model format, we might try to adapt it or log a warning.
                             # For now, assume it's new format or invalid.
                             logger.warning("Pickle file data is not in the expected multi-model format. Ignoring.")
-                            self.loaded_models = {} 
+                            self.loaded_models = {}
                 except Exception as e:
                     logger.error(f"Error loading pickle in get_running_model: {e}")
                     self.loaded_models = {} # Ensure it's a dict
@@ -568,7 +569,7 @@ class LocalAIManager:
                                     except (psutil.NoSuchProcess, psutil.AccessDenied): pass
                             except (psutil.NoSuchProcess, psutil.AccessDenied) as e_ind:
                                 logger.warning(f"Could not terminate {process_name} (PID: {current_pid}): {e_ind}")
-                                return True 
+                                return True
 
                         start_time = time.time()
                         poll_interval = 0.1
@@ -642,7 +643,7 @@ class LocalAIManager:
                 logger.error(f"Failed to completely stop service for model '{model_name}' (Hash: {model_hash}). AI stopped: {ai_stopped}, API stopped: {api_stopped}")
             else:
                 logger.info(f"Service for model '{model_name}' (Hash: {model_hash}) stopped.")
-        
+
         # After attempting to stop all, clear internal state and pickle file
         self.loaded_models.clear()
         pickle_removed = True
@@ -654,7 +655,7 @@ class LocalAIManager:
                 logger.error(f"Error removing pickle file after stopping all services: {str(e)}")
                 pickle_removed = False
                 all_stopped_successfully = False # Consider this a failure in cleanup
-        
+
         # The port freeing check from original code can be complex with multiple ports.
         # For now, assume OS handles port freeing adequately once processes are terminated.
         # A more robust check could be added later if needed.

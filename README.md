@@ -83,12 +83,6 @@ We've prepared several models for you to test with. Each model is listed with it
 - CID: `bafkreiclwlxc56ppozipczuwkmgnlrxrerrvaubc5uhvfs3g2hp3lftrwm`
 - Command: `local-ai start --hash bafkreiclwlxc56ppozipczuwkmgnlrxrerrvaubc5uhvfs3g2hp3lftrwm`
 
-**Qwen3-30B-A3B-Q8**
-- Size: 31 GB
-- RAM Required: 37.35 GB
-- CID: `bafkreieroiopteqmtbjadlnpq3qkakdu7omvtuavs2l2qbu46ijnfdo2ly`
-- Command: `local-ai start --hash bafkreieroiopteqmtbjadlnpq3qkakdu7omvtuavs2l2qbu46ijnfdo2ly`
-
 #### 👁️ Gemma3 Series (Vision Support)
 [Learn more about Gemma3](https://deepmind.google/models/gemma/gemma-3/)
 

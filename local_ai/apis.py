@@ -17,7 +17,6 @@ import requests
 import psutil
 from pathlib import Path
 from typing import Dict, Any
-from local_ai.utils import wait_for_health
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
@@ -40,7 +39,7 @@ app = FastAPI()
 # Constants for dynamic unload feature - Optimized for performance
 IDLE_TIMEOUT = 600  # 10 minutes in seconds
 UNLOAD_CHECK_INTERVAL = 30  # Check every 30 seconds (reduced from 60)
-SERVICE_START_TIMEOUT = 120  # Reduced timeout for faster failure detection
+SERVICE_START_TIMEOUT = 45  # Reduced timeout for faster failure detection
 POOL_CONNECTIONS = 50  # Further optimized for better resource usage
 POOL_KEEPALIVE = 10  # Reduced keepalive to free connections faster
 HTTP_TIMEOUT = 180.0  # Reduced timeout for faster failure detection
