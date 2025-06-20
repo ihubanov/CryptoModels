@@ -193,8 +193,10 @@ class LocalAIManager:
                     logger.error(f"Error saving metadata file: {e}")
 
             ## Make sure the machine has enough free RAM memory before starting the service
-            if service_metadata["ram"] > psutil.virtual_memory().available:
-                logger.error(f"Not enough free RAM memory to start the service. Required: {service_metadata['ram']}GB, Available: {psutil.virtual_memory().available}GB")
+            free_ram_in_gb = psutil.virtual_memory().available / (1024 * 1024 * 1024)
+            logger.info(f"Free RAM: {free_ram_in_gb} GB")
+            if service_metadata["ram"] > free_ram_in_gb:
+                logger.error(f"Not enough free RAM memory to start the service. Required: {service_metadata['ram']}GB, Available: {free_ram_in_gb}GB")
                 return False
             
 
