@@ -13,10 +13,10 @@ import json
 import uuid
 import subprocess
 import signal
-import requests
 import psutil
 from pathlib import Path
-from typing import Dict, Any
+from json_repair import repair_json
+from typing import Dict, Any, Optional
 from local_ai.utils import wait_for_health
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -28,7 +28,11 @@ from local_ai.schema import (
     ChatCompletionRequest,
     ChatCompletionResponse,
     EmbeddingRequest,
-    EmbeddingResponse
+    EmbeddingResponse,
+    ChatCompletionChunk,
+    ChoiceDeltaFunctionCall,
+    ChoiceDeltaToolCall,
+    ChatCompletionResponse
 )
 
 # Set up logging with both console and file output
@@ -421,6 +425,58 @@ class ServiceHandler:
     @staticmethod
     async def _stream_generator(port: int, data: Dict[str, Any]):
         """Generator for streaming responses from the service."""
+        buffer = ""
+        tool_calls = {}
+
+        def _extract_json_data(line: str) -> Optional[str]:
+            """Extract JSON data from SSE line, return None if not valid data."""
+            line = line.strip()
+            if not line or line.startswith(': ping'):
+                return None
+            if line.startswith('data: '):
+                return line[6:].strip()
+            return None
+        
+        def _process_tool_call_delta(delta_tool_call, tool_calls: dict):
+            """Process tool call delta and update tool_calls dict."""
+            tool_call_index = str(delta_tool_call.index)
+            if tool_call_index not in tool_calls:
+                tool_calls[tool_call_index] = {"arguments": ""}
+            
+            if delta_tool_call.id is not None:
+                tool_calls[tool_call_index]["id"] = delta_tool_call.id
+                
+            function = delta_tool_call.function
+            if function.name is not None:
+                tool_calls[tool_call_index]["name"] = function.name
+            if function.arguments is not None:
+                tool_calls[tool_call_index]["arguments"] += function.arguments
+
+        def _create_tool_call_chunk(tool_calls: dict, chunk_obj) -> str:
+            """Create tool call chunks for final output."""
+            chunk_obj_copy = chunk_obj.copy()
+            result_chunks = []
+            
+            for tool_call_index, tool_call in tool_calls.items():
+                try:
+                    tool_call_obj = json.loads(repair_json(json.dumps(tool_call)))
+                    function_call = ChoiceDeltaFunctionCall(
+                        name=tool_call_obj["name"],
+                        arguments=tool_call_obj["arguments"]
+                    )
+                    delta_tool_call = ChoiceDeltaToolCall(
+                        index=int(tool_call_index),
+                        id=tool_call_obj["id"],
+                        function=function_call,
+                        type="function"
+                    )
+                    chunk_obj_copy.choices[0].delta.content = None
+                    chunk_obj_copy.choices[0].delta.tool_calls = [delta_tool_call]  
+                    result_chunks.append(f"data: {chunk_obj_copy.json()}\n\n")
+                except Exception as e:
+                    logger.error(f"Failed to create tool call chunk: {e}")
+            
+            return "".join(result_chunks)
         try:
             async with app.state.client.stream(
                 "POST", 
@@ -435,26 +491,59 @@ class ServiceHandler:
                     yield error_msg
                     return
                 
-                buffer = bytearray()  # Use bytearray for more efficient byte operations
-                async for chunk in response.aiter_bytes(chunk_size=STREAM_CHUNK_SIZE):
-                    buffer.extend(chunk)
+                async for chunk in response.aiter_bytes():
+                    buffer += chunk.decode('utf-8', errors='replace')
                     
-                    # Process complete lines
-                    while b'\n' in buffer:
-                        line_bytes, buffer = buffer.split(b'\n', 1)
-                        line = line_bytes.decode('utf-8')
-                        if line.strip():
-                            yield f"{line}\n\n"
-                
-                # Process any remaining data in the buffer
-                if buffer:
-                    remaining = buffer.decode('utf-8').strip()
-                    if remaining:
-                        yield f"{remaining}\n\n"
-                    
+                    # Process complete lines    
+                    while '\n' in buffer:
+                        line, buffer = buffer.split('\n', 1)
+                        json_str = _extract_json_data(line)
+                        
+                        if json_str is None:
+                            continue
+                            
+                        if json_str == '[DONE]':
+                            yield 'data: [DONE]\n\n'
+                            continue
+                        
+                        try:
+                            chunk_obj = ChatCompletionChunk.parse_raw(json_str)
+                            choice = chunk_obj.choices[0]
+                            
+                            # Handle finish reason - output accumulated tool calls
+                            if choice.finish_reason and tool_calls:
+                                tool_call_chunks = _create_tool_call_chunk(tool_calls, chunk_obj)
+                                yield tool_call_chunks
+                            
+                            # Handle tool call deltas
+                            if choice.delta.tool_calls:
+                                _process_tool_call_delta(choice.delta.tool_calls[0], tool_calls)
+                            else:
+                                # Regular content chunk
+                                yield f"data: {chunk_obj.json()}\n\n"
+                                    
+                        except Exception as e:
+                            logger.error(f"Failed to parse streaming chunk: {e}")
+                            # Pass through unparseable data (except ping messages)
+                            if not line.strip().startswith(': ping'):
+                                yield f"data: {line}\n\n"
+                            
+                # Process any remaining buffer content
+                if buffer.strip():
+                    json_str = _extract_json_data(buffer)
+                    if json_str and json_str != '[DONE]':
+                        try:
+                            chunk_obj = ChatCompletionChunk.parse_raw(json_str)
+                            yield f"data: {chunk_obj.json()}\n\n"
+                        except Exception as e:
+                            logger.error(f"Failed to parse trailing chunk: {e}")
+                    elif json_str == '[DONE]':
+                        yield 'data: [DONE]\n\n'
+                            
         except Exception as e:
-            logger.error(f"Error during streaming: {e}")
+            logger.error(f"Streaming error: {e}")
             yield f"data: {{\"error\":{{\"message\":\"{str(e)}\",\"code\":500}}}}\n\n"
+
 
 # Request Processor
 class RequestProcessor:
