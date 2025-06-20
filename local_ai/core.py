@@ -9,11 +9,9 @@ import socket
 import requests
 import subprocess
 import pkg_resources
-import fcntl
 from pathlib import Path
 from loguru import logger
 from typing import Optional, Dict, Any
-from contextlib import contextmanager
 from local_ai.utils import wait_for_health
 from local_ai.download import download_model_from_filecoin_async
 
@@ -29,111 +27,18 @@ class ModelNotFoundError(LocalAIServiceError):
     """Exception raised when model file is not found."""
     pass
 
-class ServiceAlreadyStartingError(LocalAIServiceError):
-    """Exception raised when another service start process is already in progress."""
-    pass
-
 class LocalAIManager:
     """Manages a local AI service."""
     
     def __init__(self):
         """Initialize the LocalAIManager."""       
         self.pickle_file = Path(os.getenv("RUNNING_SERVICE_FILE", "running_service.pkl"))
-        self.start_lock_file = Path(os.getenv("START_LOCK_FILE", "local_ai_start.lock"))
         self.loaded_models: Dict[str, Any] = {}
         self.llama_server_path = os.getenv("LLAMA_SERVER")
         if not self.llama_server_path or not os.path.exists(self.llama_server_path):
             raise LocalAIServiceError("llama-server executable not found in LLAMA_SERVER or PATH")
-        self._current_lock_fd = None  # Track the current lock file descriptor
+        self.start_lock_file = Path(os.getenv("START_LOCK_FILE", "start_lock.lock"))
         
-    def _release_start_lock(self):
-        """Explicitly release the start lock file."""
-        try:
-            if self._current_lock_fd is not None:
-                try:
-                    os.close(self._current_lock_fd)
-                    self._current_lock_fd = None
-                except OSError:
-                    pass
-            
-            if self.start_lock_file.exists():
-                os.remove(self.start_lock_file)
-                logger.debug("Released start process lock")
-        except OSError as e:
-            logger.warning(f"Failed to release start lock: {e}")
-    
-    def clear_stale_start_lock(self):
-        """Clear stale start lock if the process holding it is no longer running."""
-        if not self.start_lock_file.exists():
-            return True
-            
-        try:
-            with open(self.start_lock_file, 'r') as f:
-                lock_pid = f.read().strip()
-            
-            if lock_pid.isdigit() and psutil.pid_exists(int(lock_pid)):
-                logger.info(f"Start lock is held by active process (PID: {lock_pid})")
-                return False
-            else:
-                logger.info("Removing stale start lock file")
-                os.remove(self.start_lock_file)
-                return True
-        except (OSError, ValueError) as e:
-            logger.warning(f"Error checking stale lock: {e}")
-            try:
-                os.remove(self.start_lock_file)
-                return True
-            except OSError:
-                return False
-        
-    @contextmanager
-    def _start_lock(self):
-        """Context manager for file-based start process lock."""
-        lock_fd = None
-        try:
-            # Create lock file and acquire exclusive lock
-            lock_fd = os.open(self.start_lock_file, os.O_CREAT | os.O_WRONLY | os.O_TRUNC)
-            self._current_lock_fd = lock_fd
-            
-            try:
-                # Try to acquire non-blocking exclusive lock
-                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                current_pid = os.getpid()
-                logger.info(f"Acquired exclusive start process lock (PID: {current_pid})")
-                
-                # Write current process PID to lock file
-                os.write(lock_fd, str(current_pid).encode())
-                os.fsync(lock_fd)
-                
-                yield
-                
-            except BlockingIOError:
-                # Lock is already held by another process
-                logger.info(f"Process {os.getpid()} blocked by existing start lock")
-                try:
-                    # Try to read PID from lock file to provide better error message
-                    with open(self.start_lock_file, 'r') as f:
-                        blocking_pid = f.read().strip()
-                    if blocking_pid.isdigit() and psutil.pid_exists(int(blocking_pid)):
-                        raise ServiceAlreadyStartingError(
-                            f"Another local-ai start process is already running (PID: {blocking_pid}). "
-                            f"Please wait for it to complete or stop it before starting a new service."
-                        )
-                except (OSError, ValueError):
-                    raise ServiceAlreadyStartingError(
-                        "Another local-ai start process appears to be running. "
-                        "Please wait for it to complete before starting a new service."
-                    )
-                    
-        except OSError as e:
-            raise ServiceStartError(f"Failed to create start process lock: {str(e)}")
-            
-        finally:
-            # Don't close the file descriptor here - it should remain open
-            # to keep the lock active until explicitly released
-            # The lock will be released only on successful completion or explicit cleanup
-            pass
-            
     def _get_free_port(self) -> int:
         """Get a free port number."""
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -212,13 +117,64 @@ class LocalAIManager:
             ValueError: If hash is not provided when no model is running.
             ModelNotFoundError: If model file is not found.
             ServiceStartError: If service fails to start.
-            ServiceAlreadyStartingError: If another start process is already running.
         """
         if not hash:
             raise ValueError("Filecoin hash is required to start the service")
 
-        # Use file-based semaphore to ensure only one start process runs at a time
-        with self._start_lock():
+        # Acquire process lock to prevent concurrent starts
+        current_pid = os.getpid()
+        lock_acquired = False
+        
+        try:
+            # Check if lock file exists
+            if self.start_lock_file.exists():
+                try:
+                    with open(self.start_lock_file, "r") as f:
+                        lock_data = json.load(f)
+                    
+                    lock_pid = lock_data.get("pid")
+                    lock_hash = lock_data.get("hash")
+                    lock_timestamp = lock_data.get("timestamp", 0)
+                    
+                    # Check if the locked process is still running
+                    if lock_pid and psutil.pid_exists(lock_pid):
+                        # Check if it's been more than 30 minutes (1800 seconds) since lock was created
+                        if time.time() - lock_timestamp > 1800:
+                            logger.warning(f"Lock file is stale (over 30 minutes old), removing it. Previous PID: {lock_pid}")
+                            self.start_lock_file.unlink()
+                        else:
+                            if lock_pid != current_pid:
+                                logger.error(f"Another process (PID: {lock_pid}) is already starting a service with hash: {lock_hash}")
+                                return False
+                    else:
+                        logger.info(f"Previous lock holder (PID: {lock_pid}) is no longer running, removing stale lock")
+                        self.start_lock_file.unlink()
+                
+                except (json.JSONDecodeError, KeyError, OSError) as e:
+                    logger.warning(f"Invalid or corrupted lock file, removing it: {e}")
+                    try:
+                        self.start_lock_file.unlink()
+                    except OSError:
+                        pass
+            
+            # Create lock file with current process info
+            lock_data = {
+                "pid": current_pid,
+                "hash": hash,
+                "timestamp": time.time(),
+                "host": host,
+                "port": port
+            }
+            
+            try:
+                with open(self.start_lock_file, "w") as f:
+                    json.dump(lock_data, f)
+                lock_acquired = True
+                logger.info(f"Acquired start lock for process {current_pid} with hash: {hash}")
+            except OSError as e:
+                logger.error(f"Failed to create lock file: {e}")
+                return False
+
             # Check if the requested port is available before doing expensive operations
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -241,8 +197,6 @@ class LocalAIManager:
                 if model_running:
                     if model_running == hash:
                         logger.warning(f"Model '{hash}' already running on port {port}")
-                        # Release lock since we're not actually starting anything new
-                        self._release_start_lock()
                         return True
                     logger.info(f"Stopping existing model '{model_running}' on port {port}")
                     self.stop()
@@ -292,6 +246,14 @@ class LocalAIManager:
                         logger.info(f"Saved metadata to {metadata_file}")
                     except Exception as e:
                         logger.error(f"Error saving metadata file: {e}")
+
+                ## Make sure the machine has enough free RAM memory before starting the service
+                free_ram_in_gb = psutil.virtual_memory().available / (1024 * 1024 * 1024)
+                logger.info(f"Free RAM: {free_ram_in_gb} GB")
+                if service_metadata["ram"] > free_ram_in_gb:
+                    logger.error(f"Not enough free RAM memory to start the service. Required: {service_metadata['ram']}GB, Available: {free_ram_in_gb}GB")
+                    return False
+                
 
                 if "gemma" in folder_name.lower():
                     template_path, best_practice_path = self._get_family_template_and_practice("gemma")
@@ -403,18 +365,33 @@ class LocalAIManager:
                     self.stop()
                     return False
                 
-                # Release the lock only on successful completion
-                self._release_start_lock()
                 return True
 
             except Exception as e:
                 logger.error(f"Error starting AI service: {str(e)}", exc_info=True)
-                # Don't release the lock on failure - let it persist to prevent concurrent starts
-                # unless it's a critical error where we should clean up
-                if isinstance(e, (KeyboardInterrupt, SystemExit)):
-                    logger.info("Cleaning up lock due to process interruption")
-                    self._release_start_lock()
                 return False
+                
+        finally:
+            # Always remove the lock when done (success or failure)
+            if lock_acquired and self.start_lock_file.exists():
+                try:
+                    # Verify we're removing our own lock
+                    with open(self.start_lock_file, "r") as f:
+                        lock_data = json.load(f)
+                    
+                    if lock_data.get("pid") == current_pid:
+                        self.start_lock_file.unlink()
+                        logger.info(f"Released start lock for process {current_pid}")
+                    else:
+                        logger.warning(f"Lock file PID mismatch, not removing lock. Expected: {current_pid}, Found: {lock_data.get('pid')}")
+                        
+                except (json.JSONDecodeError, KeyError, OSError) as e:
+                    logger.warning(f"Error while releasing lock: {e}")
+                    try:
+                        self.start_lock_file.unlink()
+                        logger.info("Removed potentially corrupted lock file")
+                    except OSError:
+                        pass
 
     def _dump_running_service(self, metadata: dict):
         """Dump the running service details to a file."""
