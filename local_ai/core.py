@@ -44,6 +44,47 @@ class LocalAIManager:
         self.llama_server_path = os.getenv("LLAMA_SERVER")
         if not self.llama_server_path or not os.path.exists(self.llama_server_path):
             raise LocalAIServiceError("llama-server executable not found in LLAMA_SERVER or PATH")
+        self._current_lock_fd = None  # Track the current lock file descriptor
+        
+    def _release_start_lock(self):
+        """Explicitly release the start lock file."""
+        try:
+            if self._current_lock_fd is not None:
+                try:
+                    os.close(self._current_lock_fd)
+                    self._current_lock_fd = None
+                except OSError:
+                    pass
+            
+            if self.start_lock_file.exists():
+                os.remove(self.start_lock_file)
+                logger.debug("Released start process lock")
+        except OSError as e:
+            logger.warning(f"Failed to release start lock: {e}")
+    
+    def clear_stale_start_lock(self):
+        """Clear stale start lock if the process holding it is no longer running."""
+        if not self.start_lock_file.exists():
+            return True
+            
+        try:
+            with open(self.start_lock_file, 'r') as f:
+                lock_pid = f.read().strip()
+            
+            if lock_pid.isdigit() and psutil.pid_exists(int(lock_pid)):
+                logger.info(f"Start lock is held by active process (PID: {lock_pid})")
+                return False
+            else:
+                logger.info("Removing stale start lock file")
+                os.remove(self.start_lock_file)
+                return True
+        except (OSError, ValueError) as e:
+            logger.warning(f"Error checking stale lock: {e}")
+            try:
+                os.remove(self.start_lock_file)
+                return True
+            except OSError:
+                return False
         
     @contextmanager
     def _start_lock(self):
@@ -52,6 +93,7 @@ class LocalAIManager:
         try:
             # Create lock file and acquire exclusive lock
             lock_fd = os.open(self.start_lock_file, os.O_CREAT | os.O_WRONLY | os.O_TRUNC)
+            self._current_lock_fd = lock_fd
             
             try:
                 # Try to acquire non-blocking exclusive lock
@@ -78,8 +120,13 @@ class LocalAIManager:
                     else:
                         # Stale lock file, remove it and try again
                         logger.warning("Found stale lock file, removing it")
-                        os.close(lock_fd)
+                        if lock_fd is not None:
+                            try:
+                                os.close(lock_fd)
+                            except OSError:
+                                pass
                         lock_fd = None
+                        self._current_lock_fd = None
                         try:
                             os.remove(self.start_lock_file)
                         except OSError:
@@ -97,20 +144,14 @@ class LocalAIManager:
             raise ServiceStartError(f"Failed to create start process lock: {str(e)}")
             
         finally:
-            # Clean up lock file and close file descriptor
-            if lock_fd is not None:
+            # Only close the file descriptor but don't remove the lock file
+            # The lock file will be removed explicitly only on successful completion
+            if lock_fd is not None and lock_fd != self._current_lock_fd:
                 try:
                     os.close(lock_fd)
                 except OSError:
                     pass
             
-            try:
-                if self.start_lock_file.exists():
-                    os.remove(self.start_lock_file)
-                    logger.debug("Released start process lock")
-            except OSError:
-                pass
-                
     def _get_free_port(self) -> int:
         """Get a free port number."""
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -218,6 +259,8 @@ class LocalAIManager:
                 if model_running:
                     if model_running == hash:
                         logger.warning(f"Model '{hash}' already running on port {port}")
+                        # Release lock since we're not actually starting anything new
+                        self._release_start_lock()
                         return True
                     logger.info(f"Stopping existing model '{model_running}' on port {port}")
                     self.stop()
@@ -378,10 +421,13 @@ class LocalAIManager:
                     self.stop()
                     return False
                 
+                # Release the lock only on successful completion
+                self._release_start_lock()
                 return True
 
             except Exception as e:
                 logger.error(f"Error starting AI service: {str(e)}", exc_info=True)
+                # Don't release the lock on failure - let it persist to prevent concurrent starts
                 return False
 
     def _dump_running_service(self, metadata: dict):
