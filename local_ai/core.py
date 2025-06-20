@@ -98,16 +98,18 @@ class LocalAIManager:
             try:
                 # Try to acquire non-blocking exclusive lock
                 fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                logger.debug("Acquired start process lock")
+                current_pid = os.getpid()
+                logger.info(f"Acquired exclusive start process lock (PID: {current_pid})")
                 
                 # Write current process PID to lock file
-                os.write(lock_fd, str(os.getpid()).encode())
+                os.write(lock_fd, str(current_pid).encode())
                 os.fsync(lock_fd)
                 
                 yield
                 
             except BlockingIOError:
                 # Lock is already held by another process
+                logger.info(f"Process {os.getpid()} blocked by existing start lock")
                 try:
                     # Try to read PID from lock file to provide better error message
                     with open(self.start_lock_file, 'r') as f:
@@ -120,13 +122,16 @@ class LocalAIManager:
                     else:
                         # Stale lock file, remove it and try again
                         logger.warning("Found stale lock file, removing it")
+                        # Close our current attempt's file descriptor
                         if lock_fd is not None:
                             try:
                                 os.close(lock_fd)
                             except OSError:
                                 pass
+                        # Reset tracking variables
                         lock_fd = None
                         self._current_lock_fd = None
+                        # Remove the stale lock file
                         try:
                             os.remove(self.start_lock_file)
                         except OSError:
@@ -144,13 +149,10 @@ class LocalAIManager:
             raise ServiceStartError(f"Failed to create start process lock: {str(e)}")
             
         finally:
-            # Only close the file descriptor but don't remove the lock file
-            # The lock file will be removed explicitly only on successful completion
-            if lock_fd is not None and lock_fd != self._current_lock_fd:
-                try:
-                    os.close(lock_fd)
-                except OSError:
-                    pass
+            # Don't close the file descriptor here - it should remain open
+            # to keep the lock active until explicitly released
+            # The lock will be released only on successful completion or explicit cleanup
+            pass
             
     def _get_free_port(self) -> int:
         """Get a free port number."""
@@ -428,6 +430,10 @@ class LocalAIManager:
             except Exception as e:
                 logger.error(f"Error starting AI service: {str(e)}", exc_info=True)
                 # Don't release the lock on failure - let it persist to prevent concurrent starts
+                # unless it's a critical error where we should clean up
+                if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                    logger.info("Cleaning up lock due to process interruption")
+                    self._release_start_lock()
                 return False
 
     def _dump_running_service(self, metadata: dict):
