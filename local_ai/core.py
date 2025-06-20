@@ -229,7 +229,6 @@ class LocalAIManager:
                             metadata = json.load(f)
                             service_metadata["family"] = metadata.get("family", "")
                             folder_name = metadata.get("folder_name", "")
-                            service_metadata["ram"] = metadata.get("ram", 20)
                             logger.info(f"Loaded metadata from {metadata_file}")
                     except Exception as e:
                         logger.error(f"Error loading metadata file: {e}")
@@ -239,21 +238,12 @@ class LocalAIManager:
                     response_json = self._retry_request_json(filecoin_url, retries=3, delay=5, timeout=10)
                     folder_name = response_json.get("folder_name", "")
                     service_metadata["family"] = response_json.get("family", "")
-                    service_metadata["ram"] = response_json.get("ram", 20)
                     try:
                         with open(metadata_file, "w") as f:
                             json.dump(response_json, f)
                         logger.info(f"Saved metadata to {metadata_file}")
                     except Exception as e:
                         logger.error(f"Error saving metadata file: {e}")
-
-                ## Make sure the machine has enough free RAM memory before starting the service
-                free_ram_in_gb = psutil.virtual_memory().available / (1024 * 1024 * 1024)
-                logger.info(f"Free RAM: {free_ram_in_gb} GB")
-                if service_metadata["ram"] > free_ram_in_gb:
-                    logger.error(f"Not enough free RAM memory to start the service. Required: {service_metadata['ram']}GB, Available: {free_ram_in_gb}GB")
-                    return False
-                
 
                 if "gemma" in folder_name.lower():
                     template_path, best_practice_path = self._get_family_template_and_practice("gemma")
