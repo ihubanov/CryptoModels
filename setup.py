@@ -26,7 +26,8 @@ setup(
         "setuptools>=65.0.0",
         "pydantic>=1.9.0",
         "pillow>=9.0.0",
-        "asyncio>=3.4.3"
+        "asyncio>=3.4.3",
+        "json_repair"
     ],
     entry_points={
         "console_scripts": [
