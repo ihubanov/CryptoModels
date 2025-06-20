@@ -119,26 +119,6 @@ class LocalAIManager:
                             f"Another local-ai start process is already running (PID: {blocking_pid}). "
                             f"Please wait for it to complete or stop it before starting a new service."
                         )
-                    else:
-                        # Stale lock file, remove it and try again
-                        logger.warning("Found stale lock file, removing it")
-                        # Close our current attempt's file descriptor
-                        if lock_fd is not None:
-                            try:
-                                os.close(lock_fd)
-                            except OSError:
-                                pass
-                        # Reset tracking variables
-                        lock_fd = None
-                        self._current_lock_fd = None
-                        # Remove the stale lock file
-                        try:
-                            os.remove(self.start_lock_file)
-                        except OSError:
-                            pass
-                        raise ServiceAlreadyStartingError(
-                            "A stale start process lock was found and removed. Please try again."
-                        )
                 except (OSError, ValueError):
                     raise ServiceAlreadyStartingError(
                         "Another local-ai start process appears to be running. "
