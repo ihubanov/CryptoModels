@@ -721,3 +721,23 @@ async def v1_embeddings(request: EmbeddingRequest):
     """Endpoint for embedding requests (v1 API)."""
     request_dict = convert_request_to_dict(request)
     return await RequestProcessor.process_request("/v1/embeddings", request_dict)
+
+@app.get("/v1/models")
+async def list_models():
+    """Return a list of loaded models in OpenAI format."""
+    # Ensure loaded_models is present in app state
+    if not hasattr(app.state, "loaded_models"):
+        app.state.loaded_models = {}
+    models = []
+    for model_hash, model_info in app.state.loaded_models.items():
+        # Use folder_name as id, fallback to hash
+        model_id = model_info.get("folder_name") or model_hash
+        models.append({
+            "id": model_id,
+            "object": "model",
+            "hash": model_hash,
+            "folder_name": model_info.get("folder_name", ""),
+            "status": model_info.get("status", "unknown"),
+        })
+    logger.info(f"[DEBUG] /v1/models returning {len(models)} models: {[m['id'] for m in models]}")
+    return {"object": "list", "data": models}

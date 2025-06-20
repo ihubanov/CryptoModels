@@ -134,91 +134,85 @@ class LocalAIManager:
                     backoff_delay = min(backoff_delay * 1.5, 8)  # Exponential backoff with cap
         return None
 
-    def start(self, hash: str, port: int = 11434, host: str = "0.0.0.0", context_length: int = 32768) -> bool:
+    def start(self, hashes, port: int = 11434, host: str = "0.0.0.0", context_length: int = 32768) -> bool:
         """
-        Start the local AI service in the background.
+        Start multiple local AI services in the background, one for each hash.
+        Downloads models sequentially, then loads each in a thread.
 
         Args:
-            hash (str): Filecoin hash of the model to download and run.
+            hashes (list[str] or str): One or more Filecoin hashes of the models to download and run.
             port (int): Port number for the AI service (default: 11434).
             host (str): Host address for the AI service (default: "0.0.0.0").
             context_length (int): Context length for the model (default: 32768).
 
         Returns:
-            bool: True if service started successfully, False otherwise.
+            bool: True if all services started successfully, False otherwise.
 
         Raises:
-            ValueError: If hash is not provided when no model is running.
-            ModelNotFoundError: If model file is not found.
-            ServiceStartError: If service fails to start.
+            ValueError: If no hash is provided.
+            ModelNotFoundError: If a model file is not found.
+            ServiceStartError: If a service fails to start.
+
+        Notes:
+            - Models are downloaded sequentially to avoid bandwidth contention.
+            - Each model is loaded in a background thread after download.
+            - Loaded models are tracked in self.loaded_models and app.state.loaded_models.
+            - This method is compatible with the CLI accepting multiple --hash arguments.
         """
-        if not hash:
-            raise ValueError("Filecoin hash is required to start the service")
-
-        try:
-            logger.info(f"Starting local AI service for model with hash: {hash}")
-            
-            local_model_path = asyncio.run(download_model_from_filecoin_async(hash))
+        import threading
+        if not isinstance(hashes, list):
+            hashes = [hashes]
+        self.loaded_models = {}
+        threads = []
+        for idx, hash in enumerate(hashes):
+            logger.info(f"[DEBUG] Preparing model {hash} (index {idx})...")
+            # Download sequentially
+            try:
+                local_model_path = asyncio.run(download_model_from_filecoin_async(hash))
+            except Exception as e:
+                logger.error(f"[DEBUG] Failed to download model {hash}: {e}")
+                continue
+            if not local_model_path or not os.path.exists(local_model_path):
+                logger.error(f"[DEBUG] Model file not found after download: {local_model_path}")
+                continue
+            # Prepare metadata for this model
             local_projector_path = local_model_path + "-projector"
-            model_running = self.get_running_model()
-            local_ai_port = self._get_free_port()
-            if model_running:
-                if model_running == hash:
-                    logger.warning(f"Model '{hash}' already running on port {port}")
-                    return True
-                logger.info(f"Stopping existing model '{model_running}' on port {port}")
-                self.stop()
-
-            if not os.path.exists(local_model_path):
-                raise ModelNotFoundError(f"Model file not found at: {local_model_path}")
-
-            service_metadata = {
-                "hash": hash,
-                "port": local_ai_port,  # Local AI server port
-                "local_text_path": local_model_path,
-                "app_port": port,  # FastAPI port
-                "context_length": context_length,
-                "last_activity": time.time(),
-                "multimodal": os.path.exists(local_projector_path),
-                "local_projector_path": local_projector_path if os.path.exists(local_projector_path) else None
-            }
-
-            # Get the directory of the model file
             model_dir = os.path.dirname(local_model_path)
             metadata_file = os.path.join(model_dir, f"{hash}.json")
-
-            logger.info(f"metadata_file: {metadata_file}")
             folder_name = ""
-
-            # Check if metadata file exists
+            family = ""
             if os.path.exists(metadata_file):
                 try:
                     with open(metadata_file, "r") as f:
                         metadata = json.load(f)
-                        service_metadata["family"] = metadata.get("family", "")
+                        family = metadata.get("family", "")
                         folder_name = metadata.get("folder_name", "")
                         logger.info(f"Loaded metadata from {metadata_file}")
                 except Exception as e:
-                    logger.error(f"Error loading metadata file: {e}")
-                    metadata_file = None
+                    logger.error(f"[DEBUG] Error loading metadata file for {hash}: {e}")
             else:
                 filecoin_url = f"https://gateway.lighthouse.storage/ipfs/{hash}"
                 response_json = self._retry_request_json(filecoin_url, retries=3, delay=5, timeout=10)
-                folder_name = response_json.get("folder_name", "")
-                service_metadata["family"] = response_json.get("family", "")
-                try:
-                    with open(metadata_file, "w") as f:
-                        json.dump(response_json, f)
-                    logger.info(f"Saved metadata to {metadata_file}")
-                except Exception as e:
-                    logger.error(f"Error saving metadata file: {e}")
-
+                if response_json:
+                    folder_name = response_json.get("folder_name", "")
+                    family = response_json.get("family", "")
+                    try:
+                        with open(metadata_file, "w") as f:
+                            json.dump(response_json, f)
+                        logger.info(f"Saved metadata to {metadata_file}")
+                    except Exception as e:
+                        logger.error(f"[DEBUG] Error saving metadata file for {hash}: {e}")
+                else:
+                    logger.error(f"[DEBUG] Could not fetch metadata for {hash}")
+                    folder_name = ""
+                    family = ""
+            local_ai_port = self._get_free_port()
+            # Prepare command
             if "gemma" in folder_name.lower():
                 template_path, best_practice_path = self._get_family_template_and_practice("gemma")
-                # Gemma models are memory intensive, so we reduce the context length
-                context_length = context_length // 2
+                model_context_length = context_length // 2
                 running_ai_command = self._build_ai_command(
-                    local_model_path, local_ai_port, host, context_length, template_path
+                    local_model_path, local_ai_port, host, model_context_length, template_path
                 )
             elif "qwen25" in folder_name.lower():
                 template_path, best_practice_path = self._get_family_template_and_practice("qwen25")
@@ -239,94 +233,61 @@ class LocalAIManager:
                 running_ai_command = self._build_ai_command(
                     local_model_path, local_ai_port, host, context_length
                 )
+            if os.path.exists(local_projector_path):
+                running_ai_command.extend(["--mmproj", str(local_projector_path)])
+            # Thread target for loading model
+            def load_model_thread(command, model_hash, model_folder_name, model_family, model_port):
+                logger.info(f"[DEBUG] Loading model {model_hash} on port {model_port}...")
+                os.makedirs("logs", exist_ok=True)
+                ai_log_stderr = Path(f"logs/ai_{model_hash}.log")
+                try:
+                    with open(ai_log_stderr, 'w') as stderr_log:
+                        ai_process = subprocess.Popen(
+                            command,
+                            stderr=stderr_log,
+                            preexec_fn=os.setsid
+                        )
+                    logger.info(f"[DEBUG] AI logs for {model_hash} written to {ai_log_stderr}")
+                    # Wait for service to be healthy
+                    if not self._wait_for_service(model_port):
+                        logger.error(f"[DEBUG] Service for {model_hash} failed to start")
+                        return
+                    logger.info(f"[DEBUG] Model {model_hash} loaded and healthy on port {model_port}")
+                    # Store model info
+                    self.loaded_models[model_hash] = {
+                        "hash": model_hash,
+                        "folder_name": model_folder_name,
+                        "family": model_family,
+                        "port": model_port,
+                        "pid": ai_process.pid,
+                        "status": "loaded",
+                        "command": command,
+                    }
+                    # Update FastAPI app state if possible
+                    try:
+                        from local_ai import apis
+                        if hasattr(apis, 'app'):
+                            apis.app.state.loaded_models = self.loaded_models
+                            logger.info(f"[DEBUG] Updated FastAPI app.state.loaded_models")
+                    except Exception as e:
+                        logger.error(f"[DEBUG] Could not update FastAPI app state: {e}")
+                except Exception as e:
+                    logger.error(f"[DEBUG] Error loading model {model_hash}: {e}")
+            # Start thread for loading
+            t = threading.Thread(
+                target=load_model_thread,
+                args=(running_ai_command, hash, folder_name, family, local_ai_port),
+                daemon=True
+            )
+            threads.append(t)
+            t.start()
+            logger.info(f"[DEBUG] Started loading thread for model {hash}")
+        # Wait for all threads to finish
+        for t in threads:
+            t.join()
+        logger.info(f"[DEBUG] All models loaded: {list(self.loaded_models.keys())}")
+        return True
 
-            if service_metadata["multimodal"]:
-                running_ai_command.extend([
-                    "--mmproj", str(local_projector_path)
-                ])
-
-            logger.info(f"Starting process: {' '.join(running_ai_command)}")
-            service_metadata["running_ai_command"] = running_ai_command
-            # Create log files for stdout and stderr for AI process
-            os.makedirs("logs", exist_ok=True)
-            ai_log_stderr = Path(f"logs/ai.log")
-            ai_process = None
-            try:
-                with open(ai_log_stderr, 'w') as stderr_log:
-                    ai_process = subprocess.Popen(
-                        running_ai_command,
-                        stderr=stderr_log,
-                        preexec_fn=os.setsid
-                    )
-                logger.info(f"AI logs written to {ai_log_stderr}")
-            except Exception as e:
-                logger.error(f"Error starting AI service: {str(e)}", exc_info=True)
-                return False
-    
-            if not self._wait_for_service(local_ai_port):
-                logger.error(f"Service failed to start within 600 seconds")
-                ai_process.terminate()
-                return False
-
-            # start the FastAPI app in the background           
-            uvicorn_command = [
-                "uvicorn",
-                "local_ai.apis:app",
-                "--host", host,
-                "--port", str(port),
-                "--log-level", "info"
-            ]
-            logger.info(f"Starting process: {' '.join(uvicorn_command)}")
-            # Create log files for stdout and stderr
-            os.makedirs("logs", exist_ok=True)
-            api_log_stderr = Path(f"logs/api.log")
-            try:
-                with open(api_log_stderr, 'w') as stderr_log:
-                    apis_process = subprocess.Popen(
-                        uvicorn_command,
-                        stderr=stderr_log,
-                        preexec_fn=os.setsid
-                    )
-                logger.info(f"API logs written to {api_log_stderr}")
-            except Exception as e:
-                logger.error(f"Error starting FastAPI app: {str(e)}", exc_info=True)
-                ai_process.terminate()
-                return False
-            
-            if not self._wait_for_service(port):
-                logger.error(f"API service failed to start within 600 seconds")
-                ai_process.terminate()
-                apis_process.terminate()
-                return False
-
-            logger.info(f"Service started on port {port} for model: {hash}")
-
-            service_metadata["pid"] = ai_process.pid
-            service_metadata["app_pid"] = apis_process.pid
-            projector_path = f"{local_model_path}-projector"    
-            if os.path.exists(projector_path):
-                service_metadata["multimodal"] = True
-                service_metadata["local_projector_path"] = projector_path
-
-            self._dump_running_service(service_metadata)    
-
-            # update service metadata to the FastAPI app
-            try:
-                update_url = f"http://localhost:{port}/update"
-                response = requests.post(update_url, json=service_metadata, timeout=10)
-                response.raise_for_status()  # Raise exception for HTTP error responses
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Failed to update service metadata: {str(e)}")
-                # Stop the partially started service
-                self.stop()
-                return False
-            
-            return True
-
-        except Exception as e:
-            logger.error(f"Error starting AI service: {str(e)}", exc_info=True)
-            return False
-        
     def _dump_running_service(self, metadata: dict):
         """Dump the running service details to a file."""
         try:
