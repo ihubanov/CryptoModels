@@ -427,7 +427,7 @@ class ServiceHandler:
         """Generator for streaming responses from the service."""
         buffer = ""
         tool_calls = {}
-
+        
         def _extract_json_data(line: str) -> Optional[str]:
             """Extract JSON data from SSE line, return None if not valid data."""
             line = line.strip()
@@ -451,11 +451,10 @@ class ServiceHandler:
                 tool_calls[tool_call_index]["name"] = function.name
             if function.arguments is not None:
                 tool_calls[tool_call_index]["arguments"] += function.arguments
-
-        def _create_tool_call_chunk(tool_calls: dict, chunk_obj) -> str:
-            """Create tool call chunks for final output."""
+        
+        def _create_tool_call_chunks(tool_calls: dict, chunk_obj):
+            """Create tool call chunks for final output - yields each chunk separately."""
             chunk_obj_copy = chunk_obj.copy()
-            result_chunks = []
             
             for tool_call_index, tool_call in tool_calls.items():
                 try:
@@ -472,11 +471,13 @@ class ServiceHandler:
                     )
                     chunk_obj_copy.choices[0].delta.content = None
                     chunk_obj_copy.choices[0].delta.tool_calls = [delta_tool_call]  
-                    result_chunks.append(f"data: {chunk_obj_copy.json()}\n\n")
+                    chunk_obj_copy.choices[0].finish_reason = "tool_calls"
+                    yield f"data: {chunk_obj_copy.json()}\n\n"
                 except Exception as e:
                     logger.error(f"Failed to create tool call chunk: {e}")
-            
-            return "".join(result_chunks)
+                    chunk_obj_copy.choices[0].delta.content = None
+                    chunk_obj_copy.choices[0].delta.tool_calls = []
+                    yield f"data: {chunk_obj_copy.json()}\n\n"
         try:
             async with app.state.client.stream(
                 "POST", 
