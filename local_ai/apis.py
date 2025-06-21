@@ -513,7 +513,7 @@ class ServiceHandler:
                             
                             # Handle finish reason - output accumulated tool calls
                             if choice.finish_reason and tool_calls:
-                                tool_call_chunks = _create_tool_call_chunk(tool_calls, chunk_obj)
+                                tool_call_chunks = _create_tool_call_chunks(tool_calls, chunk_obj)
                                 yield tool_call_chunks
                             
                             # Handle tool call deltas
