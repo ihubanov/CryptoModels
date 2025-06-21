@@ -393,7 +393,7 @@ class LocalAIManager:
                     # Try graceful termination first
                     try:
                         # Try process group termination
-                        pgid = process.pgid()
+                        pgid = process.pgid
                         os.killpg(pgid, signal.SIGTERM)
                         logger.debug(f"Sent SIGTERM to process group {pgid}")
                     except (ProcessLookupError, OSError, PermissionError):
@@ -425,7 +425,7 @@ class LocalAIManager:
                     if psutil.pid_exists(pid):
                         logger.warning(f"Force killing {process_name} (PID: {pid})")
                         try:
-                            os.killpg(process.pgid(), signal.SIGKILL)
+                            os.killpg(process.pgid, signal.SIGKILL)
                         except (ProcessLookupError, OSError, PermissionError):
                             process.kill()
                             for child in children:
