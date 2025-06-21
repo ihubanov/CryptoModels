@@ -529,7 +529,7 @@ class LocalAIManager:
             "--host", host,
             "-c", str(context_length),
             "-fa",
-            "--pooling", "mean",
+            "--pooling", "cls",
             "--no-webui",
             "-ngl", "9999",
             "--no-mmap",
