@@ -495,7 +495,7 @@ class ServiceHandler:
                 async for chunk in response.aiter_bytes():
                     buffer += chunk.decode('utf-8', errors='replace')
                     
-                    # Process complete lines    
+                    # Process complete lines
                     while '\n' in buffer:
                         line, buffer = buffer.split('\n', 1)
                         json_str = _extract_json_data(line)
@@ -513,8 +513,11 @@ class ServiceHandler:
                             
                             # Handle finish reason - output accumulated tool calls
                             if choice.finish_reason and tool_calls:
-                                tool_call_chunks = _create_tool_call_chunks(tool_calls, chunk_obj)
-                                yield tool_call_chunks
+                                for tool_call_chunk in _create_tool_call_chunks(tool_calls, chunk_obj):
+                                    yield tool_call_chunk
+
+                                yield f"data: [DONE]\n\n"
+                                return
                             
                             # Handle tool call deltas
                             if choice.delta.tool_calls:
