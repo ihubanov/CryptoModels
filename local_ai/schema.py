@@ -4,8 +4,10 @@ Schema definitions for API requests and responses following OpenAI's API standar
 
 import re
 from typing_extensions import Literal
+import time # Add time for default_factory in ModelCard/ModelPermission
+import uuid # Add uuid for default_factory in ModelPermission
 from pydantic import BaseModel, Field, validator, root_validator
-from typing import List, Dict, Optional, Union, Any, ClassVar
+from typing import List, Dict, Optional, Union, Any, ClassVar # Ensure Any is imported if used
 
 # Precompile regex patterns for better performance
 UNICODE_BOX_PATTERN = re.compile(r'\\u25[0-9a-fA-F]{2}')
@@ -261,3 +263,34 @@ class EmbeddingResponse(BaseModel):
     object: str = Field("list", description="Object type")
     data: List[Embedding] = Field(..., description="List of embeddings")
     model: str = Field(..., description="Model used for embedding")
+
+# OpenAI-compatible /v1/models endpoint schemas
+class ModelPermission(BaseModel):
+    id: str = Field(default_factory=lambda: f"modelperm-{uuid.uuid4().hex}")
+    object: str = "model_permission"
+    created: int = Field(default_factory=lambda: int(time.time()))
+    allow_create_engine: bool = False
+    allow_sampling: bool = True
+    allow_logprobs: bool = True
+    allow_search_indices: bool = False
+    allow_view: bool = True
+    allow_fine_tuning: bool = False
+    organization: str = "*"
+    group: Optional[str] = None
+    is_blocking: bool = False
+
+class ModelCard(BaseModel):
+    id: str
+    object: str = "model"
+    created: int = Field(default_factory=lambda: int(time.time()))
+    owned_by: str = "user" # Consistent with potential OpenAI examples
+    root: Optional[str] = None
+    parent: Optional[str] = None
+    permission: List[ModelPermission] = Field(default_factory=lambda: [ModelPermission()])
+    family: Optional[str] = None
+    ram_gb: Optional[float] = None # Changed from ram to ram_gb for clarity if it represents GB
+    folder_name: Optional[str] = None
+
+class ModelList(BaseModel):
+    object: str = "list"
+    data: List[ModelCard] = []
