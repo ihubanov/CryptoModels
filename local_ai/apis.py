@@ -751,23 +751,23 @@ async def list_models():
     model_id = folder_name_from_info if folder_name_from_info else model_hash
 
     # Construct the ModelCard, similar to how other response objects are built
-    # Ensure 'ram' from service_info is correctly passed to 'ram_gb'
-    ram_value = service_info.get("ram")
-    ram_gb_value = None
-    if isinstance(ram_value, (int, float)):
-        ram_gb_value = float(ram_value) # Assuming it's already in GB or a direct numerical value
-    elif isinstance(ram_value, str):
+    # Ensure 'ram' from service_info is correctly parsed
+    raw_ram_value = service_info.get("ram")
+    parsed_ram_value = None
+    if isinstance(raw_ram_value, (int, float)):
+        parsed_ram_value = float(raw_ram_value)
+    elif isinstance(raw_ram_value, str):
         try:
-            # Attempt to parse if it's a string like "8GB" or "8"
-            ram_gb_value = float(ram_value.lower().replace("gb", "").strip())
+            # Attempt to parse if it's a string like "8GB", "8gb", or "8"
+            parsed_ram_value = float(raw_ram_value.lower().replace("gb", "").strip())
         except ValueError:
-            logger.warning(f"/v1/models: Could not parse RAM value '{ram_value}' to float.")
+            logger.warning(f"/v1/models: Could not parse RAM value '{raw_ram_value}' to float.")
 
     model_card = ModelCard(
         id=model_id,
         root=model_id, # Consistent with OpenAI for base models
         family=service_info.get("family"), # Assumes 'family' is in service_info
-        ram_gb=ram_gb_value,    # From Task 1, passed to ram_gb
+        ram=parsed_ram_value,    # Use 'ram' field, populated with parsed value
         folder_name=folder_name_from_info  # From Task 1
     )
 

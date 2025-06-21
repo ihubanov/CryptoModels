@@ -190,51 +190,48 @@ class LocalAIManager:
             logger.info(f"metadata_file: {metadata_file}")
             folder_name = ""
             ram_requirement = None
-            family = "" # Initialize family
+            family = ""
             metadata_loaded_locally = False
 
             if os.path.exists(metadata_file):
                 try:
                     with open(metadata_file, "r") as f:
                         metadata = json.load(f)
-                        family = metadata.get("family", "")
-                        folder_name = metadata.get("folder_name", "")
-                        ram_requirement = metadata.get("ram")
-                        logger.info(f"Loaded metadata from {metadata_file}")
+                        # Ensure variables are updated from the loaded metadata
+                        family = metadata.get("family", family) # Use current value as default if key missing
+                        folder_name = metadata.get("folder_name", folder_name)
+                        ram_requirement = metadata.get("ram", ram_requirement)
+                        logger.info(f"Loaded metadata from {metadata_file}: folder_name='{folder_name}', family='{family}', ram='{ram_requirement}'")
                         metadata_loaded_locally = True
                 except Exception as e:
                     logger.error(f"Error loading metadata file {metadata_file}: {e}. Will attempt to fetch from IPFS.")
 
             if not metadata_loaded_locally:
-                logger.info(f"Attempting to fetch metadata from IPFS for hash: {hash}")
+                logger.info(f"Attempting to fetch metadata from IPFS for hash: {hash} (local load failed or file not found)")
                 filecoin_url = f"https://gateway.lighthouse.storage/ipfs/{hash}"
-                # Ensure metadata_file path is defined for saving even if it didn't exist initially
-                # The metadata_file variable itself is defined some lines above:
-                # metadata_file = os.path.join(model_dir, f"{hash}.json")
 
                 response_json = self._retry_request_json(filecoin_url, retries=3, delay=5, timeout=10)
                 if response_json:
-                    folder_name = response_json.get("folder_name", folder_name) # Keep existing if not in response
-                    family = response_json.get("family", family) # Keep existing if not in response
-                    ram_requirement = response_json.get("ram", ram_requirement) # Keep existing if not in response
-                    logger.info(f"Successfully fetched metadata from IPFS for {hash}.")
+                    # Ensure variables are updated from the fetched json
+                    folder_name = response_json.get("folder_name", folder_name)
+                    family = response_json.get("family", family)
+                    ram_requirement = response_json.get("ram", ram_requirement)
+                    logger.info(f"Fetched metadata from IPFS for {hash}: folder_name='{folder_name}', family='{family}', ram='{ram_requirement}'")
+
                     try:
-                        # Attempt to save the fetched (or updated) metadata
                         with open(metadata_file, "w") as f_out:
-                            # Save the structure that would have been in the local file
-                            # or the structure we expect from IPFS.
-                            # For consistency, let's save what we got from response_json directly.
                             json.dump(response_json, f_out)
                         logger.info(f"Saved/Updated metadata to {metadata_file} from IPFS response.")
                     except Exception as e_save:
                         logger.error(f"Error saving metadata file {metadata_file} after fetching from IPFS: {e_save}")
                 else:
-                    logger.warning(f"Could not fetch metadata from IPFS for {hash}. Proceeding with potentially empty/default metadata values.")
+                    logger.warning(f"Could not fetch metadata from IPFS for {hash}. Proceeding with current values: folder_name='{folder_name}', family='{family}', ram='{ram_requirement}'")
 
             # Assign to service_metadata
             service_metadata["family"] = family
             service_metadata["folder_name"] = folder_name
             service_metadata["ram"] = ram_requirement
+            logger.info(f"Final metadata for service_info: folder_name='{folder_name}', family='{family}', ram='{ram_requirement}'")
 
             if "gemma" in folder_name.lower():
                 template_path, best_practice_path = self._get_family_template_and_practice("gemma")

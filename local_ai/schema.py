@@ -288,7 +288,7 @@ class ModelCard(BaseModel):
     parent: Optional[str] = None
     permission: List[ModelPermission] = Field(default_factory=lambda: [ModelPermission()])
     family: Optional[str] = None
-    ram_gb: Optional[float] = None # Changed from ram to ram_gb for clarity if it represents GB
+    ram: Optional[float] = None # Aligned to use 'ram' consistent with service_info
     folder_name: Optional[str] = None
 
 class ModelList(BaseModel):
