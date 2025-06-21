@@ -393,7 +393,7 @@ class LocalAIManager:
                     # Try graceful termination first
                     try:
                         # Try process group termination
-                        pgid = process.pgid
+                        pgid = process.pgid()
                         os.killpg(pgid, signal.SIGTERM)
                         logger.debug(f"Sent SIGTERM to process group {pgid}")
                     except (ProcessLookupError, OSError, PermissionError):
@@ -425,7 +425,7 @@ class LocalAIManager:
                     if psutil.pid_exists(pid):
                         logger.warning(f"Force killing {process_name} (PID: {pid})")
                         try:
-                            os.killpg(process.pgid, signal.SIGKILL)
+                            os.killpg(process.pgid(), signal.SIGKILL)
                         except (ProcessLookupError, OSError, PermissionError):
                             process.kill()
                             for child in children:
@@ -465,16 +465,20 @@ class LocalAIManager:
             ports_info = [(app_port, "API"), (local_ai_port, "AI")]
             ports_freed = self._check_ports_freed(ports_info)
             
-            # Clean up the pickle file
+            # Only clean up the pickle file if both services were successfully stopped
             pickle_removed = True
-            try:
-                if os.path.exists(self.pickle_file):
-                    os.remove(self.pickle_file)
-                    logger.info("Service metadata file removed")
-                else:
-                    logger.debug("Service metadata file already removed")
-            except Exception as e:
-                logger.error(f"Error removing pickle file: {str(e)}")
+            if ai_stopped and api_stopped:
+                try:
+                    if os.path.exists(self.pickle_file):
+                        os.remove(self.pickle_file)
+                        logger.info("Service metadata file removed")
+                    else:
+                        logger.debug("Service metadata file already removed")
+                except Exception as e:
+                    logger.error(f"Error removing pickle file: {str(e)}")
+                    pickle_removed = False
+            else:
+                logger.warning("Keeping service metadata file since not all processes were successfully stopped")
                 pickle_removed = False
 
             # Determine overall success
