@@ -28,10 +28,17 @@ class ModelNotFoundError(LocalAIServiceError):
     pass
 
 class LocalAIManager:
-    """Manages a local AI service."""
+    """Manages a local AI service with optimized performance."""
+    
+    # Performance constants
+    LOCK_TIMEOUT = 1800  # 30 minutes
+    PORT_CHECK_TIMEOUT = 2
+    HEALTH_CHECK_TIMEOUT = 300  # 5 minutes  
+    PROCESS_TERM_TIMEOUT = 15
+    MAX_PORT_RETRIES = 5
     
     def __init__(self):
-        """Initialize the LocalAIManager."""       
+        """Initialize the LocalAIManager with optimized defaults."""       
         self.pickle_file = Path(os.getenv("RUNNING_SERVICE_FILE", "running_service.pkl"))
         self.loaded_models: Dict[str, Any] = {}
         self.llama_server_path = os.getenv("LLAMA_SERVER")
@@ -83,21 +90,45 @@ class LocalAIManager:
             self._get_model_best_practice_path(model_family)
         )
     
-    def _retry_request_json(self, url, retries=2, delay=2, timeout=8):
-        """Utility to retry a GET request for JSON data with optimized parameters."""
+    def _retry_request_json(self, url: str, retries: int = 2, delay: int = 2, timeout: int = 8) -> Optional[dict]:
+        """
+        Utility to retry a GET request for JSON data with optimized parameters.
+        Returns parsed JSON data or None on failure.
+        """
         backoff_delay = delay
+        last_error = None
+        
         for attempt in range(retries):
             try:
+                # Use session for connection pooling if making multiple requests
                 response = requests.get(url, timeout=timeout)
-                if response.status_code == 200:
-                    # Cache JSON parsing result
-                    json_data = response.json()
-                    return json_data
-            except requests.exceptions.RequestException as e:
-                logger.warning(f"Attempt {attempt+1} failed for {url}: {e}")
-                if attempt < retries - 1:  # Don't sleep on last attempt
-                    time.sleep(backoff_delay)
-                    backoff_delay = min(backoff_delay * 1.5, 8)  # Exponential backoff with cap
+                response.raise_for_status()  # Raise exception for HTTP errors
+                
+                # Parse JSON once and return
+                return response.json()
+                
+            except requests.exceptions.Timeout as e:
+                last_error = f"Timeout after {timeout}s"
+                logger.warning(f"Attempt {attempt+1}/{retries} timed out for {url}")
+            except requests.exceptions.ConnectionError as e:
+                last_error = f"Connection error: {str(e)[:100]}"
+                logger.warning(f"Attempt {attempt+1}/{retries} connection failed for {url}")
+            except requests.exceptions.HTTPError as e:
+                last_error = f"HTTP error {e.response.status_code}"
+                logger.warning(f"Attempt {attempt+1}/{retries} HTTP error for {url}: {e}")
+                # Don't retry on 4xx errors (client errors)
+                if 400 <= e.response.status_code < 500:
+                    break
+            except (requests.exceptions.RequestException, ValueError) as e:
+                last_error = f"Request error: {str(e)[:100]}"
+                logger.warning(f"Attempt {attempt+1}/{retries} failed for {url}: {e}")
+            
+            # Sleep with exponential backoff (except on last attempt)
+            if attempt < retries - 1:
+                time.sleep(backoff_delay)
+                backoff_delay = min(backoff_delay * 1.5, 8)  # Cap at 8 seconds
+        
+        logger.error(f"Failed to fetch {url} after {retries} attempts. Last error: {last_error}")
         return None
 
     def start(self, hash: str, port: int = 11434, host: str = "0.0.0.0", context_length: int = 32768) -> bool:
@@ -122,69 +153,13 @@ class LocalAIManager:
             raise ValueError("Filecoin hash is required to start the service")
 
         # Acquire process lock to prevent concurrent starts
-        current_pid = os.getpid()
-        lock_acquired = False
+        if not self._acquire_start_lock(hash, host, port):
+            return False
         
         try:
-            # Check if lock file exists
-            if self.start_lock_file.exists():
-                try:
-                    with open(self.start_lock_file, "r") as f:
-                        lock_data = json.load(f)
-                    
-                    lock_pid = lock_data.get("pid")
-                    lock_hash = lock_data.get("hash")
-                    lock_timestamp = lock_data.get("timestamp", 0)
-                    
-                    # Check if the locked process is still running
-                    if lock_pid and psutil.pid_exists(lock_pid):
-                        # Check if it's been more than 30 minutes (1800 seconds) since lock was created
-                        if time.time() - lock_timestamp > 1800:
-                            logger.warning(f"Lock file is stale (over 30 minutes old), removing it. Previous PID: {lock_pid}")
-                            self.start_lock_file.unlink()
-                        else:
-                            if lock_pid != current_pid:
-                                logger.error(f"Another process (PID: {lock_pid}) is already starting a service with hash: {lock_hash}")
-                                return False
-                    else:
-                        logger.info(f"Previous lock holder (PID: {lock_pid}) is no longer running, removing stale lock")
-                        self.start_lock_file.unlink()
-                
-                except (json.JSONDecodeError, KeyError, OSError) as e:
-                    logger.warning(f"Invalid or corrupted lock file, removing it: {e}")
-                    try:
-                        self.start_lock_file.unlink()
-                    except OSError:
-                        pass
-            
-            # Create lock file with current process info
-            lock_data = {
-                "pid": current_pid,
-                "hash": hash,
-                "timestamp": time.time(),
-                "host": host,
-                "port": port
-            }
-            
-            try:
-                with open(self.start_lock_file, "w") as f:
-                    json.dump(lock_data, f)
-                lock_acquired = True
-                logger.info(f"Acquired start lock for process {current_pid} with hash: {hash}")
-            except OSError as e:
-                logger.error(f"Failed to create lock file: {e}")
-                return False
-
             # Check if the requested port is available before doing expensive operations
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.settimeout(2)
-                    result = s.connect_ex((host, port))
-                    if result == 0:  # Connection successful, port is in use
-                        raise ServiceStartError(f"Port {port} is already in use on {host}")
-            except socket.error as e:
-                if "Connection refused" not in str(e):
-                    raise ServiceStartError(f"Unable to check port {port} availability: {str(e)}")
+            if not self._check_port_availability(host, port):
+                raise ServiceStartError(f"Port {port} is already in use on {host}")
                 # Connection refused means port is free, which is what we want
 
             try:
@@ -204,46 +179,15 @@ class LocalAIManager:
                 if not os.path.exists(local_model_path):
                     raise ModelNotFoundError(f"Model file not found at: {local_model_path}")
 
-                service_metadata = {
-                    "hash": hash,
-                    "port": local_ai_port,  # Local AI server port
-                    "local_text_path": local_model_path,
-                    "app_port": port,  # FastAPI port
-                    "context_length": context_length,
-                    "last_activity": time.time(),
-                    "multimodal": os.path.exists(local_projector_path),
-                    "local_projector_path": local_projector_path if os.path.exists(local_projector_path) else None
-                }
-
-                # Get the directory of the model file
+                # Optimized metadata and multimodal checking
                 model_dir = os.path.dirname(local_model_path)
-                metadata_file = os.path.join(model_dir, f"{hash}.json")
-
-                logger.info(f"metadata_file: {metadata_file}")
-                folder_name = ""
-
-                # Check if metadata file exists
-                if os.path.exists(metadata_file):
-                    try:
-                        with open(metadata_file, "r") as f:
-                            metadata = json.load(f)
-                            service_metadata["family"] = metadata.get("family", "")
-                            folder_name = metadata.get("folder_name", "")
-                            logger.info(f"Loaded metadata from {metadata_file}")
-                    except Exception as e:
-                        logger.error(f"Error loading metadata file: {e}")
-                        metadata_file = None
-                else:
-                    filecoin_url = f"https://gateway.lighthouse.storage/ipfs/{hash}"
-                    response_json = self._retry_request_json(filecoin_url, retries=3, delay=5, timeout=10)
-                    folder_name = response_json.get("folder_name", "")
-                    service_metadata["family"] = response_json.get("family", "")
-                    try:
-                        with open(metadata_file, "w") as f:
-                            json.dump(response_json, f)
-                        logger.info(f"Saved metadata to {metadata_file}")
-                    except Exception as e:
-                        logger.error(f"Error saving metadata file: {e}")
+                folder_name, metadata = self._load_or_fetch_metadata(hash, model_dir)
+                is_multimodal, projector_path = self._check_multimodal_support(local_model_path)
+                
+                service_metadata = self._create_service_metadata(
+                    hash, local_model_path, local_ai_port, port, context_length, 
+                    metadata, is_multimodal, projector_path
+                )
 
                 if "gemma" in folder_name.lower():
                     template_path, best_practice_path = self._get_family_template_and_practice("gemma")
@@ -335,12 +279,11 @@ class LocalAIManager:
 
                 logger.info(f"Service started on port {port} for model: {hash}")
 
-                service_metadata["pid"] = ai_process.pid
-                service_metadata["app_pid"] = apis_process.pid
-                projector_path = f"{local_model_path}-projector"    
-                if os.path.exists(projector_path):
-                    service_metadata["multimodal"] = True
-                    service_metadata["local_projector_path"] = projector_path
+                # Update service metadata with process IDs
+                service_metadata.update({
+                    "pid": ai_process.pid,
+                    "app_pid": apis_process.pid
+                })
 
                 self._dump_running_service(service_metadata)    
 
@@ -363,25 +306,7 @@ class LocalAIManager:
                 
         finally:
             # Always remove the lock when done (success or failure)
-            if lock_acquired and self.start_lock_file.exists():
-                try:
-                    # Verify we're removing our own lock
-                    with open(self.start_lock_file, "r") as f:
-                        lock_data = json.load(f)
-                    
-                    if lock_data.get("pid") == current_pid:
-                        self.start_lock_file.unlink()
-                        logger.info(f"Released start lock for process {current_pid}")
-                    else:
-                        logger.warning(f"Lock file PID mismatch, not removing lock. Expected: {current_pid}, Found: {lock_data.get('pid')}")
-                        
-                except (json.JSONDecodeError, KeyError, OSError) as e:
-                    logger.warning(f"Error while releasing lock: {e}")
-                    try:
-                        self.start_lock_file.unlink()
-                        logger.info("Removed potentially corrupted lock file")
-                    except OSError:
-                        pass
+            self._release_start_lock()
 
     def _dump_running_service(self, metadata: dict):
         """Dump the running service details to a file."""
@@ -439,175 +364,94 @@ class LocalAIManager:
             
             def terminate_process_group(pid, process_name, timeout=15):
                 """
-                Terminate a process and its entire process group.
+                Terminate a process and its entire process group efficiently.
                 Returns True if successful, False otherwise.
                 """
                 if not pid:
                     logger.warning(f"No PID provided for {process_name}")
                     return True
-                    
+                
+                # Quick check if process exists
+                if not psutil.pid_exists(pid):
+                    logger.info(f"Process {process_name} (PID: {pid}) not found, assuming already stopped")
+                    return True
+                
                 try:
-                    # Check if process exists and get its status
-                    if not psutil.pid_exists(pid):
-                        logger.info(f"Process {process_name} (PID: {pid}) not found, assuming already stopped")
-                        return True
+                    process = psutil.Process(pid)
                     
-                    # Get process object and check its status
-                    try:
-                        process = psutil.Process(pid)
-                        status = process.status()
-                        if status == psutil.STATUS_ZOMBIE:
-                            logger.info(f"Process {process_name} (PID: {pid}) is already zombie, cleaning up")
-                            return True
-                        elif status in [psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
-                            logger.info(f"Process {process_name} (PID: {pid}) is already dead/stopped")
-                            return True
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        logger.info(f"Process {process_name} (PID: {pid}) no longer accessible, assuming stopped")
+                    # Check if already terminated
+                    status = process.status()
+                    if status in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
+                        logger.info(f"Process {process_name} (PID: {pid}) already terminated (status: {status})")
                         return True
                     
                     logger.info(f"Terminating {process_name} (PID: {pid})...")
                     
-                    # First attempt: Graceful termination
-                    success = False
-                    try:
-                        # Try to get all child processes first
-                        children = []
-                        try:
-                            parent = psutil.Process(pid)
-                            children = parent.children(recursive=True)
-                            logger.debug(f"Found {len(children)} child processes for {process_name}")
-                        except (psutil.NoSuchProcess, psutil.AccessDenied):
-                            pass
-                        
-                        # Try process group termination first
-                        try:
-                            pgid = os.getpgid(pid)
-                            logger.debug(f"Sending SIGTERM to process group {pgid} for {process_name}")
-                            os.killpg(pgid, signal.SIGTERM)
-                            logger.info(f"Successfully sent SIGTERM to process group {pgid}")
-                        except (ProcessLookupError, OSError, PermissionError) as e:
-                            logger.debug(f"Process group termination failed for {process_name}: {e}")
-                            # Fall back to individual process termination
-                            try:
-                                parent = psutil.Process(pid)
-                                parent.terminate()
-                                logger.info(f"Successfully sent SIGTERM to process {pid}")
-                                
-                                # Also terminate children individually if group kill failed
-                                for child in children:
-                                    try:
-                                        child.terminate()
-                                        logger.debug(f"Terminated child process {child.pid}")
-                                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                        pass
-                            except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-                                logger.warning(f"Could not terminate {process_name} (PID: {pid}): {e}")
-                                return True  # Process might already be gone
-
-                        # Wait for graceful termination with adaptive polling
-                        start_time = time.time()
-                        poll_interval = 0.1  # Start with faster polling
-                        while time.time() - start_time < timeout:
-                            try:
-                                if not psutil.pid_exists(pid):
-                                    logger.info(f"{process_name} terminated gracefully")
-                                    success = True
-                                    break
-                                
-                                # Check if it's a zombie that needs cleanup
-                                try:
-                                    process = psutil.Process(pid)
-                                    if process.status() == psutil.STATUS_ZOMBIE:
-                                        logger.info(f"{process_name} became zombie, considering it stopped")
-                                        success = True
-                                        break
-                                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                    success = True
-                                    break
-                                    
-                                time.sleep(poll_interval)
-                                # Gradually increase polling interval to reduce CPU usage
-                                poll_interval = min(poll_interval * 1.2, 0.5)
-                            except Exception:
-                                # If we can't check, assume it's gone
-                                success = True
-                                break
-                        
-                        if success:
-                            return True
-                            
-                    except Exception as e:
-                        logger.error(f"Error during graceful termination of {process_name}: {e}")
+                    # Get children before termination
+                    children = process.children(recursive=True)
                     
-                    # Second attempt: Force termination
-                    if not success and psutil.pid_exists(pid):
-                        logger.warning(f"{process_name} (PID: {pid}) still running after SIGTERM, sending SIGKILL")
-                        try:
-                            # Get fresh list of children
-                            children = []
+                    # Try graceful termination first
+                    try:
+                        # Try process group termination
+                        pgid = process.pgid()
+                        os.killpg(pgid, signal.SIGTERM)
+                        logger.debug(f"Sent SIGTERM to process group {pgid}")
+                    except (ProcessLookupError, OSError, PermissionError):
+                        # Fallback to individual termination
+                        process.terminate()
+                        for child in children:
                             try:
-                                parent = psutil.Process(pid)
-                                children = parent.children(recursive=True)
+                                child.terminate()
                             except (psutil.NoSuchProcess, psutil.AccessDenied):
                                 pass
-                            
-                            # Try process group kill first
-                            try:
-                                pgid = os.getpgid(pid)
-                                os.killpg(pgid, signal.SIGKILL)
-                                logger.info(f"Successfully sent SIGKILL to process group {pgid}")
-                            except (ProcessLookupError, OSError, PermissionError):
-                                # Fall back to individual process kill
-                                try:
-                                    parent = psutil.Process(pid)
-                                    parent.kill()
-                                    logger.info(f"Successfully sent SIGKILL to process {pid}")
-                                    
-                                    # Kill children individually
-                                    for child in children:
-                                        try:
-                                            child.kill()
-                                            logger.debug(f"Killed child process {child.pid}")
-                                        except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                            pass
-                                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                    logger.info(f"{process_name} disappeared during force kill")
-                                    return True
-                            
-                            # Wait for force termination
-                            force_timeout = min(timeout // 2, 10)  # Max 10 seconds for force kill
-                            start_time = time.time()
-                            while time.time() - start_time < force_timeout:
-                                if not psutil.pid_exists(pid):
-                                    logger.info(f"{process_name} killed successfully")
-                                    return True
-                                time.sleep(0.2)
-                            
-                            # Final check
-                            if psutil.pid_exists(pid):
-                                try:
-                                    process = psutil.Process(pid)
-                                    status = process.status()
-                                    if status == psutil.STATUS_ZOMBIE:
-                                        logger.warning(f"{process_name} is zombie but considered stopped")
-                                        return True
-                                    else:
-                                        logger.error(f"Failed to kill {process_name} (PID: {pid}), status: {status}")
-                                        return False
-                                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                    return True
-                            else:
-                                return True
-                                
-                        except Exception as e:
-                            logger.error(f"Error force-killing {process_name} (PID: {pid}): {str(e)}")
-                            return False
                     
+                    # Wait for graceful termination with exponential backoff
+                    wait_time = 0.1
+                    elapsed = 0
+                    while elapsed < timeout and psutil.pid_exists(pid):
+                        time.sleep(wait_time)
+                        elapsed += wait_time
+                        wait_time = min(wait_time * 1.5, 2.0)  # Cap at 2 seconds
+                        
+                        # Check if process became zombie
+                        try:
+                            if process.status() == psutil.STATUS_ZOMBIE:
+                                logger.info(f"{process_name} became zombie, considering stopped")
+                                return True
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            return True
+                    
+                    # Force kill if still running
+                    if psutil.pid_exists(pid):
+                        logger.warning(f"Force killing {process_name} (PID: {pid})")
+                        try:
+                            os.killpg(process.pgid(), signal.SIGKILL)
+                        except (ProcessLookupError, OSError, PermissionError):
+                            process.kill()
+                            for child in children:
+                                try:
+                                    child.kill()
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    pass
+                        
+                        # Final wait with shorter timeout
+                        for _ in range(50):  # 5 seconds max
+                            if not psutil.pid_exists(pid):
+                                break
+                            time.sleep(0.1)
+                    
+                    success = not psutil.pid_exists(pid)
+                    if success:
+                        logger.info(f"{process_name} terminated successfully")
+                    else:
+                        logger.error(f"Failed to terminate {process_name} (PID: {pid})")
                     return success
-                
+                    
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    logger.info(f"Process {process_name} (PID: {pid}) no longer accessible")
+                    return True
                 except Exception as e:
-                    logger.error(f"Unexpected error terminating {process_name} (PID: {pid}): {str(e)}")
+                    logger.error(f"Error terminating {process_name} (PID: {pid}): {e}")
                     return False
 
             # Track termination success
@@ -617,34 +461,9 @@ class LocalAIManager:
             # Give processes time to clean up
             time.sleep(2)
             
-            # Verify ports are freed with retry logic
-            ports_freed = True
-            max_port_check_retries = 5
-            
-            for port, service_name in [(app_port, "API"), (local_ai_port, "AI")]:
-                if not port:
-                    continue
-                    
-                port_freed = False
-                for retry in range(max_port_check_retries):
-                    try:
-                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                            s.settimeout(2)
-                            result = s.connect_ex(('localhost', port))
-                            if result != 0:  # Connection failed, port is free
-                                port_freed = True
-                                break
-                            else:
-                                logger.debug(f"{service_name} port {port} still in use, retry {retry + 1}/{max_port_check_retries}")
-                                time.sleep(1)
-                    except Exception as e:
-                        logger.debug(f"Port check error for {port}: {e}")
-                        port_freed = True  # Assume port is free if we can't check
-                        break
-                
-                if not port_freed:
-                    logger.warning(f"{service_name} port {port} still appears to be in use after multiple checks")
-                    ports_freed = False
+            # Verify ports are freed with optimized checking
+            ports_info = [(app_port, "API"), (local_ai_port, "AI")]
+            ports_freed = self._check_ports_freed(ports_info)
             
             # Clean up the pickle file
             pickle_removed = True
@@ -718,3 +537,191 @@ class LocalAIManager:
                 for key, value in best_practice.items():
                     command.extend([f"--{key}", str(value)])
         return command
+
+    def _load_or_fetch_metadata(self, hash: str, model_dir: str) -> tuple[str, dict]:
+        """
+        Load metadata from cache or fetch from remote with optimized I/O.
+        Returns (folder_name, metadata_dict)
+        """
+        metadata_file = os.path.join(model_dir, f"{hash}.json")
+        
+        # Try to load from cache first
+        if os.path.exists(metadata_file):
+            try:
+                with open(metadata_file, "r") as f:
+                    metadata = json.load(f)
+                    folder_name = metadata.get("folder_name", "")
+                    logger.info(f"Loaded metadata from cache: {metadata_file}")
+                    return folder_name, metadata
+            except (json.JSONDecodeError, IOError) as e:
+                logger.warning(f"Invalid metadata file {metadata_file}, will fetch from remote: {e}")
+                # Remove corrupted file
+                try:
+                    os.remove(metadata_file)
+                except OSError:
+                    pass
+        
+        # Fetch from remote
+        filecoin_url = f"https://gateway.lighthouse.storage/ipfs/{hash}"
+        response_json = self._retry_request_json(filecoin_url, retries=3, delay=5, timeout=10)
+        
+        if not response_json:
+            logger.error(f"Failed to fetch metadata from {filecoin_url}")
+            return "", {}
+        
+        folder_name = response_json.get("folder_name", "")
+        
+        # Save to cache (create directory if needed)
+        try:
+            os.makedirs(model_dir, exist_ok=True)
+            with open(metadata_file, "w") as f:
+                json.dump(response_json, f)
+            logger.info(f"Cached metadata to {metadata_file}")
+        except IOError as e:
+            logger.warning(f"Failed to cache metadata: {e}")
+        
+        return folder_name, response_json
+    
+    def _check_multimodal_support(self, local_model_path: str) -> tuple[bool, Optional[str]]:
+        """
+        Check if model supports multimodal with single file check.
+        Returns (is_multimodal, projector_path)
+        """
+        projector_path = f"{local_model_path}-projector"
+        is_multimodal = os.path.exists(projector_path)
+        return is_multimodal, projector_path if is_multimodal else None
+
+    def _create_service_metadata(self, hash: str, local_model_path: str, local_ai_port: int, 
+                                port: int, context_length: int, metadata: dict, 
+                                is_multimodal: bool, projector_path: Optional[str]) -> dict:
+        """Create service metadata dictionary with all required fields."""
+        return {
+            "hash": hash,
+            "port": local_ai_port,
+            "local_text_path": local_model_path,
+            "app_port": port,
+            "context_length": context_length,
+            "last_activity": time.time(),
+            "multimodal": is_multimodal,
+            "local_projector_path": projector_path,
+            "family": metadata.get("family", "")
+        }
+
+    def _acquire_start_lock(self, hash: str, host: str, port: int) -> bool:
+        """
+        Acquire the start lock efficiently with minimal I/O operations.
+        Returns True if lock acquired, False otherwise.
+        """
+        current_pid = os.getpid()
+        current_time = time.time()
+        
+        # Check and handle existing lock
+        if self.start_lock_file.exists():
+            try:
+                with open(self.start_lock_file, "r") as f:
+                    lock_data = json.load(f)
+                
+                lock_pid = lock_data.get("pid")
+                lock_timestamp = lock_data.get("timestamp", 0)
+                
+                # Check if lock is stale (over 30 minutes) or process is dead
+                if current_time - lock_timestamp > self.LOCK_TIMEOUT or not psutil.pid_exists(lock_pid):
+                    logger.warning(f"Removing stale lock file (PID: {lock_pid})")
+                    self.start_lock_file.unlink()
+                elif lock_pid != current_pid:
+                    logger.error(f"Another process (PID: {lock_pid}) is already starting service")
+                    return False
+                    
+            except (json.JSONDecodeError, KeyError, OSError) as e:
+                logger.warning(f"Corrupted lock file, removing: {e}")
+                try:
+                    self.start_lock_file.unlink()
+                except OSError:
+                    pass
+        
+        # Create new lock
+        lock_data = {
+            "pid": current_pid,
+            "hash": hash,
+            "timestamp": current_time,
+            "host": host,
+            "port": port
+        }
+        
+        try:
+            with open(self.start_lock_file, "w") as f:
+                json.dump(lock_data, f)
+            logger.info(f"Acquired start lock for PID {current_pid}")
+            return True
+        except OSError as e:
+            logger.error(f"Failed to create lock file: {e}")
+            return False
+    
+    def _release_start_lock(self) -> None:
+        """Release the start lock if we own it."""
+        if not self.start_lock_file.exists():
+            return
+            
+        current_pid = os.getpid()
+        try:
+            with open(self.start_lock_file, "r") as f:
+                lock_data = json.load(f)
+            
+            if lock_data.get("pid") == current_pid:
+                self.start_lock_file.unlink()
+                logger.info(f"Released start lock for PID {current_pid}")
+            else:
+                logger.warning(f"Lock file PID mismatch, not removing")
+                
+        except (json.JSONDecodeError, KeyError, OSError) as e:
+            logger.warning(f"Error releasing lock: {e}")
+            try:
+                self.start_lock_file.unlink()
+                logger.info("Removed potentially corrupted lock file")
+            except OSError:
+                pass
+
+    def _check_port_availability(self, host: str, port: int, timeout: int = 2) -> bool:
+        """
+        Check if a port is available (not in use).
+        Returns True if port is free, False if in use.
+        """
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(timeout)
+                result = s.connect_ex((host, port))
+                return result != 0  # 0 means connection successful (port in use)
+        except socket.error:
+            return True  # Assume port is free if we can't check
+        
+    def _check_ports_freed(self, ports_info: list, max_retries: int = 5) -> bool:
+        """
+        Check if multiple ports are freed with optimized retry logic.
+        ports_info: list of (port, service_name) tuples
+        Returns True if all ports are freed.
+        """
+        if not ports_info:
+            return True
+            
+        freed_ports = set()
+        
+        for retry in range(max_retries):
+            for port, service_name in ports_info:
+                if port and port not in freed_ports:
+                    if self._check_port_availability('localhost', port, timeout=1):
+                        freed_ports.add(port)
+                        logger.debug(f"{service_name} port {port} is now free")
+            
+            # If all ports are freed, return early
+            if len(freed_ports) == len([p for p, _ in ports_info if p]):
+                return True
+                
+            if retry < max_retries - 1:
+                time.sleep(1)
+        
+        # Log which ports are still in use
+        for port, service_name in ports_info:
+            if port and port not in freed_ports:
+                logger.warning(f"{service_name} port {port} still in use after {max_retries} checks")
+        
+        return len(freed_ports) == len([p for p, _ in ports_info if p])
