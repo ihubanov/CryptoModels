@@ -189,53 +189,50 @@ class LocalAIManager:
 
             logger.info(f"metadata_file: {metadata_file}")
             folder_name = ""
-            ram_requirement = None # Initialize ram_requirement
+            ram_requirement = None
+            family = "" # Initialize family
+            metadata_loaded_locally = False
 
-            # Check if metadata file exists
             if os.path.exists(metadata_file):
                 try:
                     with open(metadata_file, "r") as f:
                         metadata = json.load(f)
-                        service_metadata["family"] = metadata.get("family", "")
+                        family = metadata.get("family", "")
                         folder_name = metadata.get("folder_name", "")
-                        ram_requirement = metadata.get("ram") # Get ram from metadata
+                        ram_requirement = metadata.get("ram")
                         logger.info(f"Loaded metadata from {metadata_file}")
+                        metadata_loaded_locally = True
                 except Exception as e:
-                    logger.error(f"Error loading metadata file: {e}")
-                    metadata_file = None # Keep this to signify that local metadata loading failed or didn't happen
-                    # Ensure response_json is fetched if local metadata fails
-                    response_json = self._retry_request_json(f"https://gateway.lighthouse.storage/ipfs/{hash}", retries=3, delay=5, timeout=10)
-                    if response_json:
-                        folder_name = response_json.get("folder_name", "")
-                        service_metadata["family"] = response_json.get("family", "")
-                        ram_requirement = response_json.get("ram") # Get ram from response_json
-                        # Attempt to save fetched metadata
-                        try:
-                            with open(metadata_file, "w") as f_out: # use different file handler
-                                json.dump(response_json, f_out)
-                            logger.info(f"Saved fetched metadata to {metadata_file}")
-                        except Exception as e_save:
-                            logger.error(f"Error saving fetched metadata file: {e_save}")
-                    else: # Case where fetching from IPFS also fails
-                        logger.warning(f"Could not load or fetch metadata for {hash}")
+                    logger.error(f"Error loading metadata file {metadata_file}: {e}. Will attempt to fetch from IPFS.")
 
-            else: # Metadata file does not exist, fetch from IPFS
+            if not metadata_loaded_locally:
+                logger.info(f"Attempting to fetch metadata from IPFS for hash: {hash}")
                 filecoin_url = f"https://gateway.lighthouse.storage/ipfs/{hash}"
+                # Ensure metadata_file path is defined for saving even if it didn't exist initially
+                # The metadata_file variable itself is defined some lines above:
+                # metadata_file = os.path.join(model_dir, f"{hash}.json")
+
                 response_json = self._retry_request_json(filecoin_url, retries=3, delay=5, timeout=10)
                 if response_json:
-                    folder_name = response_json.get("folder_name", "")
-                    service_metadata["family"] = response_json.get("family", "")
-                    ram_requirement = response_json.get("ram") # Get ram from response_json
+                    folder_name = response_json.get("folder_name", folder_name) # Keep existing if not in response
+                    family = response_json.get("family", family) # Keep existing if not in response
+                    ram_requirement = response_json.get("ram", ram_requirement) # Keep existing if not in response
+                    logger.info(f"Successfully fetched metadata from IPFS for {hash}.")
                     try:
-                        with open(metadata_file, "w") as f:
-                            json.dump(response_json, f)
-                        logger.info(f"Saved metadata to {metadata_file}")
-                    except Exception as e:
-                        logger.error(f"Error saving metadata file: {e}")
-                else: # Case where fetching from IPFS fails and no local file
-                    logger.warning(f"Could not fetch metadata for {hash} and no local file found.")
+                        # Attempt to save the fetched (or updated) metadata
+                        with open(metadata_file, "w") as f_out:
+                            # Save the structure that would have been in the local file
+                            # or the structure we expect from IPFS.
+                            # For consistency, let's save what we got from response_json directly.
+                            json.dump(response_json, f_out)
+                        logger.info(f"Saved/Updated metadata to {metadata_file} from IPFS response.")
+                    except Exception as e_save:
+                        logger.error(f"Error saving metadata file {metadata_file} after fetching from IPFS: {e_save}")
+                else:
+                    logger.warning(f"Could not fetch metadata from IPFS for {hash}. Proceeding with potentially empty/default metadata values.")
 
-            # Add folder_name and ram to service_metadata, consistent with other keys
+            # Assign to service_metadata
+            service_metadata["family"] = family
             service_metadata["folder_name"] = folder_name
             service_metadata["ram"] = ram_requirement
 
