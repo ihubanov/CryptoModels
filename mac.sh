@@ -120,12 +120,12 @@ if command_exists llama-cli; then
     LATEST_VERSION=$(grep -oE 'tag: *"b[0-9]+"' llama.cpp.rb | sed 's/tag: *"b//;s/"//' || echo "0")
     log_message "Latest available version: $LATEST_VERSION"
     
-    if [ "$INSTALLED_VERSION" -lt "$LATEST_VERSION" ]; then
-        log_message "New version available. Updating llama.cpp..."
+    if [ "$INSTALLED_VERSION" -ne "$LATEST_VERSION" ]; then
+        log_message "Version mismatch detected. Reinstalling llama.cpp to match formula version..."
         brew uninstall --force llama.cpp
         brew install llama.cpp.rb || handle_error $? "Failed to install llama.cpp"
     else
-        log_message "Already running the latest version of llama.cpp."
+        log_message "Already running the correct version of llama.cpp."
     fi
 else
     log_message "llama.cpp not found. Installing..."
