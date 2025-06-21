@@ -392,18 +392,19 @@ class LocalAIManager:
                     
                     # Try graceful termination first
                     try:
-                        # Try process group termination
-                        pgid = process.pgid()
-                        os.killpg(pgid, signal.SIGTERM)
-                        logger.debug(f"Sent SIGTERM to process group {pgid}")
-                    except (ProcessLookupError, OSError, PermissionError):
-                        # Fallback to individual termination
+                        # Terminate the main process
                         process.terminate()
+                        logger.debug(f"Sent SIGTERM to process {pid}")
+                        
+                        # Terminate all children
                         for child in children:
                             try:
                                 child.terminate()
+                                logger.debug(f"Sent SIGTERM to child process {child.pid}")
                             except (psutil.NoSuchProcess, psutil.AccessDenied):
                                 pass
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        logger.warning(f"Could not terminate {process_name} (PID: {pid})")
                     
                     # Wait for graceful termination with exponential backoff
                     wait_time = 0.1
@@ -425,14 +426,19 @@ class LocalAIManager:
                     if psutil.pid_exists(pid):
                         logger.warning(f"Force killing {process_name} (PID: {pid})")
                         try:
-                            os.killpg(process.pgid(), signal.SIGKILL)
-                        except (ProcessLookupError, OSError, PermissionError):
+                            # Kill the main process
                             process.kill()
+                            logger.debug(f"Sent SIGKILL to process {pid}")
+                            
+                            # Kill all children
                             for child in children:
                                 try:
                                     child.kill()
+                                    logger.debug(f"Sent SIGKILL to child process {child.pid}")
                                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                                     pass
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            logger.warning(f"Could not kill {process_name} (PID: {pid})")
                         
                         # Final wait with shorter timeout
                         for _ in range(50):  # 5 seconds max
