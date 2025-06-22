@@ -65,6 +65,12 @@ We've prepared several models for you to test with. Each model is listed with it
 #### 🔤 Qwen3 Series
 [Learn more about Qwen3](https://qwenlm.github.io/blog/qwen3/)
 
+**Qwen3-Embedding-0.6B-Q**
+- Size: 649 MB
+- RAM Required: 1.16 GB
+- CID: `bafkreiacd5mwy4a5wkdmvxsk42nsupes5uf4q3dm52k36mvbhgdrez422y`
+- Command: `local-ai start --hash bafkreiacd5mwy4a5wkdmvxsk42nsupes5uf4q3dm52k36mvbhgdrez422y`
+
 **Qwen3-4B-Q8**
 - Size: 4.28 GB
 - RAM Required: 9.5 GB
@@ -156,6 +162,17 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 }'
 ```
 
+### Embedding Example
+
+```bash
+curl -X POST http://localhost:8080/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "local-model",
+    "input": ["Hello, world!"]
+}'
+```
+
 ## Advanced Usage
 
 ### Uploading Custom Models
@@ -164,7 +181,11 @@ You can use `local-ai upload` to upload your own `gguf` models downloaded from [
 
 #### Model Preparation
 
-##### For Language Models (Text-to-Text)
+The platform now supports multiple model types through the `--task` parameter:
+
+##### For Chat Models (Text Generation)
+
+Use `--task chat` for conversational AI and text generation models.
 
 1. **Download the model**:
    - Go to Huggingface and download your desired `.gguf` model
@@ -175,13 +196,34 @@ You can use `local-ai upload` to upload your own `gguf` models downloaded from [
    - Place the downloaded `.gguf` file inside this folder
    - Rename the file to match the folder name, but **remove the `.gguf` extension**
 
-**Example Structure for Language Models:**
+**Example Structure for Chat Models:**
 ```
 qwen3-8b-q8/              # Folder name
 └── qwen3-8b-q8          # File name (no .gguf extension)
 ```
 
+##### For Embedding Models
+
+Use `--task embed` for text embedding and similarity models.
+
+1. **Download the embedding model**:
+   - Go to Huggingface and download your desired embedding model in `.gguf` format
+   - Example: Text embedding models like [`Qwen3 Embedding 0.6B`](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF) or specialized embedding models
+
+2. **Prepare the folder structure**:
+   - Create a new folder with a descriptive name (e.g., `qwen3-embedding-0.6b-q8`)
+   - Place the downloaded `.gguf` file inside this folder
+   - Rename the file to match the folder name, but **remove the `.gguf` extension**
+
+**Example Structure for Embedding Models:**
+```
+qwen3-embedding-0.6b-q8/         # Folder name
+└── qwen3-embedding-0.6b-q8     # File name (no .gguf extension)
+```
+
 ##### For Vision Models (Image-Text-to-Text)
+
+Use `--task chat` for vision models as they are conversational models with image understanding capabilities.
 
 1. **Download the model files**:
    - Go to Huggingface and download both required files:
@@ -222,6 +264,7 @@ local-ai upload --folder-name qwen3-8b-q8
 export LIGHTHOUSE_API_KEY=your_api_key
 local-ai upload \
   --folder-name qwen3-8b-q8 \
+  --task chat \
   --ram 12 \
   --hf-repo Qwen/Qwen3-8B-GGUF \
   --hf-file Qwen3-8B-Q8_0.gguf \
@@ -230,11 +273,23 @@ local-ai upload \
   --max-retries 20
 ```
 
+**Upload for Embedding Models:**
+```bash
+export LIGHTHOUSE_API_KEY=your_api_key
+local-ai upload \
+  --folder-name qwen3-embedding-0.6b-q8 \
+  --task embed \
+  --ram 1.16 \
+  --hf-repo Qwen/Qwen3-Embedding-0.6B-GGUF \
+  --hf-file Qwen3-Embedding-0.6B-Q8_0.gguf
+```
+
 #### Upload Options
 
 | Option | Description | Default | Required |
 |--------|-------------|---------|----------|
 | `--folder-name` | Folder containing the model files | - | ✅ |
+| `--task` | Task type: `chat` for text generation models, `embed` for embedding models | `chat` | ❌ |
 | `--ram` | RAM usage in GB at 32768 context length | - | ❌ |
 | `--hf-repo` | Hugging Face repository (e.g., `Qwen/Qwen3-8B-GGUF`) | - | ❌ |
 | `--hf-file` | Original Hugging Face filename | - | ❌ |
