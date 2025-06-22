@@ -4,14 +4,12 @@ forwarding them to an underlying service running on a local port. It handles bot
 as well as embedding generation, with support for streaming responses.
 """
 
-import os
 import logging
 import httpx
 import asyncio
 import time
 import json
 import uuid
-from pathlib import Path
 from json_repair import repair_json
 from typing import Dict, Any, Optional
 from local_ai.core import LocalAIManager, LocalAIServiceError
