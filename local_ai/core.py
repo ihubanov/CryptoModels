@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import signal
 import pickle
 import psutil
 import asyncio
@@ -803,7 +804,6 @@ class LocalAIManager:
                     pass
                 
                 # Use the existing terminate_process_group logic adapted for async
-                import signal
                 
                 # Try process group termination first
                 try:
@@ -928,9 +928,22 @@ class LocalAIManager:
                     logger.error(f"Error force-killing AI server (PID: {pid}): {str(e)}")
                     return False
             
-            # Clean up using the existing stop() method logic
+            # Clean up service info if process was successfully killed
             if success:
-                logger.info("AI server stopped successfully")
+                try:
+                    # Remove PID from service info to indicate server is no longer running
+                    with open(self.pickle_file, "rb") as f:
+                        service_info = pickle.load(f)
+                    
+                    service_info.pop("pid", None)
+                    
+                    with open(self.pickle_file, "wb") as f:
+                        pickle.dump(service_info, f)
+                    
+                    logger.info("AI server stopped successfully and service info cleaned up")
+                except Exception as e:
+                    logger.warning(f"AI server stopped but failed to clean up service info: {str(e)}")
+                
                 return True
             else:
                 logger.error("Failed to stop AI server")

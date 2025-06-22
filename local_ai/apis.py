@@ -10,6 +10,7 @@ import asyncio
 import time
 import json
 import uuid
+import psutil
 from json_repair import repair_json
 from typing import Dict, Any, Optional
 from local_ai.core import LocalAIManager, LocalAIServiceError
@@ -331,13 +332,34 @@ class RequestProcessor:
         """Ensure the AI server is running, reload if necessary."""
         try:
             service_info = get_service_info()
-            if "pid" not in service_info:
-                logger.info(f"[{request_id}] AI server not running, reloading...")
+            pid = service_info.get("pid")
+            
+            # Check if PID exists and if the process is actually running
+            if not pid:
+                logger.info(f"[{request_id}] No PID found, reloading AI server...")
                 return await local_ai_manager.reload_ai_server()
+        
+            if not psutil.pid_exists(pid):
+                logger.info(f"[{request_id}] PID {pid} not running, reloading AI server...")
+                return await local_ai_manager.reload_ai_server()
+            
+            # Check if process is actually alive (not zombie)
+            try:
+                process = psutil.Process(pid)
+                status = process.status()
+                if status in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
+                    logger.info(f"[{request_id}] Process {pid} is {status}, reloading AI server...")
+                    return await local_ai_manager.reload_ai_server()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                logger.info(f"[{request_id}] Process {pid} not accessible, reloading AI server...")
+                return await local_ai_manager.reload_ai_server()
+            
+            logger.debug(f"[{request_id}] AI server PID {pid} is running")
             return True
+            
         except HTTPException:
             logger.info(f"[{request_id}] Service info not available, attempting reload...")
-            return False
+            return await local_ai_manager.reload_ai_server()
     
     @staticmethod
     async def process_request(endpoint: str, request_data: Dict[str, Any]):
