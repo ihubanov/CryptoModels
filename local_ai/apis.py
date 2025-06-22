@@ -787,6 +787,8 @@ async def update(request: Dict[str, Any]):
 @app.post("/chat/completions")
 async def chat_completions(request: ChatCompletionRequest):
     """Endpoint for chat completion requests."""
+    if app.state.service_info["task"] == "embed":
+        raise HTTPException(status_code=400, detail="Chat completion requests are not supported for embedding models")
     request_dict = convert_request_to_dict(request)
     return await RequestProcessor.process_request("/chat/completions", request_dict)
 
@@ -799,6 +801,8 @@ async def embeddings(request: EmbeddingRequest):
 @app.post("/v1/chat/completions")
 async def v1_chat_completions(request: ChatCompletionRequest):
     """Endpoint for chat completion requests (v1 API)."""
+    if app.state.service_info["task"] == "embed":
+        raise HTTPException(status_code=400, detail="Chat completion requests are not supported for embedding models")
     request_dict = convert_request_to_dict(request)
     return await RequestProcessor.process_request("/v1/chat/completions", request_dict)
 
