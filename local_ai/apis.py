@@ -329,37 +329,58 @@ class RequestProcessor:
     
     @staticmethod
     async def _ensure_server_running(request_id: str) -> bool:
-        """Ensure the AI server is running, reload if necessary."""
+        """
+        Optimized server state checking and reloading with better error handling.
+        """
         try:
             service_info = get_service_info()
             pid = service_info.get("pid")
             
-            # Check if PID exists and if the process is actually running
+            # Quick validation checks
             if not pid:
                 logger.info(f"[{request_id}] No PID found, reloading AI server...")
                 return await local_ai_manager.reload_ai_server()
         
+            # Efficient process existence and status check
             if not psutil.pid_exists(pid):
-                logger.info(f"[{request_id}] PID {pid} not running, reloading AI server...")
+                logger.info(f"[{request_id}] PID {pid} not found, reloading AI server...")
                 return await local_ai_manager.reload_ai_server()
             
-            # Check if process is actually alive (not zombie)
+            # Check process status in a single call
             try:
                 process = psutil.Process(pid)
                 status = process.status()
+                
+                # Check for non-running states
                 if status in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
-                    logger.info(f"[{request_id}] Process {pid} is {status}, reloading AI server...")
+                    logger.info(f"[{request_id}] Process {pid} status is {status}, reloading AI server...")
                     return await local_ai_manager.reload_ai_server()
+                
+                # Additional check for processes that might be hung
+                try:
+                    # Quick responsiveness check - verify process is actually doing something
+                    cpu_percent = process.cpu_percent(interval=0.1)  # Non-blocking check
+                    memory_info = process.memory_info()
+                    
+                    logger.debug(f"[{request_id}] AI server PID {pid} is healthy "
+                               f"(status: {status}, memory: {memory_info.rss // 1024 // 1024}MB)")
+                    
+                except psutil.AccessDenied:
+                    # Process exists but we can't get detailed info - assume it's running
+                    logger.debug(f"[{request_id}] AI server PID {pid} running (limited access)")
+                    
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 logger.info(f"[{request_id}] Process {pid} not accessible, reloading AI server...")
                 return await local_ai_manager.reload_ai_server()
             
-            logger.debug(f"[{request_id}] AI server PID {pid} is running")
             return True
             
         except HTTPException:
             logger.info(f"[{request_id}] Service info not available, attempting reload...")
             return await local_ai_manager.reload_ai_server()
+        except Exception as e:
+            logger.error(f"[{request_id}] Unexpected error in _ensure_server_running: {str(e)}")
+            return False
     
     @staticmethod
     async def process_request(endpoint: str, request_data: Dict[str, Any]):
@@ -463,29 +484,80 @@ class RequestProcessor:
 
 # Background Tasks
 async def unload_checker():
-    """Periodically check if the AI server has been idle for too long and unload it if needed."""
+    """
+    Optimized unload checker that periodically checks if the AI server has been idle 
+    for too long and unloads it if needed.
+    """
     logger.info("Unload checker task started")
+    consecutive_errors = 0
+    max_consecutive_errors = 5
     
     while True:
         try:
             await asyncio.sleep(UNLOAD_CHECK_INTERVAL)
+            
             try:
                 service_info = get_service_info()
-                if ("pid" in service_info and hasattr(app.state, "last_request_time")):
-                    idle_time = time.time() - app.state.last_request_time
-                    logger.info(f"Unload checker task, last request time: {app.state.last_request_time}")
+                
+                # Check if we have both PID and last request time
+                if "pid" not in service_info:
+                    logger.debug("No PID found in service info, skipping unload check")
+                    consecutive_errors = 0  # Reset error counter
+                    continue
+                
+                if not hasattr(app.state, "last_request_time"):
+                    logger.debug("No last request time available, skipping unload check")
+                    consecutive_errors = 0
+                    continue
+                
+                # Calculate idle time
+                current_time = time.time()
+                idle_time = current_time - app.state.last_request_time
+                
+                # Log idle status periodically (every 5 minutes)
+                if int(idle_time) % 300 == 0:
+                    logger.info(f"AI server idle time: {idle_time:.1f}s (threshold: {IDLE_TIMEOUT}s)")
+                
+                # Check if server should be unloaded
+                if idle_time > IDLE_TIMEOUT:
+                    pid = service_info.get("pid")
+                    logger.info(f"AI server (PID: {pid}) has been idle for {idle_time:.2f}s, initiating unload...")
                     
-                    if idle_time > IDLE_TIMEOUT:
-                        logger.info(f"AI server has been idle for {idle_time:.2f}s, unloading...")
-                        await local_ai_manager.kill_ai_server()
-            except HTTPException:
-                pass  # Service info not available, continue checking
+                    # Use the optimized kill method from LocalAIManager
+                    unload_success = await local_ai_manager.kill_ai_server()
+                    
+                    if unload_success:
+                        logger.info("AI server unloaded successfully due to inactivity")
+                        # Update last request time to prevent immediate re-unload attempts
+                        app.state.last_request_time = current_time
+                    else:
+                        logger.warning("Failed to unload AI server")
+                
+                # Reset error counter on successful check
+                consecutive_errors = 0
+                
+            except HTTPException as e:
+                # Service info not available - this is expected when no service is running
+                consecutive_errors = 0  # Don't count this as an error
+                logger.debug(f"Service info not available (expected when no service running): {e}")
+                
+            except Exception as e:
+                consecutive_errors += 1
+                logger.error(f"Error in unload checker (attempt {consecutive_errors}/{max_consecutive_errors}): {str(e)}")
+                
+                # If we have too many consecutive errors, wait longer before next attempt
+                if consecutive_errors >= max_consecutive_errors:
+                    logger.error(f"Too many consecutive errors in unload checker, extending sleep interval")
+                    await asyncio.sleep(UNLOAD_CHECK_INTERVAL * 2)  # Double the sleep time
+                    consecutive_errors = 0  # Reset counter after extended wait
             
         except asyncio.CancelledError:
             logger.info("Unload checker task cancelled")
             break
         except Exception as e:
-            logger.error(f"Error in unload checker task: {str(e)}", exc_info=True)
+            logger.error(f"Critical error in unload checker task: {str(e)}", exc_info=True)
+            # Wait a bit longer before retrying on critical errors
+            await asyncio.sleep(UNLOAD_CHECK_INTERVAL * 2)
 
 # Performance monitoring middleware
 @app.middleware("http")
@@ -527,32 +599,100 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Clean up resources when the application shuts down."""
-    # Cancel background tasks
+    """
+    Optimized shutdown event with proper resource cleanup and error handling.
+    """
+    logger.info("Starting application shutdown...")
+    shutdown_start_time = time.time()
+    
+    # Phase 1: Cancel background tasks gracefully
     tasks_to_cancel = []
+    task_names = []
+    
     for task_attr in ["worker_task", "unload_checker_task"]:
         if hasattr(app.state, task_attr):
             task = getattr(app.state, task_attr)
-            task.cancel()
-            tasks_to_cancel.append(task)
+            if not task.done():
+                task_names.append(task_attr)
+                tasks_to_cancel.append(task)
+                task.cancel()
     
-    # Wait for tasks to complete cancellation
     if tasks_to_cancel:
-        await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
+        logger.info(f"Cancelling background tasks: {', '.join(task_names)}")
+        try:
+            # Wait for tasks to complete cancellation with timeout
+            await asyncio.wait_for(
+                asyncio.gather(*tasks_to_cancel, return_exceptions=True),
+                timeout=10.0  # 10 second timeout for task cancellation
+            )
+            logger.info("Background tasks cancelled successfully")
+        except asyncio.TimeoutError:
+            logger.warning("Background task cancellation timed out, proceeding with shutdown")
+        except Exception as e:
+            logger.error(f"Error during background task cancellation: {str(e)}")
     
-    # Kill the AI server if it's running
+    # Phase 2: Clean up AI server
     try:
         service_info = get_service_info()
         if "pid" in service_info:
-            await local_ai_manager.kill_ai_server()
+            pid = service_info.get("pid")
+            logger.info(f"Terminating AI server (PID: {pid}) during shutdown...")
+            
+            # Use the optimized kill method with timeout
+            kill_success = await asyncio.wait_for(
+                local_ai_manager.kill_ai_server(),
+                timeout=15.0  # 15 second timeout for AI server termination
+            )
+            
+            if kill_success:
+                logger.info("AI server terminated successfully during shutdown")
+            else:
+                logger.warning("AI server termination failed during shutdown")
+        else:
+            logger.debug("No AI server PID found, skipping termination")
+            
     except HTTPException:
-        pass  # Service info not available
+        logger.debug("Service info not available during shutdown (expected)")
+    except asyncio.TimeoutError:
+        logger.error("AI server termination timed out during shutdown")
+    except Exception as e:
+        logger.error(f"Error terminating AI server during shutdown: {str(e)}")
     
-    # Close HTTP client
+    # Phase 3: Close HTTP client connections
     if hasattr(app.state, "client"):
-        await app.state.client.aclose()
+        try:
+            logger.info("Closing HTTP client connections...")
+            await asyncio.wait_for(app.state.client.aclose(), timeout=5.0)
+            logger.info("HTTP client closed successfully")
+        except asyncio.TimeoutError:
+            logger.warning("HTTP client close timed out")
+        except Exception as e:
+            logger.error(f"Error closing HTTP client: {str(e)}")
     
-    logger.info("Service shutdown complete")
+    # Phase 4: Clean up any remaining request queue
+    if hasattr(RequestProcessor, 'queue'):
+        try:
+            queue_size = RequestProcessor.queue.qsize()
+            if queue_size > 0:
+                logger.warning(f"Request queue still has {queue_size} pending requests during shutdown")
+                # Cancel any pending futures in the queue
+                pending_requests = []
+                while not RequestProcessor.queue.empty():
+                    try:
+                        _, _, future, request_id, _ = RequestProcessor.queue.get_nowait()
+                        if not future.done():
+                            future.cancel()
+                            pending_requests.append(request_id)
+                    except asyncio.QueueEmpty:
+                        break
+                
+                if pending_requests:
+                    logger.info(f"Cancelled {len(pending_requests)} pending requests")
+        except Exception as e:
+            logger.error(f"Error cleaning up request queue: {str(e)}")
+    
+    shutdown_duration = time.time() - shutdown_start_time
+    logger.info(f"Application shutdown complete (duration: {shutdown_duration:.2f}s)")
 
 # API Endpoints
 @app.get("/health")

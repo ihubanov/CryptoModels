@@ -347,7 +347,7 @@ class LocalAIManager:
     
     def stop(self) -> bool:
         """
-        Stop the running AI service.
+        Stop the running AI service with optimized process termination.
 
         Returns:
             bool: True if the service stopped successfully, False otherwise.
@@ -369,133 +369,26 @@ class LocalAIManager:
 
             logger.info(f"Stopping AI service '{hash_val}' running on port {app_port} (AI PID: {pid}, API PID: {app_pid})...")
             
-            def terminate_process_group(pid, process_name, timeout=15):
-                """
-                Terminate a process and its entire process group efficiently.
-                Returns True if successful, False otherwise.
-                """
-                if not pid:
-                    logger.warning(f"No PID provided for {process_name}")
-                    return True
-                
-                # Quick check if process exists
-                if not psutil.pid_exists(pid):
-                    logger.info(f"Process {process_name} (PID: {pid}) not found, assuming already stopped")
-                    return True
-                
-                try:
-                    process = psutil.Process(pid)
-                    
-                    # Check if already terminated
-                    status = process.status()
-                    if status in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
-                        logger.info(f"Process {process_name} (PID: {pid}) already terminated (status: {status})")
-                        return True
-                    
-                    logger.info(f"Terminating {process_name} (PID: {pid})...")
-                    
-                    # Get children before termination
-                    children = process.children(recursive=True)
-                    
-                    # Try graceful termination first
-                    try:
-                        # Terminate the main process
-                        process.terminate()
-                        logger.debug(f"Sent SIGTERM to process {pid}")
-                        
-                        # Terminate all children
-                        for child in children:
-                            try:
-                                child.terminate()
-                                logger.debug(f"Sent SIGTERM to child process {child.pid}")
-                            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                pass
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        logger.warning(f"Could not terminate {process_name} (PID: {pid})")
-                    
-                    # Wait for graceful termination with exponential backoff
-                    wait_time = 0.1
-                    elapsed = 0
-                    while elapsed < timeout and psutil.pid_exists(pid):
-                        time.sleep(wait_time)
-                        elapsed += wait_time
-                        wait_time = min(wait_time * 1.5, 2.0)  # Cap at 2 seconds
-                        
-                        # Check if process became zombie
-                        try:
-                            if process.status() == psutil.STATUS_ZOMBIE:
-                                logger.info(f"{process_name} became zombie, considering stopped")
-                                return True
-                        except (psutil.NoSuchProcess, psutil.AccessDenied):
-                            return True
-                    
-                    # Force kill if still running
-                    if psutil.pid_exists(pid):
-                        logger.warning(f"Force killing {process_name} (PID: {pid})")
-                        try:
-                            # Kill the main process
-                            process.kill()
-                            logger.debug(f"Sent SIGKILL to process {pid}")
-                            
-                            # Kill all children
-                            for child in children:
-                                try:
-                                    child.kill()
-                                    logger.debug(f"Sent SIGKILL to child process {child.pid}")
-                                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                    pass
-                        except (psutil.NoSuchProcess, psutil.AccessDenied):
-                            logger.warning(f"Could not kill {process_name} (PID: {pid})")
-                        
-                        # Final wait with shorter timeout
-                        for _ in range(50):  # 5 seconds max
-                            if not psutil.pid_exists(pid):
-                                break
-                            time.sleep(0.1)
-                    
-                    success = not psutil.pid_exists(pid)
-                    if success:
-                        logger.info(f"{process_name} terminated successfully")
-                    else:
-                        logger.error(f"Failed to terminate {process_name} (PID: {pid})")
-                    return success
-                    
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    logger.info(f"Process {process_name} (PID: {pid}) no longer accessible")
-                    return True
-                except Exception as e:
-                    logger.error(f"Error terminating {process_name} (PID: {pid}): {e}")
-                    return False
-
-            # Track termination success
-            ai_stopped = terminate_process_group(pid, "AI service")
-            api_stopped = terminate_process_group(app_pid, "API service")
+            # Use the optimized termination methods
+            ai_stopped = self._terminate_process_safely(pid, "AI service", timeout=15)
+            api_stopped = self._terminate_process_safely(app_pid, "API service", timeout=15)
             
-            # Give processes time to clean up
-            time.sleep(2)
+            # Brief pause to allow system cleanup
+            time.sleep(1)
             
-            # Verify ports are freed with optimized checking
+            # Verify ports are freed
             ports_info = [(app_port, "API"), (local_ai_port, "AI")]
-            ports_freed = self._check_ports_freed(ports_info)
+            ports_freed = self._check_ports_freed(ports_info, max_retries=3)
             
-            # Only clean up the pickle file if both services were successfully stopped
-            pickle_removed = True
+            # Clean up metadata file
+            metadata_cleaned = False
             if ai_stopped and api_stopped:
-                try:
-                    if os.path.exists(self.pickle_file):
-                        os.remove(self.pickle_file)
-                        logger.info("Service metadata file removed")
-                    else:
-                        logger.debug("Service metadata file already removed")
-                except Exception as e:
-                    logger.error(f"Error removing pickle file: {str(e)}")
-                    pickle_removed = False
+                metadata_cleaned = self._cleanup_service_metadata(force=False)
             else:
                 logger.warning("Keeping service metadata file since not all processes were successfully stopped")
-                pickle_removed = False
-
+            
             # Determine overall success
-            success = ai_stopped and api_stopped and pickle_removed
+            success = ai_stopped and api_stopped and metadata_cleaned
             
             if success:
                 logger.info("AI service stopped successfully.")
@@ -503,12 +396,403 @@ class LocalAIManager:
                     logger.warning("Service stopped but some ports may still be in use temporarily")
             else:
                 logger.error("AI service stop completed with some failures")
-                logger.error(f"AI stopped: {ai_stopped}, API stopped: {api_stopped}, pickle removed: {pickle_removed}")
+                logger.error(f"AI stopped: {ai_stopped}, API stopped: {api_stopped}, metadata cleaned: {metadata_cleaned}")
             
             return success
 
         except Exception as e:
             logger.error(f"Error stopping AI service: {str(e)}", exc_info=True)
+            return False
+
+    def _terminate_process_safely(self, pid: int, process_name: str, timeout: int = 15, use_process_group: bool = True) -> bool:
+        """
+        Safely terminate a process with graceful fallback to force kill.
+        
+        Args:
+            pid: Process ID to terminate
+            process_name: Human-readable process name for logging
+            timeout: Timeout for graceful termination in seconds
+            use_process_group: Whether to try process group termination first
+            
+        Returns:
+            bool: True if process was terminated successfully, False otherwise
+        """
+        if not pid:
+            logger.warning(f"No PID provided for {process_name}")
+            return True
+        
+        # Quick existence check
+        if not psutil.pid_exists(pid):
+            logger.info(f"Process {process_name} (PID: {pid}) not found, assuming already stopped")
+            return True
+        
+        try:
+            process = psutil.Process(pid)
+            
+            # Check if already in terminal state
+            try:
+                status = process.status()
+                if status in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
+                    logger.info(f"Process {process_name} (PID: {pid}) already terminated (status: {status})")
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                return True
+            
+            logger.info(f"Terminating {process_name} (PID: {pid})...")
+            
+            # Collect children before termination
+            children = []
+            try:
+                children = process.children(recursive=True)
+                logger.debug(f"Found {len(children)} child processes for {process_name}")
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+            
+            # Phase 1: Graceful termination
+            try:
+                if use_process_group:
+                    # Try process group termination first (more efficient)
+                    try:
+                        pgid = os.getpgid(pid)
+                        os.killpg(pgid, signal.SIGTERM)
+                        logger.debug(f"Sent SIGTERM to process group {pgid}")
+                    except (ProcessLookupError, OSError, PermissionError):
+                        # Fall back to individual process termination
+                        process.terminate()
+                        logger.debug(f"Sent SIGTERM to process {pid}")
+                        
+                        # Terminate children individually
+                        for child in children:
+                            try:
+                                child.terminate()
+                                logger.debug(f"Sent SIGTERM to child process {child.pid}")
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                pass
+                else:
+                    # Individual process termination
+                    process.terminate()
+                    logger.debug(f"Sent SIGTERM to process {pid}")
+                    
+                    for child in children:
+                        try:
+                            child.terminate()
+                            logger.debug(f"Sent SIGTERM to child process {child.pid}")
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
+                            
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                logger.info(f"Process {process_name} disappeared during termination")
+                return True
+            
+            # Wait for graceful termination with exponential backoff
+            wait_time = 0.1
+            elapsed = 0
+            while elapsed < timeout and psutil.pid_exists(pid):
+                time.sleep(wait_time)
+                elapsed += wait_time
+                wait_time = min(wait_time * 1.5, 2.0)  # Cap at 2 seconds
+                
+                # Check if process became zombie
+                try:
+                    if process.status() == psutil.STATUS_ZOMBIE:
+                        logger.info(f"{process_name} became zombie, considering stopped")
+                        return True
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    return True
+            
+            # Phase 2: Force termination if still running
+            if psutil.pid_exists(pid):
+                logger.warning(f"Force killing {process_name} (PID: {pid})")
+                try:
+                    # Refresh children list
+                    children = []
+                    try:
+                        process = psutil.Process(pid)
+                        children = process.children(recursive=True)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+                    
+                    if use_process_group:
+                        # Try process group kill
+                        try:
+                            pgid = os.getpgid(pid)
+                            os.killpg(pgid, signal.SIGKILL)
+                            logger.debug(f"Sent SIGKILL to process group {pgid}")
+                        except (ProcessLookupError, OSError, PermissionError):
+                            # Fall back to individual kill
+                            process.kill()
+                            logger.debug(f"Sent SIGKILL to process {pid}")
+                            
+                            for child in children:
+                                try:
+                                    child.kill()
+                                    logger.debug(f"Sent SIGKILL to child process {child.pid}")
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    pass
+                    else:
+                        # Individual process kill
+                        process.kill()
+                        logger.debug(f"Sent SIGKILL to process {pid}")
+                        
+                        for child in children:
+                            try:
+                                child.kill()
+                                logger.debug(f"Sent SIGKILL to child process {child.pid}")
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                pass
+                                
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    logger.info(f"Process {process_name} disappeared during force kill")
+                    return True
+                
+                # Final wait for force termination (shorter timeout)
+                force_timeout = 5
+                for _ in range(force_timeout * 10):  # 0.1s intervals
+                    if not psutil.pid_exists(pid):
+                        break
+                    time.sleep(0.1)
+            
+            # Final status check
+            success = not psutil.pid_exists(pid)
+            if success:
+                logger.info(f"{process_name} terminated successfully")
+            else:
+                try:
+                    process = psutil.Process(pid)
+                    status = process.status()
+                    if status == psutil.STATUS_ZOMBIE:
+                        logger.warning(f"{process_name} is zombie but considered stopped")
+                        success = True
+                    else:
+                        logger.error(f"Failed to terminate {process_name} (PID: {pid}), status: {status}")
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    success = True
+                    
+            return success
+            
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            logger.info(f"Process {process_name} (PID: {pid}) no longer accessible")
+            return True
+        except Exception as e:
+            logger.error(f"Error terminating {process_name} (PID: {pid}): {e}")
+            return False
+
+    async def _terminate_process_safely_async(self, pid: int, process_name: str, timeout: int = 15, use_process_group: bool = True) -> bool:
+        """
+        Async version of _terminate_process_safely for use in async contexts.
+        
+        Args:
+            pid: Process ID to terminate
+            process_name: Human-readable process name for logging
+            timeout: Timeout for graceful termination in seconds
+            use_process_group: Whether to try process group termination first
+            
+        Returns:
+            bool: True if process was terminated successfully, False otherwise
+        """
+        if not pid:
+            logger.warning(f"No PID provided for {process_name}")
+            return True
+        
+        # Quick existence check
+        if not psutil.pid_exists(pid):
+            logger.info(f"Process {process_name} (PID: {pid}) not found, assuming already stopped")
+            return True
+        
+        try:
+            process = psutil.Process(pid)
+            
+            # Check if already in terminal state
+            try:
+                status = process.status()
+                if status in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
+                    logger.info(f"Process {process_name} (PID: {pid}) already terminated (status: {status})")
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                return True
+            
+            logger.info(f"Terminating {process_name} (PID: {pid})...")
+            
+            # Collect children before termination
+            children = []
+            try:
+                children = process.children(recursive=True)
+                logger.debug(f"Found {len(children)} child processes for {process_name}")
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+            
+            # Phase 1: Graceful termination
+            try:
+                if use_process_group:
+                    # Try process group termination first
+                    try:
+                        pgid = os.getpgid(pid)
+                        os.killpg(pgid, signal.SIGTERM)
+                        logger.debug(f"Sent SIGTERM to process group {pgid}")
+                    except (ProcessLookupError, OSError, PermissionError):
+                        # Fall back to individual process termination
+                        process.terminate()
+                        logger.debug(f"Sent SIGTERM to process {pid}")
+                        
+                        for child in children:
+                            try:
+                                child.terminate()
+                                logger.debug(f"Sent SIGTERM to child process {child.pid}")
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                pass
+                else:
+                    # Individual process termination
+                    process.terminate()
+                    logger.debug(f"Sent SIGTERM to process {pid}")
+                    
+                    for child in children:
+                        try:
+                            child.terminate()
+                            logger.debug(f"Sent SIGTERM to child process {child.pid}")
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
+                            
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                logger.info(f"Process {process_name} disappeared during termination")
+                return True
+            
+            # Wait for graceful termination with async sleep
+            wait_time = 0.1
+            elapsed = 0
+            while elapsed < timeout and psutil.pid_exists(pid):
+                await asyncio.sleep(wait_time)
+                elapsed += wait_time
+                wait_time = min(wait_time * 1.5, 2.0)  # Cap at 2 seconds
+                
+                # Check if process became zombie
+                try:
+                    if process.status() == psutil.STATUS_ZOMBIE:
+                        logger.info(f"{process_name} became zombie, considering stopped")
+                        return True
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    return True
+            
+            # Phase 2: Force termination if still running
+            if psutil.pid_exists(pid):
+                logger.warning(f"Force killing {process_name} (PID: {pid})")
+                try:
+                    # Refresh children list
+                    children = []
+                    try:
+                        process = psutil.Process(pid)
+                        children = process.children(recursive=True)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+                    
+                    if use_process_group:
+                        # Try process group kill
+                        try:
+                            pgid = os.getpgid(pid)
+                            os.killpg(pgid, signal.SIGKILL)
+                            logger.debug(f"Sent SIGKILL to process group {pgid}")
+                        except (ProcessLookupError, OSError, PermissionError):
+                            # Fall back to individual kill
+                            process.kill()
+                            logger.debug(f"Sent SIGKILL to process {pid}")
+                            
+                            for child in children:
+                                try:
+                                    child.kill()
+                                    logger.debug(f"Sent SIGKILL to child process {child.pid}")
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    pass
+                    else:
+                        # Individual process kill
+                        process.kill()
+                        logger.debug(f"Sent SIGKILL to process {pid}")
+                        
+                        for child in children:
+                            try:
+                                child.kill()
+                                logger.debug(f"Sent SIGKILL to child process {child.pid}")
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                pass
+                                
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    logger.info(f"Process {process_name} disappeared during force kill")
+                    return True
+                
+                # Final wait for force termination with async sleep
+                force_timeout = 5
+                for _ in range(force_timeout * 10):  # 0.1s intervals
+                    if not psutil.pid_exists(pid):
+                        break
+                    await asyncio.sleep(0.1)
+            
+            # Final status check
+            success = not psutil.pid_exists(pid)
+            if success:
+                logger.info(f"{process_name} terminated successfully")
+            else:
+                try:
+                    process = psutil.Process(pid)
+                    status = process.status()
+                    if status == psutil.STATUS_ZOMBIE:
+                        logger.warning(f"{process_name} is zombie but considered stopped")
+                        success = True
+                    else:
+                        logger.error(f"Failed to terminate {process_name} (PID: {pid}), status: {status}")
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    success = True
+                    
+            return success
+            
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            logger.info(f"Process {process_name} (PID: {pid}) no longer accessible")
+            return True
+        except Exception as e:
+            logger.error(f"Error terminating {process_name} (PID: {pid}): {e}")
+            return False
+
+    def _cleanup_service_metadata(self, force: bool = False) -> bool:
+        """
+        Clean up service metadata file with proper error handling.
+        
+        Args:
+            force: If True, remove file even if processes might still be running
+            
+        Returns:
+            bool: True if cleanup was successful, False otherwise
+        """
+        try:
+            if not os.path.exists(self.pickle_file):
+                logger.debug("Service metadata file already removed")
+                return True
+                
+            if not force:
+                # Verify that processes are actually stopped before cleanup
+                try:
+                    with open(self.pickle_file, "rb") as f:
+                        service_info = pickle.load(f)
+                    
+                    pid = service_info.get("pid")
+                    app_pid = service_info.get("app_pid")
+                    
+                    # Check if any processes are still running
+                    running_processes = []
+                    if pid and psutil.pid_exists(pid):
+                        running_processes.append(f"AI server (PID: {pid})")
+                    if app_pid and psutil.pid_exists(app_pid):
+                        running_processes.append(f"API server (PID: {app_pid})")
+                    
+                    if running_processes:
+                        logger.warning(f"Not cleaning up metadata - processes still running: {', '.join(running_processes)}")
+                        return False
+                        
+                except Exception as e:
+                    logger.warning(f"Could not verify process status, proceeding with cleanup: {e}")
+            
+            os.remove(self.pickle_file)
+            logger.info("Service metadata file removed successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error removing service metadata file: {str(e)}")
             return False
 
     def _get_model_template_path(self, model_family: str) -> str:
@@ -753,10 +1037,10 @@ class LocalAIManager:
         return len(freed_ports) == len([p for p, _ in ports_info if p])
     
     async def kill_ai_server(self) -> bool:
-        """Kill the AI server process if it's running (async version for API usage)."""
+        """Kill the AI server process if it's running (optimized async version)."""
         try:
             if not os.path.exists(self.pickle_file):
-                logger.warning("No PID found in service info, cannot kill AI server")
+                logger.warning("No service info found, cannot kill AI server")
                 return False
                 
             # Load service details from the pickle file
@@ -770,171 +1054,13 @@ class LocalAIManager:
                 
             logger.info(f"Attempting to kill AI server with PID {pid}")
             
-            # Check if process exists and get its status
-            if not psutil.pid_exists(pid):
-                logger.info(f"Process {pid} not found, assuming already stopped")
-                return True
-            
-            # Get process object and check its status
-            try:
-                process = psutil.Process(pid)
-                status = process.status()
-                if status == psutil.STATUS_ZOMBIE:
-                    logger.info(f"Process {pid} is already zombie, cleaning up")
-                    return True
-                elif status in [psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
-                    logger.info(f"Process {pid} is already dead/stopped")
-                    return True
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                logger.info(f"Process {pid} no longer accessible, assuming stopped")
-                return True
-            
-            # First attempt: Graceful termination
-            success = False
-            timeout = 15  # Total timeout for graceful termination
-            
-            try:
-                # Try to get all child processes first
-                children = []
-                try:
-                    parent = psutil.Process(pid)
-                    children = parent.children(recursive=True)
-                    logger.debug(f"Found {len(children)} child processes for AI server")
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-                
-                # Use the existing terminate_process_group logic adapted for async
-                
-                # Try process group termination first
-                try:
-                    pgid = os.getpgid(pid)
-                    logger.debug(f"Sending SIGTERM to process group {pgid}")
-                    os.killpg(pgid, signal.SIGTERM)
-                    logger.info(f"Successfully sent SIGTERM to process group {pgid}")
-                except (ProcessLookupError, OSError, PermissionError) as e:
-                    logger.debug(f"Process group termination failed: {e}")
-                    # Fall back to individual process termination
-                    try:
-                        parent = psutil.Process(pid)
-                        parent.terminate()
-                        logger.info(f"Successfully sent SIGTERM to process {pid}")
-                        
-                        # Also terminate children individually if group kill failed
-                        for child in children:
-                            try:
-                                child.terminate()
-                                logger.debug(f"Terminated child process {child.pid}")
-                            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                pass
-                    except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-                        logger.warning(f"Could not terminate process {pid}: {e}")
-                        return True  # Process might already be gone
-
-                # Wait for graceful termination
-                start_time = time.time()
-                check_interval = 0.5
-                while time.time() - start_time < timeout:
-                    try:
-                        if not psutil.pid_exists(pid):
-                            logger.info(f"AI server process terminated gracefully")
-                            success = True
-                            break
-                        
-                        # Check if it's a zombie that needs cleanup
-                        try:
-                            process = psutil.Process(pid)
-                            if process.status() == psutil.STATUS_ZOMBIE:
-                                logger.info(f"AI server became zombie, considering it stopped")
-                                success = True
-                                break
-                        except (psutil.NoSuchProcess, psutil.AccessDenied):
-                            success = True
-                            break
-                            
-                        await asyncio.sleep(check_interval)
-                    except Exception:
-                        # If we can't check, assume it's gone
-                        success = True
-                        break
-                
-                if success:
-                    return True
-                    
-            except Exception as e:
-                logger.error(f"Error during graceful termination: {e}")
-            
-            # Second attempt: Force termination
-            if not success and psutil.pid_exists(pid):
-                logger.warning(f"Process {pid} still running after SIGTERM, sending SIGKILL")
-                try:
-                    # Get fresh list of children
-                    children = []
-                    try:
-                        parent = psutil.Process(pid)
-                        children = parent.children(recursive=True)
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
-                    
-                    # Try process group kill first
-                    try:
-                        pgid = os.getpgid(pid)
-                        os.killpg(pgid, signal.SIGKILL)
-                        logger.info(f"Successfully sent SIGKILL to process group {pgid}")
-                    except (ProcessLookupError, OSError, PermissionError):
-                        # Fall back to individual process kill
-                        try:
-                            parent = psutil.Process(pid)
-                            parent.kill()
-                            logger.info(f"Successfully sent SIGKILL to process {pid}")
-                            
-                            # Kill children individually
-                            for child in children:
-                                try:
-                                    child.kill()
-                                    logger.debug(f"Killed child process {child.pid}")
-                                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                    pass
-                        except (psutil.NoSuchProcess, psutil.AccessDenied):
-                            logger.info(f"Process disappeared during force kill")
-                            return True
-                    
-                    # Wait for force termination
-                    force_timeout = 10  # Max 10 seconds for force kill
-                    start_time = time.time()
-                    while time.time() - start_time < force_timeout:
-                        if not psutil.pid_exists(pid):
-                            logger.info(f"AI server killed successfully")
-                            success = True
-                            break
-                        await asyncio.sleep(0.2)
-                    
-                    # Final check
-                    if psutil.pid_exists(pid):
-                        try:
-                            process = psutil.Process(pid)
-                            status = process.status()
-                            if status == psutil.STATUS_ZOMBIE:
-                                logger.warning(f"AI server is zombie but considered stopped")
-                                success = True
-                            else:
-                                logger.error(f"Failed to kill AI server (PID: {pid}), status: {status}")
-                                return False
-                        except (psutil.NoSuchProcess, psutil.AccessDenied):
-                            success = True
-                    else:
-                        success = True
-                        
-                except Exception as e:
-                    logger.error(f"Error force-killing AI server (PID: {pid}): {str(e)}")
-                    return False
+            # Use the optimized async termination method
+            success = await self._terminate_process_safely_async(pid, "AI server", timeout=15)
             
             # Clean up service info if process was successfully killed
             if success:
                 try:
                     # Remove PID from service info to indicate server is no longer running
-                    with open(self.pickle_file, "rb") as f:
-                        service_info = pickle.load(f)
-                    
                     service_info.pop("pid", None)
                     
                     with open(self.pickle_file, "wb") as f:
