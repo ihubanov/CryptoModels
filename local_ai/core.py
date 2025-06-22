@@ -44,6 +44,8 @@ class LocalAIManager:
         if not self.llama_server_path or not os.path.exists(self.llama_server_path):
             raise LocalAIServiceError("llama-server executable not found in LLAMA_SERVER or PATH")
         self.start_lock_file = Path(os.getenv("START_LOCK_FILE", "start_lock.lock"))
+        self.logs_dir = Path("logs")
+        self.logs_dir.mkdir(exist_ok=True)
         
     def _get_free_port(self) -> int:
         """Get a free port number."""
@@ -230,8 +232,7 @@ class LocalAIManager:
                 logger.info(f"Starting process: {' '.join(running_ai_command)}")
                 service_metadata["running_ai_command"] = running_ai_command
                 # Create log files for stdout and stderr for AI process
-                os.makedirs("logs", exist_ok=True)
-                ai_log_stderr = Path(f"logs/ai.log")
+                ai_log_stderr = self.logs_dir / "ai.log"
                 ai_process = None
                 try:
                     with open(ai_log_stderr, 'w') as stderr_log:
@@ -262,8 +263,7 @@ class LocalAIManager:
                 ]
                 logger.info(f"Starting process: {' '.join(uvicorn_command)}")
                 # Create log files for stdout and stderr
-                os.makedirs("logs", exist_ok=True)
-                api_log_stderr = Path(f"logs/api.log")
+                api_log_stderr = self.logs_dir / "api.log"
                 try:
                     with open(api_log_stderr, 'w') as stderr_log:
                         apis_process = subprocess.Popen(
@@ -749,3 +749,276 @@ class LocalAIManager:
                 logger.warning(f"{service_name} port {port} still in use after {max_retries} checks")
         
         return len(freed_ports) == len([p for p, _ in ports_info if p])
+    
+    async def kill_ai_server(self) -> bool:
+        """Kill the AI server process if it's running (async version for API usage)."""
+        try:
+            if not os.path.exists(self.pickle_file):
+                logger.warning("No PID found in service info, cannot kill AI server")
+                return False
+                
+            # Load service details from the pickle file
+            with open(self.pickle_file, "rb") as f:
+                service_info = pickle.load(f)
+                
+            pid = service_info.get("pid")
+            if not pid:
+                logger.warning("No PID found in service info, cannot kill AI server")
+                return False
+                
+            logger.info(f"Attempting to kill AI server with PID {pid}")
+            
+            # Check if process exists and get its status
+            if not psutil.pid_exists(pid):
+                logger.info(f"Process {pid} not found, assuming already stopped")
+                return True
+            
+            # Get process object and check its status
+            try:
+                process = psutil.Process(pid)
+                status = process.status()
+                if status == psutil.STATUS_ZOMBIE:
+                    logger.info(f"Process {pid} is already zombie, cleaning up")
+                    return True
+                elif status in [psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
+                    logger.info(f"Process {pid} is already dead/stopped")
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                logger.info(f"Process {pid} no longer accessible, assuming stopped")
+                return True
+            
+            # First attempt: Graceful termination
+            success = False
+            timeout = 15  # Total timeout for graceful termination
+            
+            try:
+                # Try to get all child processes first
+                children = []
+                try:
+                    parent = psutil.Process(pid)
+                    children = parent.children(recursive=True)
+                    logger.debug(f"Found {len(children)} child processes for AI server")
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+                
+                # Use the existing terminate_process_group logic adapted for async
+                import signal
+                
+                # Try process group termination first
+                try:
+                    pgid = os.getpgid(pid)
+                    logger.debug(f"Sending SIGTERM to process group {pgid}")
+                    os.killpg(pgid, signal.SIGTERM)
+                    logger.info(f"Successfully sent SIGTERM to process group {pgid}")
+                except (ProcessLookupError, OSError, PermissionError) as e:
+                    logger.debug(f"Process group termination failed: {e}")
+                    # Fall back to individual process termination
+                    try:
+                        parent = psutil.Process(pid)
+                        parent.terminate()
+                        logger.info(f"Successfully sent SIGTERM to process {pid}")
+                        
+                        # Also terminate children individually if group kill failed
+                        for child in children:
+                            try:
+                                child.terminate()
+                                logger.debug(f"Terminated child process {child.pid}")
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                pass
+                    except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                        logger.warning(f"Could not terminate process {pid}: {e}")
+                        return True  # Process might already be gone
+
+                # Wait for graceful termination
+                start_time = time.time()
+                check_interval = 0.5
+                while time.time() - start_time < timeout:
+                    try:
+                        if not psutil.pid_exists(pid):
+                            logger.info(f"AI server process terminated gracefully")
+                            success = True
+                            break
+                        
+                        # Check if it's a zombie that needs cleanup
+                        try:
+                            process = psutil.Process(pid)
+                            if process.status() == psutil.STATUS_ZOMBIE:
+                                logger.info(f"AI server became zombie, considering it stopped")
+                                success = True
+                                break
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            success = True
+                            break
+                            
+                        await asyncio.sleep(check_interval)
+                    except Exception:
+                        # If we can't check, assume it's gone
+                        success = True
+                        break
+                
+                if success:
+                    return True
+                    
+            except Exception as e:
+                logger.error(f"Error during graceful termination: {e}")
+            
+            # Second attempt: Force termination
+            if not success and psutil.pid_exists(pid):
+                logger.warning(f"Process {pid} still running after SIGTERM, sending SIGKILL")
+                try:
+                    # Get fresh list of children
+                    children = []
+                    try:
+                        parent = psutil.Process(pid)
+                        children = parent.children(recursive=True)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+                    
+                    # Try process group kill first
+                    try:
+                        pgid = os.getpgid(pid)
+                        os.killpg(pgid, signal.SIGKILL)
+                        logger.info(f"Successfully sent SIGKILL to process group {pgid}")
+                    except (ProcessLookupError, OSError, PermissionError):
+                        # Fall back to individual process kill
+                        try:
+                            parent = psutil.Process(pid)
+                            parent.kill()
+                            logger.info(f"Successfully sent SIGKILL to process {pid}")
+                            
+                            # Kill children individually
+                            for child in children:
+                                try:
+                                    child.kill()
+                                    logger.debug(f"Killed child process {child.pid}")
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    pass
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            logger.info(f"Process disappeared during force kill")
+                            return True
+                    
+                    # Wait for force termination
+                    force_timeout = 10  # Max 10 seconds for force kill
+                    start_time = time.time()
+                    while time.time() - start_time < force_timeout:
+                        if not psutil.pid_exists(pid):
+                            logger.info(f"AI server killed successfully")
+                            success = True
+                            break
+                        await asyncio.sleep(0.2)
+                    
+                    # Final check
+                    if psutil.pid_exists(pid):
+                        try:
+                            process = psutil.Process(pid)
+                            status = process.status()
+                            if status == psutil.STATUS_ZOMBIE:
+                                logger.warning(f"AI server is zombie but considered stopped")
+                                success = True
+                            else:
+                                logger.error(f"Failed to kill AI server (PID: {pid}), status: {status}")
+                                return False
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            success = True
+                    else:
+                        success = True
+                        
+                except Exception as e:
+                    logger.error(f"Error force-killing AI server (PID: {pid}): {str(e)}")
+                    return False
+            
+            # Clean up using the existing stop() method logic
+            if success:
+                logger.info("AI server stopped successfully")
+                return True
+            else:
+                logger.error("Failed to stop AI server")
+                return False
+            
+        except Exception as e:
+            logger.error(f"Error killing AI server: {str(e)}", exc_info=True)
+            return False
+    
+    async def reload_ai_server(self, service_start_timeout: int = 120) -> bool:
+        """Reload the AI server process (async version for API usage)."""
+        try:
+            if not os.path.exists(self.pickle_file):
+                logger.error("No service info found, cannot reload AI server")
+                return False
+                
+            # Load service details from the pickle file
+            with open(self.pickle_file, "rb") as f:
+                service_info = pickle.load(f)
+                
+            running_ai_command = service_info.get("running_ai_command")
+            if not running_ai_command:
+                logger.error("No running_ai_command found in service info, cannot reload AI server")
+                return False
+                
+            logger.info(f"Reloading AI server with command: {running_ai_command}")
+
+            ai_log_stderr = self.logs_dir / "ai.log"
+            
+            try:
+                with open(ai_log_stderr, 'w') as stderr_log:
+                    ai_process = subprocess.Popen(
+                        running_ai_command,
+                        stderr=stderr_log,
+                        preexec_fn=os.setsid
+                    )
+                logger.info(f"AI logs written to {ai_log_stderr}")
+            except Exception as e:
+                logger.error(f"Error starting AI service: {str(e)}", exc_info=True)
+                return False
+            
+            # Wait for the process to start by checking the health endpoint
+            port = service_info["port"]
+            if not wait_for_health(port, timeout=service_start_timeout):
+                logger.error(f"AI server failed to start within {service_start_timeout} seconds")
+                return False
+            
+            # Check if the process is running
+            if ai_process.poll() is None:
+                # Update the service info with new PID
+                service_info["pid"] = ai_process.pid
+                with open(self.pickle_file, "wb") as f:
+                    pickle.dump(service_info, f)
+                logger.info(f"Successfully reloaded AI server with PID {ai_process.pid}")
+                return True
+            else:
+                logger.error(f"Failed to reload AI server: Process exited with code {ai_process.returncode}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error reloading AI server: {str(e)}", exc_info=True)
+            return False
+    
+    def get_service_info(self) -> Dict[str, Any]:
+        """Get service info from pickle file with error handling."""
+        if not os.path.exists(self.pickle_file):
+            raise LocalAIServiceError("Service information not available")
+        
+        try:
+            with open(self.pickle_file, "rb") as f:
+                return pickle.load(f)
+        except Exception as e:
+            raise LocalAIServiceError(f"Failed to load service info: {str(e)}")
+    
+    def update_service_info(self, updates: Dict[str, Any]) -> bool:
+        """Update service information in the pickle file."""
+        try:
+            if os.path.exists(self.pickle_file):
+                with open(self.pickle_file, "rb") as f:
+                    service_info = pickle.load(f)
+            else:
+                service_info = {}
+            
+            service_info.update(updates)
+            
+            with open(self.pickle_file, "wb") as f:
+                pickle.dump(service_info, f)
+            
+            return True
+        except Exception as e:
+            logger.error(f"Failed to update service info: {str(e)}")
+            return False
