@@ -551,6 +551,7 @@ class LocalAIManager:
             "-fa",
             "--no-webui",
             "-ngl", "9999",
+            "--pooling", "cls",
             "--jinja",
             "--reasoning-format", "none"
         ]
