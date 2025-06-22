@@ -62,8 +62,8 @@ def parse_args():
         "upload", help="Upload model files to IPFS"
     )
     upload_command.add_argument(
-        "--task", type=str, default="chat", choices=["chat", "embedding"],
-        help = "Task type (chat or embedding)"
+        "--task", type=str, default="chat", choices=["chat", "embed"],
+        help = "Task type (chat or embed)"
     )
     upload_command.add_argument(
         "--folder-name", type=str, required=True,

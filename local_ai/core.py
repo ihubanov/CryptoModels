@@ -183,8 +183,8 @@ class LocalAIManager:
                 metadata = self._load_or_fetch_metadata(hash, model_dir)
                 folder_name = metadata.get("folder_name", "")
                 task = metadata.get("task", "chat")
-                if task == "embedding":
-                    running_ai_command = self._build_embedding_command(local_model_path, local_ai_port, host)
+                if task == "embed":
+                    running_ai_command = self._build_embed_command(local_model_path, local_ai_port, host)
                 else:
                     is_multimodal, projector_path = self._check_multimodal_support(local_model_path)
                     
@@ -523,8 +523,8 @@ class LocalAIManager:
             return None
         return best_practice_path
     
-    def _build_embedding_command(self, model_path: str, port: int, host: str) -> list:
-        """Build the embedding command with common parameters."""
+    def _build_embed_command(self, model_path: str, port: int, host: str) -> list:
+        """Build the embed command with common parameters."""
         command = [
             self.llama_server_path,
             "--model", str(model_path),
