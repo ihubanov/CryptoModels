@@ -62,13 +62,13 @@ def parse_args():
         "upload", help="Upload model files to IPFS"
     )
     upload_command.add_argument(
-        "--folder-name", type=str, required=True,
-        help="Folder containing model files"
+        "--task", type=str, default="chat", choices=["chat", "embedding"],
+        help = "Task type (chat or embedding)"
     )
     upload_command.add_argument(
-        "--model-family", type=str, required=False,
-        help = "Model family (e.g., GPT-3, GPT-4, etc.)"
-    )   
+        "--folder-name", type=str, required=True,
+        help="Folder containing model files"
+    ) 
     upload_command.add_argument(
         "--zip-chunk-size", type=int, default=512,
         help="Chunk size for splitting compressed files"
@@ -140,7 +140,7 @@ def handle_status(args):
 
 def handle_upload(args):
     kwargs = {
-        "family": args.model_family,
+        "task": args.task,
         "ram": args.ram,
         "hf_repo": args.hf_repo,
         "hf_file": args.hf_file,

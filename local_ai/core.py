@@ -1,7 +1,6 @@
 import os
 import json
 import time
-import signal
 import pickle
 import psutil
 import asyncio
@@ -181,46 +180,50 @@ class LocalAIManager:
 
                 # Optimized metadata and multimodal checking
                 model_dir = os.path.dirname(local_model_path)
-                folder_name, metadata = self._load_or_fetch_metadata(hash, model_dir)
-                is_multimodal, projector_path = self._check_multimodal_support(local_model_path)
-                
-                service_metadata = self._create_service_metadata(
-                    hash, local_model_path, local_ai_port, port, context_length, 
-                    metadata, is_multimodal, projector_path
-                )
-
-                if "gemma" in folder_name.lower():
-                    template_path, best_practice_path = self._get_family_template_and_practice("gemma")
-                    # Gemma models are memory intensive, so we reduce the context length
-                    context_length = context_length // 2
-                    running_ai_command = self._build_ai_command(
-                        local_model_path, local_ai_port, host, context_length, template_path
-                    )
-                elif "qwen25" in folder_name.lower():
-                    template_path, best_practice_path = self._get_family_template_and_practice("qwen25")
-                    running_ai_command = self._build_ai_command(
-                        local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
-                    )
-                elif "qwen3" in folder_name.lower():
-                    template_path, best_practice_path = self._get_family_template_and_practice("qwen3")
-                    running_ai_command = self._build_ai_command(
-                        local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
-                    )
-                elif "llama" in folder_name.lower():
-                    template_path, best_practice_path = self._get_family_template_and_practice("llama")
-                    running_ai_command = self._build_ai_command(
-                        local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
-                    )
+                metadata = self._load_or_fetch_metadata(hash, model_dir)
+                folder_name = metadata.get("folder_name", "")
+                task = metadata.get("task", "chat")
+                if task == "embedding":
+                    running_ai_command = self._build_embedding_command(local_model_path, local_ai_port, host)
                 else:
-                    running_ai_command = self._build_ai_command(
-                        local_model_path, local_ai_port, host, context_length
+                    is_multimodal, projector_path = self._check_multimodal_support(local_model_path)
+                    
+                    service_metadata = self._create_service_metadata(
+                        hash, local_model_path, local_ai_port, port, context_length, 
+                        metadata, is_multimodal, projector_path
                     )
 
-                if service_metadata["multimodal"]:
-                    running_ai_command.extend([
-                        "--mmproj", str(local_projector_path)
-                    ])
+                    if "gemma" in folder_name.lower():
+                        template_path, best_practice_path = self._get_family_template_and_practice("gemma")
+                        # Gemma models are memory intensive, so we reduce the context length
+                        context_length = context_length // 2
+                        running_ai_command = self._build_ai_command(
+                            local_model_path, local_ai_port, host, context_length, template_path
+                        )
+                    elif "qwen25" in folder_name.lower():
+                        template_path, best_practice_path = self._get_family_template_and_practice("qwen25")
+                        running_ai_command = self._build_ai_command(
+                            local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
+                        )
+                    elif "qwen3" in folder_name.lower():
+                        template_path, best_practice_path = self._get_family_template_and_practice("qwen3")
+                        running_ai_command = self._build_ai_command(
+                            local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
+                        )
+                    elif "llama" in folder_name.lower():
+                        template_path, best_practice_path = self._get_family_template_and_practice("llama")
+                        running_ai_command = self._build_ai_command(
+                            local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
+                        )
+                    else:
+                        running_ai_command = self._build_ai_command(
+                            local_model_path, local_ai_port, host, context_length
+                        )
 
+                    if service_metadata["multimodal"]:
+                        running_ai_command.extend([
+                            "--mmproj", str(local_projector_path)
+                        ])
                 logger.info(f"Starting process: {' '.join(running_ai_command)}")
                 service_metadata["running_ai_command"] = running_ai_command
                 # Create log files for stdout and stderr for AI process
@@ -519,6 +522,20 @@ class LocalAIManager:
         if not os.path.exists(best_practice_path):
             return None
         return best_practice_path
+    
+    def _build_embedding_command(self, model_path: str, port: int, host: str) -> list:
+        """Build the embedding command with common parameters."""
+        command = [
+            self.llama_server_path,
+            "--model", str(model_path),
+            "--port", str(port),
+            "--host", host,
+            "--embedding",
+            "--pooling", "cls",
+            "-ub", "8192",
+            "-ngl", "9999"
+        ]
+        return command
 
     def _build_ai_command(self, model_path: str, port: int, host: str, context_length: int, template_path: Optional[str] = None, best_practice_path: Optional[str] = None) -> list:
         """Build the AI command with common parameters."""
@@ -529,11 +546,8 @@ class LocalAIManager:
             "--host", host,
             "-c", str(context_length),
             "-fa",
-            "--pooling", "cls",
             "--no-webui",
             "-ngl", "9999",
-            "--no-mmap",
-            "--mlock",
             "--jinja",
             "--reasoning-format", "none"
         ]
@@ -548,10 +562,10 @@ class LocalAIManager:
                     command.extend([f"--{key}", str(value)])
         return command
 
-    def _load_or_fetch_metadata(self, hash: str, model_dir: str) -> tuple[str, dict]:
+    def _load_or_fetch_metadata(self, hash: str, model_dir: str) -> dict:
         """
         Load metadata from cache or fetch from remote with optimized I/O.
-        Returns (folder_name, metadata_dict)
+        Returns metadata_dict
         """
         metadata_file = os.path.join(model_dir, f"{hash}.json")
         
@@ -560,9 +574,8 @@ class LocalAIManager:
             try:
                 with open(metadata_file, "r") as f:
                     metadata = json.load(f)
-                    folder_name = metadata.get("folder_name", "")
                     logger.info(f"Loaded metadata from cache: {metadata_file}")
-                    return folder_name, metadata
+                    return metadata
             except (json.JSONDecodeError, IOError) as e:
                 logger.warning(f"Invalid metadata file {metadata_file}, will fetch from remote: {e}")
                 # Remove corrupted file
@@ -577,9 +590,7 @@ class LocalAIManager:
         
         if not response_json:
             logger.error(f"Failed to fetch metadata from {filecoin_url}")
-            return "", {}
-        
-        folder_name = response_json.get("folder_name", "")
+            return {}
         
         # Save to cache (create directory if needed)
         try:
@@ -590,7 +601,7 @@ class LocalAIManager:
         except IOError as e:
             logger.warning(f"Failed to cache metadata: {e}")
         
-        return folder_name, response_json
+        return response_json
     
     def _check_multimodal_support(self, local_model_path: str) -> tuple[bool, Optional[str]]:
         """
@@ -613,8 +624,7 @@ class LocalAIManager:
             "context_length": context_length,
             "last_activity": time.time(),
             "multimodal": is_multimodal,
-            "local_projector_path": projector_path,
-            "family": metadata.get("family", "")
+            "local_projector_path": projector_path
         }
 
     def _acquire_start_lock(self, hash: str, host: str, port: int) -> bool:
