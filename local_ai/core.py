@@ -185,12 +185,15 @@ class LocalAIManager:
                 task = metadata.get("task", "chat")
                 if task == "embed":
                     running_ai_command = self._build_embed_command(local_model_path, local_ai_port, host)
+                    service_metadata = self._create_service_metadata(
+                        hash, local_model_path, local_ai_port, port, context_length, task, False, None
+                    )
                 else:
                     is_multimodal, projector_path = self._check_multimodal_support(local_model_path)
                     
                     service_metadata = self._create_service_metadata(
                         hash, local_model_path, local_ai_port, port, context_length, 
-                        metadata, is_multimodal, projector_path
+                        task, is_multimodal, projector_path
                     )
 
                     if "gemma" in folder_name.lower():
@@ -613,10 +616,11 @@ class LocalAIManager:
         return is_multimodal, projector_path if is_multimodal else None
 
     def _create_service_metadata(self, hash: str, local_model_path: str, local_ai_port: int, 
-                                port: int, context_length: int, metadata: dict, 
+                                port: int, context_length: int, task: str, 
                                 is_multimodal: bool, projector_path: Optional[str]) -> dict:
         """Create service metadata dictionary with all required fields."""
         return {
+            "task": task,
             "hash": hash,
             "port": local_ai_port,
             "local_text_path": local_model_path,
