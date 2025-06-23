@@ -158,6 +158,43 @@ class LocalAIManager:
         if not self._acquire_start_lock(hash, host, port):
             return False
         
+        # Track processes for cleanup on interruption
+        ai_process = None
+        apis_process = None
+        
+        def cleanup_processes():
+            """Clean up any running processes."""
+            if ai_process and ai_process.poll() is None:
+                logger.info("Cleaning up AI process due to interruption...")
+                try:
+                    ai_process.terminate()
+                    ai_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    ai_process.kill()
+                except Exception as e:
+                    logger.error(f"Error cleaning up AI process: {e}")
+            
+            if apis_process and apis_process.poll() is None:
+                logger.info("Cleaning up API process due to interruption...")
+                try:
+                    apis_process.terminate()
+                    apis_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    apis_process.kill()
+                except Exception as e:
+                    logger.error(f"Error cleaning up API process: {e}")
+        
+        def signal_handler(signum, frame):
+            """Handle interruption signals."""
+            logger.info(f"Received signal {signum}, cleaning up processes...")
+            cleanup_processes()
+            self._release_start_lock()
+            exit(1)
+        
+        # Set up signal handlers for graceful cleanup
+        original_sigint = signal.signal(signal.SIGINT, signal_handler)
+        original_sigterm = signal.signal(signal.SIGTERM, signal_handler)
+        
         try:
             # Check if the requested port is available before doing expensive operations
             if not self._check_port_availability(host, port):
@@ -234,7 +271,6 @@ class LocalAIManager:
                 service_metadata["running_ai_command"] = running_ai_command
                 # Create log files for stdout and stderr for AI process
                 ai_log_stderr = self.logs_dir / "ai.log"
-                ai_process = None
                 try:
                     with open(ai_log_stderr, 'w') as stderr_log:
                         ai_process = subprocess.Popen(
@@ -245,11 +281,12 @@ class LocalAIManager:
                     logger.info(f"AI logs written to {ai_log_stderr}")
                 except Exception as e:
                     logger.error(f"Error starting AI service: {str(e)}", exc_info=True)
+                    cleanup_processes()
                     return False
         
                 if not wait_for_health(local_ai_port):
                     logger.error(f"Service failed to start within 600 seconds")
-                    ai_process.terminate()
+                    cleanup_processes()
                     return False
                 
                 logger.info(f"[LOCAL-AI] Local AI service started on port {local_ai_port}")
@@ -275,13 +312,12 @@ class LocalAIManager:
                     logger.info(f"API logs written to {api_log_stderr}")
                 except Exception as e:
                     logger.error(f"Error starting FastAPI app: {str(e)}", exc_info=True)
-                    ai_process.terminate()
+                    cleanup_processes()
                     return False
                 
                 if not wait_for_health(port):
                     logger.error(f"API service failed to start within 600 seconds")
-                    ai_process.terminate()
-                    apis_process.terminate()
+                    cleanup_processes()
                     return False
 
                 logger.info(f"Service started on port {port} for model: {hash}")
@@ -302,16 +338,20 @@ class LocalAIManager:
                 except requests.exceptions.RequestException as e:
                     logger.error(f"Failed to update service metadata: {str(e)}")
                     # Stop the partially started service
-                    self.stop()
+                    cleanup_processes()
                     return False
                 
                 return True
 
             except Exception as e:
                 logger.error(f"Error starting AI service: {str(e)}", exc_info=True)
+                cleanup_processes()
                 return False
                 
         finally:
+            # Restore original signal handlers
+            signal.signal(signal.SIGINT, original_sigint)
+            signal.signal(signal.SIGTERM, original_sigterm)
             # Always remove the lock when done (success or failure)
             self._release_start_lock()
 
