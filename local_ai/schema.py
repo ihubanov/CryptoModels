@@ -6,6 +6,8 @@ import re
 from typing_extensions import Literal
 from pydantic import BaseModel, Field, validator, root_validator
 from typing import List, Dict, Optional, Union, Any, ClassVar
+import time
+import uuid
 
 # Precompile regex patterns for better performance
 UNICODE_BOX_PATTERN = re.compile(r'\\u25[0-9a-fA-F]{2}')
@@ -298,4 +300,35 @@ class ChatCompletionChunk(BaseModel):
     created: int = Field(..., description="The creation timestamp of the chunk.")
     model: str = Field(..., description="The model used for the chunk.")
     object: Literal["chat.completion.chunk"] = Field(..., description="The object type, always 'chat.completion.chunk'.")
-    system_fingerprint: Optional[str] = Field(None, description="System fingerprint for the completion") 
+    system_fingerprint: Optional[str] = Field(None, description="System fingerprint for the completion")
+
+# OpenAI-compatible /v1/models endpoint schemas
+class ModelPermission(BaseModel):
+    id: str = Field(default_factory=lambda: f"modelperm-{uuid.uuid4().hex}")
+    object: str = "model_permission"
+    created: int = Field(default_factory=lambda: int(time.time()))
+    allow_create_engine: bool = False
+    allow_sampling: bool = True
+    allow_logprobs: bool = True
+    allow_search_indices: bool = False
+    allow_view: bool = True
+    allow_fine_tuning: bool = False
+    organization: str = "*"
+    group: Optional[str] = None
+    is_blocking: bool = False
+
+class ModelCard(BaseModel):
+    id: str
+    object: str = "model"
+    created: int = Field(default_factory=lambda: int(time.time()))
+    owned_by: str = "user" # Consistent with potential OpenAI examples
+    root: Optional[str] = None
+    parent: Optional[str] = None
+    permission: List[ModelPermission] = Field(default_factory=lambda: [ModelPermission()])
+    family: Optional[str] = None
+    ram: Optional[float] = None # Aligned to use 'ram' consistent with service_info
+    folder_name: Optional[str] = None
+
+class ModelList(BaseModel):
+    object: str = "list"
+    data: List[ModelCard] = [] 

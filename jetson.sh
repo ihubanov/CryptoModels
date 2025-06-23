@@ -317,9 +317,27 @@ log_message "Virtual environment activated."
 # Function: install_or_update_local_ai
 # Uninstalls and reinstalls the local-ai toolkit from the GitHub repository.
 install_or_update_local_ai() {
+    # Get the current branch
+    BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    # Get the URL of the remote (assume 'origin' or fallback to first remote)
+    REMOTE=$(git remote get-url origin 2>/dev/null)
+    if [ -z "$REMOTE" ]; then
+        REMOTE=$(git remote -v | awk 'NR==1{print $2}')
+    fi
+
+    if [ -z "$BRANCH" ] || [ -z "$REMOTE" ]; then
+        handle_error 1 "Could not detect git remote or branch."
+        return 1
+    fi
+
+    # If remote is SSH, convert to HTTPS for pip
+    if [[ $REMOTE =~ ^git@([^:]+):(.+)$ ]]; then
+        REMOTE="https://${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+    fi
+
     pip uninstall local-ai -y || handle_error $? "Failed to uninstall local-ai."
-    pip install -q git+https://github.com/eternalai-org/local-ai.git || handle_error $? "Failed to install/update local-ai toolkit."
-    log_message "local-ai toolkit installed/updated."
+    pip install -q "git+${REMOTE}@${BRANCH}" || handle_error $? "Failed to install/update local-ai toolkit."
+    log_message "local-ai toolkit installed/updated from ${REMOTE}@${BRANCH}."
 }
 
 log_message "Setting up local-ai toolkit..."
