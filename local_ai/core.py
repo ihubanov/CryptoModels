@@ -2,7 +2,7 @@ import os
 import json
 import time
 import signal
-import pickle
+import msgpack
 import psutil
 import asyncio
 import socket
@@ -39,7 +39,7 @@ class LocalAIManager:
     
     def __init__(self):
         """Initialize the LocalAIManager with optimized defaults."""       
-        self.pickle_file = Path(os.getenv("RUNNING_SERVICE_FILE", "running_service.pkl"))
+        self.msgpack_file = Path(os.getenv("RUNNING_SERVICE_FILE", "running_service.msgpack"))
         self.loaded_models: Dict[str, Any] = {}
         self.llama_server_path = os.getenv("LLAMA_SERVER")
         if not self.llama_server_path or not os.path.exists(self.llama_server_path):
@@ -61,14 +61,14 @@ class LocalAIManager:
         Returns:
             bool: True if the service restarted successfully, False otherwise.
         """
-        if not self.pickle_file.exists():
+        if not self.msgpack_file.exists():
             logger.warning("No running AI service to restart.")
             return False
         
         try:
-            # Load service details from the pickle file
-            with open(self.pickle_file, "rb") as f:
-                service_info = pickle.load(f)
+            # Load service details from the msgpack file
+            with open(self.msgpack_file, "rb") as f:
+                service_info = msgpack.load(f)
             
             hash = service_info.get("hash")
             port = service_info.get("app_port")
@@ -318,8 +318,8 @@ class LocalAIManager:
     def _dump_running_service(self, metadata: dict):
         """Dump the running service details to a file."""
         try:
-            with open(self.pickle_file, "wb") as f:
-                pickle.dump(metadata, f)
+            with open(self.msgpack_file, "wb") as f:
+                msgpack.dump(metadata, f)
         except Exception as e:
             logger.error(f"Error dumping running service: {str(e)}", exc_info=True)
             return False
@@ -331,13 +331,13 @@ class LocalAIManager:
         Returns:
             Optional[str]: Running model hash or None if no healthy service exists.
         """
-        if not self.pickle_file.exists():
+        if not self.msgpack_file.exists():
             return None
 
         try:
-            # Load service info from pickle file
-            with open(self.pickle_file, "rb") as f:
-                service_info = pickle.load(f)   
+            # Load service info from msgpack file
+            with open(self.msgpack_file, "rb") as f:
+                service_info = msgpack.load(f)   
             model_hash = service_info.get("hash")      
             return model_hash
 
@@ -352,14 +352,14 @@ class LocalAIManager:
         Returns:
             bool: True if the service stopped successfully, False otherwise.
         """
-        if not os.path.exists(self.pickle_file):
+        if not os.path.exists(self.msgpack_file):
             logger.warning("No running AI service to stop.")
             return False
 
         try:
-            # Load service details from the pickle file
-            with open(self.pickle_file, "rb") as f:
-                service_info = pickle.load(f)
+            # Load service details from the msgpack file
+            with open(self.msgpack_file, "rb") as f:
+                service_info = msgpack.load(f)
             
             hash_val = service_info.get("hash")
             pid = service_info.get("pid")
@@ -760,15 +760,15 @@ class LocalAIManager:
             bool: True if cleanup was successful, False otherwise
         """
         try:
-            if not os.path.exists(self.pickle_file):
+            if not os.path.exists(self.msgpack_file):
                 logger.debug("Service metadata file already removed")
                 return True
                 
             if not force:
                 # Verify that processes are actually stopped before cleanup
                 try:
-                    with open(self.pickle_file, "rb") as f:
-                        service_info = pickle.load(f)
+                    with open(self.msgpack_file, "rb") as f:
+                        service_info = msgpack.load(f)
                     
                     pid = service_info.get("pid")
                     app_pid = service_info.get("app_pid")
@@ -787,7 +787,7 @@ class LocalAIManager:
                 except Exception as e:
                     logger.warning(f"Could not verify process status, proceeding with cleanup: {e}")
             
-            os.remove(self.pickle_file)
+            os.remove(self.msgpack_file)
             logger.info("Service metadata file removed successfully")
             return True
             
@@ -1039,13 +1039,13 @@ class LocalAIManager:
     async def kill_ai_server(self) -> bool:
         """Kill the AI server process if it's running (optimized async version)."""
         try:
-            if not os.path.exists(self.pickle_file):
+            if not os.path.exists(self.msgpack_file):
                 logger.warning("No service info found, cannot kill AI server")
                 return False
                 
-            # Load service details from the pickle file
-            with open(self.pickle_file, "rb") as f:
-                service_info = pickle.load(f)
+            # Load service details from the msgpack file
+            with open(self.msgpack_file, "rb") as f:
+                service_info = msgpack.load(f)
                 
             pid = service_info.get("pid")
             if not pid:
@@ -1063,8 +1063,8 @@ class LocalAIManager:
                     # Remove PID from service info to indicate server is no longer running
                     service_info.pop("pid", None)
                     
-                    with open(self.pickle_file, "wb") as f:
-                        pickle.dump(service_info, f)
+                    with open(self.msgpack_file, "wb") as f:
+                        msgpack.dump(service_info, f)
                     
                     logger.info("AI server stopped successfully and service info cleaned up")
                 except Exception as e:
@@ -1082,13 +1082,13 @@ class LocalAIManager:
     async def reload_ai_server(self, service_start_timeout: int = 120) -> bool:
         """Reload the AI server process (async version for API usage)."""
         try:
-            if not os.path.exists(self.pickle_file):
+            if not os.path.exists(self.msgpack_file):
                 logger.error("No service info found, cannot reload AI server")
                 return False
                 
-            # Load service details from the pickle file
-            with open(self.pickle_file, "rb") as f:
-                service_info = pickle.load(f)
+            # Load service details from the msgpack file
+            with open(self.msgpack_file, "rb") as f:
+                service_info = msgpack.load(f)
                 
             running_ai_command = service_info.get("running_ai_command")
             if not running_ai_command:
@@ -1121,8 +1121,8 @@ class LocalAIManager:
             if ai_process.poll() is None:
                 # Update the service info with new PID
                 service_info["pid"] = ai_process.pid
-                with open(self.pickle_file, "wb") as f:
-                    pickle.dump(service_info, f)
+                with open(self.msgpack_file, "wb") as f:
+                    msgpack.dump(service_info, f)
                 logger.info(f"Successfully reloaded AI server with PID {ai_process.pid}")
                 return True
             else:
@@ -1134,29 +1134,29 @@ class LocalAIManager:
             return False
     
     def get_service_info(self) -> Dict[str, Any]:
-        """Get service info from pickle file with error handling."""
-        if not os.path.exists(self.pickle_file):
+        """Get service info from msgpack file with error handling."""
+        if not os.path.exists(self.msgpack_file):
             raise LocalAIServiceError("Service information not available")
         
         try:
-            with open(self.pickle_file, "rb") as f:
-                return pickle.load(f)
+            with open(self.msgpack_file, "rb") as f:
+                return msgpack.load(f)
         except Exception as e:
             raise LocalAIServiceError(f"Failed to load service info: {str(e)}")
     
     def update_service_info(self, updates: Dict[str, Any]) -> bool:
-        """Update service information in the pickle file."""
+        """Update service information in the msgpack file."""
         try:
-            if os.path.exists(self.pickle_file):
-                with open(self.pickle_file, "rb") as f:
-                    service_info = pickle.load(f)
+            if os.path.exists(self.msgpack_file):
+                with open(self.msgpack_file, "rb") as f:
+                    service_info = msgpack.load(f)
             else:
                 service_info = {}
             
             service_info.update(updates)
             
-            with open(self.pickle_file, "wb") as f:
-                pickle.dump(service_info, f)
+            with open(self.msgpack_file, "wb") as f:
+                msgpack.dump(service_info, f)
             
             return True
         except Exception as e:

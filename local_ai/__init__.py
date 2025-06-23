@@ -68,6 +68,4 @@ for cmd_name, env_var_name in required_commands:
     find_and_set_command(cmd_name, env_var_name, search_path)
 
 running_service_path = (Path.cwd()/ "running_service.pkl").absolute()
-os.environ["RUNNING_SERVICE_FILE"] = str(running_service_path)
-TRACKING_DOWNLOAD_HASHES = Path.cwd() / "download_hashes.pkl"
-os.environ["TRACKING_DOWNLOAD_HASHES"] = str(TRACKING_DOWNLOAD_HASHES)  
+os.environ["RUNNING_SERVICE_FILE"] = str(running_service_path)  

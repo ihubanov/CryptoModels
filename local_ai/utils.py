@@ -1,5 +1,5 @@
 import os
-import pickle
+import msgpack
 import shutil
 import hashlib
 from typing import List
@@ -82,13 +82,6 @@ async def async_extract_zip(paths: list) -> None:
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, extract_zip, paths)  # Assuming extract_zip is defined
 
-def check_downloading():
-    tracking_path = os.environ["TRACKING_DOWNLOAD_HASHES"]
-    downloading_files = []
-    if os.path.exists(tracking_path):
-        with open(tracking_path, "rb") as f:
-            downloading_files = pickle.load(f)
-    return downloading_files
 
 
 def wait_for_health(port: int, timeout: int = 300) -> bool:

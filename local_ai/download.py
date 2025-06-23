@@ -3,7 +3,7 @@ import random
 import requests
 import aiohttp
 import asyncio
-import pickle
+import msgpack
 from tqdm import tqdm
 from pathlib import Path
 from local_ai.utils import compute_file_hash, async_extract_zip, async_move, async_rmtree
@@ -287,24 +287,6 @@ async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Pat
         print(f"Using existing model at {local_path_str}")
         return local_path_str
 
-    # Track downloads in progress
-    tracking_path = os.environ["TRACKING_DOWNLOAD_HASHES"]
-    downloading_files = []
-    
-    try:
-        if os.path.exists(tracking_path):
-            with open(tracking_path, "rb") as f:
-                downloading_files = pickle.load(f)
-    except Exception as e:
-        print(f"Error reading tracking file: {e}")
-        downloading_files = []
-
-    # Add current hash to tracking
-    if filecoin_hash not in downloading_files:
-        downloading_files.append(filecoin_hash)
-        with open(tracking_path, "wb") as f:
-            pickle.dump(downloading_files, f)
-
     # Define input link
     input_link = f"{GATEWAY_URL}{filecoin_hash}"
     
@@ -392,11 +374,6 @@ async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Pat
                             await async_rmtree(str(folder_path))
                         
                         print(f"Model download complete: {local_path_str}")
-                        
-                        # Update tracking file to remove this hash
-                        with open(tracking_path, "wb") as f:
-                            pickle.dump([f for f in downloading_files if f != filecoin_hash], f)
-                        
                         return local_path_str
                     else:
                         print(f"Model not found at {source_text_path}")
@@ -434,13 +411,6 @@ async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Pat
     
     except Exception as e:
         print(f"Download failed: {e}")
-    finally:
-        # Always clean up tracking file
-        try:
-            with open(tracking_path, "wb") as f:
-                pickle.dump([f for f in downloading_files if f != filecoin_hash], f)
-        except Exception as e:
-            print(f"Error updating tracking file: {e}")
 
     print("All download attempts failed")
     return None

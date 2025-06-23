@@ -6,7 +6,6 @@ from loguru import logger
 from local_ai import __version__
 from local_ai.core import LocalAIManager
 from local_ai.upload import upload_folder_to_lighthouse
-from local_ai.utils import check_downloading
 from local_ai.download import check_downloaded_model, download_model_from_filecoin_async
 
 manager = LocalAIManager()
@@ -106,9 +105,6 @@ def parse_args():
     restart_command = subparsers.add_parser(
         "restart", help="Restart the local language model server"
     )
-    check_downloading_command = subparsers.add_parser(
-        "downloading", help="Check if the model is being downloaded"
-    )
     return parser.parse_known_args()
 
 def version_command():
@@ -151,14 +147,6 @@ def handle_restart(args):
     if not manager.restart():
         sys.exit(1)
 
-def handle_check_downloading(args):
-    downloading_files = check_downloading()
-    if not downloading_files:
-        return False
-    str_files = ",".join(downloading_files)
-    print(str_files)
-    return True
-
 def main():
     known_args, unknown_args = parse_args()
     for arg in unknown_args:
@@ -181,8 +169,6 @@ def main():
         handle_upload(known_args)
     elif known_args.command == "restart":
         handle_restart(known_args)
-    elif known_args.command == "downloading":
-        handle_check_downloading(known_args)
     else:
         logger.error(f"Unknown command: {known_args.command}")
         sys.exit(2)
