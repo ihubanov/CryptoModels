@@ -28,7 +28,9 @@ from local_ai.schema import (
     ChatCompletionChunk,
     ChoiceDeltaFunctionCall,
     ChoiceDeltaToolCall,
-    ChatCompletionResponse
+    ChatCompletionResponse,
+    ModelCard,
+    ModelList
 )
 
 # Set up logging with both console and file output
@@ -745,3 +747,53 @@ async def v1_embeddings(request: EmbeddingRequest):
     """Endpoint for embedding requests (v1 API)."""
     request_dict = convert_request_to_dict(request)
     return await RequestProcessor.process_request("/v1/embeddings", request_dict)
+
+@app.get("/v1/models", response_model=ModelList)
+async def list_models():
+    """
+    Provides a list of available models, compatible with OpenAI's /v1/models endpoint.
+    Currently lists the single loaded model if available.
+    """
+    try:
+        service_info = get_service_info()
+    except HTTPException as e:
+        # This pattern of handling 503 for missing service_info is consistent
+        if e.status_code == 503:
+            logger.info("/v1/models: Service information not available. No model loaded or /update not called.")
+            return ModelList(data=[])
+        logger.error(f"/v1/models: Unexpected HTTPException while fetching service_info: {e.detail}")
+        raise # Re-raise other or unexpected HTTPExceptions
+
+    model_hash = service_info.get("hash")
+    folder_name_from_info = service_info.get("folder_name") # From Task 1
+
+    if not model_hash:
+        logger.warning("/v1/models: No model hash found in service_info, though service_info itself was present. Returning empty list.")
+        return ModelList(data=[])
+
+    # Prefer folder_name for user-facing ID, fallback to hash
+    model_id = folder_name_from_info if folder_name_from_info else model_hash
+
+    # Construct the ModelCard, similar to how other response objects are built
+    # Ensure 'ram' from service_info is correctly parsed
+    raw_ram_value = service_info.get("ram")
+    parsed_ram_value = None
+    if isinstance(raw_ram_value, (int, float)):
+        parsed_ram_value = float(raw_ram_value)
+    elif isinstance(raw_ram_value, str):
+        try:
+            # Attempt to parse if it's a string like "8GB", "8gb", or "8"
+            parsed_ram_value = float(raw_ram_value.lower().replace("gb", "").strip())
+        except ValueError:
+            logger.warning(f"/v1/models: Could not parse RAM value '{raw_ram_value}' to float.")
+
+    model_card = ModelCard(
+        id=model_id,
+        root=model_id, # Consistent with OpenAI for base models
+        family=service_info.get("family"), # Assumes 'family' is in service_info
+        ram=parsed_ram_value,    # Use 'ram' field, populated with parsed value
+        folder_name=folder_name_from_info  # From Task 1
+    )
+
+    logger.info(f"/v1/models: Returning information for model ID: {model_id}")
+    return ModelList(data=[model_card])
