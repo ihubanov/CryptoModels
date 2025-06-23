@@ -65,7 +65,7 @@ We've prepared several models for you to test with. Each model is listed with it
 #### 🔤 Qwen3 Series
 [Learn more about Qwen3](https://qwenlm.github.io/blog/qwen3/)
 
-**Qwen3-Embedding-0.6B-Q**
+**Qwen3-Embedding-0.6B-Q8**
 - Size: 649 MB
 - RAM Required: 1.16 GB
 - CID: `bafkreiacd5mwy4a5wkdmvxsk42nsupes5uf4q3dm52k36mvbhgdrez422y`
