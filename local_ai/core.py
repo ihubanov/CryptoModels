@@ -205,6 +205,8 @@ class LocalAIManager:
                 logger.info(f"Starting local AI service for model with hash: {hash}")
                 
                 local_model_path = asyncio.run(download_model_from_filecoin_async(hash))
+                if not isinstance(local_model_path, str) or not local_model_path:
+                    raise ModelNotFoundError(f"Model file not found for hash: {hash}")
                 local_projector_path = local_model_path + "-projector"
                 model_running = self.get_running_model()
                 local_ai_port = self._get_free_port()
@@ -222,6 +224,8 @@ class LocalAIManager:
                 model_dir = os.path.dirname(local_model_path)
                 metadata = self._load_or_fetch_metadata(hash, model_dir)
                 folder_name = metadata.get("folder_name", "")
+                family = metadata.get("family", None)
+                ram = metadata.get("ram", None)
                 task = metadata.get("task", "chat")
                 if task == "embed":
                     running_ai_command = self._build_embed_command(local_model_path, local_ai_port, host)
@@ -267,6 +271,11 @@ class LocalAIManager:
                         running_ai_command.extend([
                             "--mmproj", str(local_projector_path)
                         ])
+
+                service_metadata["family"] = family
+                service_metadata["folder_name"] = folder_name
+                service_metadata["ram"] = ram
+                
                 logger.info(f"Starting process: {' '.join(running_ai_command)}")
                 service_metadata["running_ai_command"] = running_ai_command
                 # Create log files for stdout and stderr for AI process
