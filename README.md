@@ -75,15 +75,6 @@ bash ubuntu.sh
 ```bash
 bash jetson.sh
 ```
-#### Alternative Installation (Direct):
-```bash
-# Create virtual environment
-python3 -m venv cryptomodels
-source cryptomodels/bin/activate
-
-# Install CryptoModels
-pip install git+https://github.com/eternalai-org/CryptoModels.git
-```
 
 ### Setting Up Your Environment
 
