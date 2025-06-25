@@ -1,5 +1,5 @@
 # 🚀 CryptoModels: Sovereign Weights
-![Sovereign Weights](./images/sovereign_weights.jpg)
+![Sovereign Weights](./images/crypto_models.jpg)
 
 ## Deploy AI Models to CryptoAgents
 
