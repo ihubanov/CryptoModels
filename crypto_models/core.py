@@ -16,7 +16,7 @@ from crypto_models.utils import wait_for_health
 from crypto_models.download import download_model_from_filecoin_async
 
 class CryptoAgentsServiceError(Exception):
-    """Base exception for Local AI service errors."""
+    """Base exception for CryptoModels service errors."""
     pass
 
 class ServiceStartError(CryptoAgentsServiceError):
@@ -28,7 +28,7 @@ class ModelNotFoundError(CryptoAgentsServiceError):
     pass
 
 class CryptoModelsManager:
-    """Manages a local AI service with optimized performance."""
+    """Manages a CryptoModels service with optimized performance."""
     
     # Performance constants
     LOCK_TIMEOUT = 1800  # 30 minutes
@@ -56,13 +56,13 @@ class CryptoModelsManager:
     
     def restart(self):
         """
-        Restart the currently running AI service.
+        Restart the currently running CryptoModels service.
 
         Returns:
             bool: True if the service restarted successfully, False otherwise.
         """
         if not self.msgpack_file.exists():
-            logger.warning("No running AI service to restart.")
+            logger.warning("No running CryptoModels service to restart.")
             return False
         
         try:
@@ -74,7 +74,7 @@ class CryptoModelsManager:
             port = service_info.get("app_port")
             context_length = service_info.get("context_length")
 
-            logger.info(f"Restarting AI service '{hash}' running on port {port}...")
+            logger.info(f"Restarting CryptoModels service '{hash}' running on port {port}...")
 
             # Stop the current service
             self.stop()
@@ -82,7 +82,7 @@ class CryptoModelsManager:
             # Start the service with the same parameters
             return self.start(hash, port, context_length=context_length)
         except Exception as e:
-            logger.error(f"Error restarting AI service: {str(e)}", exc_info=True)
+            logger.error(f"Error restarting CryptoModels service: {str(e)}", exc_info=True)
             return False
 
     def _get_family_template_and_practice(self, model_family: str):
@@ -135,12 +135,12 @@ class CryptoModelsManager:
 
     def start(self, hash: str, port: int = 11434, host: str = "0.0.0.0", context_length: int = 32768) -> bool:
         """
-        Start the local AI service in the background.
+        Start the CryptoModels service in the background.
 
         Args:
             hash (str): Filecoin hash of the model to download and run.
-            port (int): Port number for the AI service (default: 11434).
-            host (str): Host address for the AI service (default: "0.0.0.0").
+            port (int): Port number for the CryptoModels service (default: 11434).
+            host (str): Host address for the CryptoModels service (default: "0.0.0.0").
             context_length (int): Context length for the model (default: 32768).
 
         Returns:
@@ -202,7 +202,7 @@ class CryptoModelsManager:
                 # Connection refused means port is free, which is what we want
 
             try:
-                logger.info(f"Starting local AI service for model with hash: {hash}")
+                logger.info(f"Starting CryptoModels service for model with hash: {hash}")
                 
                 local_model_path = asyncio.run(download_model_from_filecoin_async(hash))
                 if not isinstance(local_model_path, str) or not local_model_path:
@@ -289,7 +289,7 @@ class CryptoModelsManager:
                         )
                     logger.info(f"AI logs written to {ai_log_stderr}")
                 except Exception as e:
-                    logger.error(f"Error starting AI service: {str(e)}", exc_info=True)
+                    logger.error(f"Error starting CryptoModels service: {str(e)}", exc_info=True)
                     cleanup_processes()
                     return False
         
@@ -298,7 +298,7 @@ class CryptoModelsManager:
                     cleanup_processes()
                     return False
                 
-                logger.info(f"[LOCAL-AI] Local AI service started on port {local_ai_port}")
+                logger.info(f"[CRYPTOMODELS] CryptoModels service started on port {local_ai_port}")
 
                 # start the FastAPI app in the background           
                 uvicorn_command = [
@@ -353,7 +353,7 @@ class CryptoModelsManager:
                 return True
 
             except Exception as e:
-                logger.error(f"Error starting AI service: {str(e)}", exc_info=True)
+                logger.error(f"Error starting CryptoModels service: {str(e)}", exc_info=True)
                 cleanup_processes()
                 return False
                 
@@ -396,13 +396,13 @@ class CryptoModelsManager:
     
     def stop(self) -> bool:
         """
-        Stop the running AI service with optimized process termination.
+        Stop the running CryptoModels service with optimized process termination.
 
         Returns:
             bool: True if the service stopped successfully, False otherwise.
         """
         if not os.path.exists(self.msgpack_file):
-            logger.warning("No running AI service to stop.")
+            logger.warning("No running CryptoModels service to stop.")
             return False
 
         try:
@@ -416,10 +416,10 @@ class CryptoModelsManager:
             app_port = service_info.get("app_port")
             local_ai_port = service_info.get("port")
 
-            logger.info(f"Stopping AI service '{hash_val}' running on port {app_port} (AI PID: {pid}, API PID: {app_pid})...")
+            logger.info(f"Stopping CryptoModels service '{hash_val}' running on port {app_port} (AI PID: {pid}, API PID: {app_pid})...")
             
             # Use the optimized termination methods
-            ai_stopped = self._terminate_process_safely(pid, "AI service", timeout=15)
+            ai_stopped = self._terminate_process_safely(pid, "CryptoModels service", timeout=15)
             api_stopped = self._terminate_process_safely(app_pid, "API service", timeout=15)
             
             # Brief pause to allow system cleanup
@@ -440,17 +440,17 @@ class CryptoModelsManager:
             success = ai_stopped and api_stopped and metadata_cleaned
             
             if success:
-                logger.info("AI service stopped successfully.")
+                logger.info("CryptoModels service stopped successfully.")
                 if not ports_freed:
                     logger.warning("Service stopped but some ports may still be in use temporarily")
             else:
-                logger.error("AI service stop completed with some failures")
-                logger.error(f"AI stopped: {ai_stopped}, API stopped: {api_stopped}, metadata cleaned: {metadata_cleaned}")
+                logger.error("CryptoModels service stop completed with some failures")
+                logger.error(f"CryptoModels stopped: {ai_stopped}, API stopped: {api_stopped}, metadata cleaned: {metadata_cleaned}")
             
             return success
 
         except Exception as e:
-            logger.error(f"Error stopping AI service: {str(e)}", exc_info=True)
+            logger.error(f"Error stopping CryptoModels service: {str(e)}", exc_info=True)
             return False
 
     def _terminate_process_safely(self, pid: int, process_name: str, timeout: int = 15, use_process_group: bool = True) -> bool:
@@ -1157,7 +1157,7 @@ class CryptoModelsManager:
                     )
                 logger.info(f"AI logs written to {ai_log_stderr}")
             except Exception as e:
-                logger.error(f"Error starting AI service: {str(e)}", exc_info=True)
+                logger.error(f"Error starting CryptoModels service: {str(e)}", exc_info=True)
                 return False
             
             # Wait for the process to start by checking the health endpoint
