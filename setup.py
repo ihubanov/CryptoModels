@@ -1,9 +1,14 @@
-from crypto_models import __version__
 from setuptools import setup, find_packages
+import os
+
+# Read version from _version.py
+version = {}
+with open(os.path.join(os.path.dirname(__file__), 'crypto_models', '_version.py')) as f:
+    exec(f.read(), version)
 
 setup(
     name="CryptoModels",
-    version=__version__,
+    version=version['__version__'],
     packages=find_packages(),
     package_data={
         "crypto_models": [

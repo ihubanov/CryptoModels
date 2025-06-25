@@ -2,10 +2,9 @@ import os
 import shutil
 import warnings
 from loguru import logger
+from ._version import __version__
 
 warnings.filterwarnings("ignore", category=UserWarning)
-
-__version__ = "1.0.0"
 
 # Import template functions for easier access
 
