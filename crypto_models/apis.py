@@ -340,12 +340,12 @@ class RequestProcessor:
             
             # Quick validation checks
             if not pid:
-                logger.info(f"[{request_id}] No PID found, reloading AI server...")
+                logger.info(f"[{request_id}] No PID found, reloading CryptoModels server...")
                 return await crypto_models_manager.reload_ai_server()
         
             # Efficient process existence and status check
             if not psutil.pid_exists(pid):
-                logger.info(f"[{request_id}] PID {pid} not found, reloading AI server...")
+                logger.info(f"[{request_id}] PID {pid} not found, reloading CryptoModels server...")
                 return await crypto_models_manager.reload_ai_server()
             
             # Check process status in a single call
@@ -355,7 +355,7 @@ class RequestProcessor:
                 
                 # Check for non-running states
                 if status in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
-                    logger.info(f"[{request_id}] Process {pid} status is {status}, reloading AI server...")
+                    logger.info(f"[{request_id}] Process {pid} status is {status}, reloading CryptoModels server...")
                     return await crypto_models_manager.reload_ai_server()
                 
                 # Additional check for processes that might be hung
@@ -364,15 +364,15 @@ class RequestProcessor:
                     cpu_percent = process.cpu_percent(interval=0.1)  # Non-blocking check
                     memory_info = process.memory_info()
                     
-                    logger.debug(f"[{request_id}] AI server PID {pid} is healthy "
+                    logger.debug(f"[{request_id}] CryptoModels server PID {pid} is healthy "
                                f"(status: {status}, memory: {memory_info.rss // 1024 // 1024}MB)")
                     
                 except psutil.AccessDenied:
                     # Process exists but we can't get detailed info - assume it's running
-                    logger.debug(f"[{request_id}] AI server PID {pid} running (limited access)")
+                    logger.debug(f"[{request_id}] CryptoModels server PID {pid} running (limited access)")
                     
             except (psutil.NoSuchProcess, psutil.AccessDenied):
-                logger.info(f"[{request_id}] Process {pid} not accessible, reloading AI server...")
+                logger.info(f"[{request_id}] Process {pid} not accessible, reloading CryptoModels server...")
                 return await crypto_models_manager.reload_ai_server()
             
             return True
@@ -395,7 +395,7 @@ class RequestProcessor:
         # Update the last request time
         app.state.last_request_time = time.time()
         
-        # Check if we need to reload the AI server
+        # Check if we need to reload the CryptoModels server
         await RequestProcessor._ensure_server_running(request_id)
         
         start_wait_time = time.time()
@@ -487,7 +487,7 @@ class RequestProcessor:
 # Background Tasks
 async def unload_checker():
     """
-    Optimized unload checker that periodically checks if the AI server has been idle 
+    Optimized unload checker that periodically checks if the CryptoModels server has been idle 
     for too long and unloads it if needed.
     """
     logger.info("Unload checker task started")
@@ -518,22 +518,22 @@ async def unload_checker():
                 
                 # Log idle status periodically (every 5 minutes)
                 if int(idle_time) % 300 == 0:
-                    logger.info(f"AI server idle time: {idle_time:.1f}s (threshold: {IDLE_TIMEOUT}s)")
+                    logger.info(f"CryptoModels server idle time: {idle_time:.1f}s (threshold: {IDLE_TIMEOUT}s)")
                 
                 # Check if server should be unloaded
                 if idle_time > IDLE_TIMEOUT:
                     pid = service_info.get("pid")
-                    logger.info(f"AI server (PID: {pid}) has been idle for {idle_time:.2f}s, initiating unload...")
+                    logger.info(f"CryptoModels server (PID: {pid}) has been idle for {idle_time:.2f}s, initiating unload...")
                     
                     # Use the optimized kill method from CryptoModelsManager
                     unload_success = await crypto_models_manager.kill_ai_server()
                     
                     if unload_success:
-                        logger.info("AI server unloaded successfully due to inactivity")
+                        logger.info("CryptoModels server unloaded successfully due to inactivity")
                         # Update last request time to prevent immediate re-unload attempts
                         app.state.last_request_time = current_time
                     else:
-                        logger.warning("Failed to unload AI server")
+                        logger.warning("Failed to unload CryptoModels server")
                 
                 # Reset error counter on successful check
                 consecutive_errors = 0
@@ -633,12 +633,12 @@ async def shutdown_event():
         except Exception as e:
             logger.error(f"Error during background task cancellation: {str(e)}")
     
-    # Phase 2: Clean up AI server
+    # Phase 2: Clean up CryptoModels server
     try:
         service_info = get_service_info()
         if "pid" in service_info:
             pid = service_info.get("pid")
-            logger.info(f"Terminating AI server (PID: {pid}) during shutdown...")
+            logger.info(f"Terminating CryptoModels server (PID: {pid}) during shutdown...")
             
             # Use the optimized kill method with timeout
             kill_success = await asyncio.wait_for(
@@ -647,18 +647,18 @@ async def shutdown_event():
             )
             
             if kill_success:
-                logger.info("AI server terminated successfully during shutdown")
+                logger.info("CryptoModels server terminated successfully during shutdown")
             else:
-                logger.warning("AI server termination failed during shutdown")
+                logger.warning("CryptoModels server termination failed during shutdown")
         else:
-            logger.debug("No AI server PID found, skipping termination")
+            logger.debug("No CryptoModels server PID found, skipping termination")
             
     except HTTPException:
         logger.debug("Service info not available during shutdown (expected)")
     except asyncio.TimeoutError:
-        logger.error("AI server termination timed out during shutdown")
+        logger.error("CryptoModels server termination timed out during shutdown")
     except Exception as e:
-        logger.error(f"Error terminating AI server during shutdown: {str(e)}")
+        logger.error(f"Error terminating CryptoModels server during shutdown: {str(e)}")
     
     # Phase 3: Close HTTP client connections
     if hasattr(app.state, "client"):
