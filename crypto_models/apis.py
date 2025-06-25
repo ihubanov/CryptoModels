@@ -13,12 +13,12 @@ import uuid
 import psutil
 from json_repair import repair_json
 from typing import Dict, Any, Optional
-from local_ai.core import LocalAIManager, LocalAIServiceError
+from crypto_models.core import CryptoModelsManager, CryptoAgentsServiceError
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 # Import schemas from schema.py
-from local_ai.schema import (
+from crypto_models.schema import (
     Choice,
     Message,
     ChatCompletionRequest,
@@ -39,8 +39,8 @@ logger.setLevel(logging.INFO)
 
 app = FastAPI()
 
-# Initialize LocalAI Manager for service management
-local_ai_manager = LocalAIManager()
+# Initialize CryptoModels Manager for service management
+crypto_models_manager = CryptoModelsManager()
 
 # Constants for dynamic unload feature - Optimized for performance
 IDLE_TIMEOUT = 600  # 10 minutes in seconds
@@ -58,10 +58,10 @@ STREAM_CHUNK_SIZE = 16384  # Increased chunk size for better throughput
 
 # Utility functions
 def get_service_info() -> Dict[str, Any]:
-    """Get service info from LocalAIManager with error handling."""
+    """Get service info from CryptoModelsManager with error handling."""
     try:
-        return local_ai_manager.get_service_info()
-    except LocalAIServiceError as e:
+        return crypto_models_manager.get_service_info()
+    except CryptoAgentsServiceError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
 def get_service_port() -> int:
@@ -341,12 +341,12 @@ class RequestProcessor:
             # Quick validation checks
             if not pid:
                 logger.info(f"[{request_id}] No PID found, reloading AI server...")
-                return await local_ai_manager.reload_ai_server()
+                return await crypto_models_manager.reload_ai_server()
         
             # Efficient process existence and status check
             if not psutil.pid_exists(pid):
                 logger.info(f"[{request_id}] PID {pid} not found, reloading AI server...")
-                return await local_ai_manager.reload_ai_server()
+                return await crypto_models_manager.reload_ai_server()
             
             # Check process status in a single call
             try:
@@ -356,7 +356,7 @@ class RequestProcessor:
                 # Check for non-running states
                 if status in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
                     logger.info(f"[{request_id}] Process {pid} status is {status}, reloading AI server...")
-                    return await local_ai_manager.reload_ai_server()
+                    return await crypto_models_manager.reload_ai_server()
                 
                 # Additional check for processes that might be hung
                 try:
@@ -373,13 +373,13 @@ class RequestProcessor:
                     
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 logger.info(f"[{request_id}] Process {pid} not accessible, reloading AI server...")
-                return await local_ai_manager.reload_ai_server()
+                return await crypto_models_manager.reload_ai_server()
             
             return True
             
         except HTTPException:
             logger.info(f"[{request_id}] Service info not available, attempting reload...")
-            return await local_ai_manager.reload_ai_server()
+            return await crypto_models_manager.reload_ai_server()
         except Exception as e:
             logger.error(f"[{request_id}] Unexpected error in _ensure_server_running: {str(e)}")
             return False
@@ -525,8 +525,8 @@ async def unload_checker():
                     pid = service_info.get("pid")
                     logger.info(f"AI server (PID: {pid}) has been idle for {idle_time:.2f}s, initiating unload...")
                     
-                    # Use the optimized kill method from LocalAIManager
-                    unload_success = await local_ai_manager.kill_ai_server()
+                    # Use the optimized kill method from CryptoModelsManager
+                    unload_success = await crypto_models_manager.kill_ai_server()
                     
                     if unload_success:
                         logger.info("AI server unloaded successfully due to inactivity")
@@ -642,7 +642,7 @@ async def shutdown_event():
             
             # Use the optimized kill method with timeout
             kill_success = await asyncio.wait_for(
-                local_ai_manager.kill_ai_server(),
+                crypto_models_manager.kill_ai_server(),
                 timeout=15.0  # 15 second timeout for AI server termination
             )
             
@@ -705,8 +705,8 @@ async def health():
 
 @app.post("/update")
 async def update(request: Dict[str, Any]):
-    """Update the service information in the LocalAIManager."""
-    if local_ai_manager.update_service_info(request):
+    """Update the service information in the CryptoModelsManager."""
+    if crypto_models_manager.update_service_info(request):
         return {"status": "ok", "message": "Service info updated successfully"}
     else:
         raise HTTPException(status_code=500, detail="Failed to update service info")
