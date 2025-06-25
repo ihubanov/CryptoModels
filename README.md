@@ -67,6 +67,14 @@ bash mac.sh
 ```
 > **Note**: You'll need `llama.cpp.rb` in the same directory as `mac.sh`
 
+#### For Ubuntu (Using Setup Script):
+```bash
+bash ubuntu.sh
+```
+#### For Jetson (Using Setup Script):
+```bash
+bash jetson.sh
+```
 #### Alternative Installation (Direct):
 ```bash
 # Create virtual environment
