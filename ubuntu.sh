@@ -233,10 +233,10 @@ mkdir -p "$LLAMA_WRAPPER_DIR"
 
 # Prepare variables for template and model paths.
 PYTHON_VERSION=$($PYTHON_CMD -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')")
-VENV_SITE_PACKAGES="$(pwd)/local_ai/lib/${PYTHON_VERSION}/site-packages"
-TEMPLATES_DIR="$VENV_SITE_PACKAGES/local_ai/examples/templates"
+VENV_SITE_PACKAGES="$(pwd)/cryptomodels/lib/${PYTHON_VERSION}/site-packages"
+TEMPLATES_DIR="$VENV_SITE_PACKAGES/crypto_models/examples/templates"
 USER_HOME="$HOME"
-ABS_TEMPLATE_PATH="$USER_HOME/.local/lib/${PYTHON_VERSION}/site-packages/local_ai/examples/templates"
+ABS_TEMPLATE_PATH="$USER_HOME/.local/lib/${PYTHON_VERSION}/site-packages/crypto_models/examples/templates"
 
 cat > "$LLAMA_WRAPPER_DIR/llama-server" << EOF
 #!/bin/bash
@@ -331,51 +331,51 @@ fi
 # -----------------------------------------------------------------------------
 # Step 7: Create and activate Python virtual environment
 # -----------------------------------------------------------------------------
-log_message "Creating virtual environment 'local_ai'..."
-"$PYTHON_CMD" -m venv local_ai || handle_error $? "Failed to create virtual environment."
+log_message "Creating virtual environment 'cryptomodels'..."
+"$PYTHON_CMD" -m venv cryptomodels || handle_error $? "Failed to create virtual environment."
 
 log_message "Activating virtual environment..."
-source local_ai/bin/activate || handle_error $? "Failed to activate virtual environment."
+source cryptomodels/bin/activate || handle_error $? "Failed to activate virtual environment."
 log_message "Virtual environment activated."
 
 # -----------------------------------------------------------------------------
-# Step 8: Install or update local-ai toolkit in the virtual environment
+# Step 8: Install or update cryptomodels toolkit in the virtual environment
 # -----------------------------------------------------------------------------
 # Function: install_or_update_local_ai
-# Uninstalls and reinstalls the local-ai toolkit from the GitHub repository.
+# Uninstalls and reinstalls the cryptomodels toolkit from the GitHub repository.
 install_or_update_local_ai() {
-    pip uninstall local-ai -y || handle_error $? "Failed to uninstall local-ai."
-    pip install -q git+https://github.com/eternalai-org/local-ai.git || handle_error $? "Failed to install/update local-ai toolkit."
-    log_message "local-ai toolkit installed/updated."
+    pip uninstall cryptomodels -y || handle_error $? "Failed to uninstall cryptomodels."
+    pip install -q git+https://github.com/eternalai-org/CryptoModels.git || handle_error $? "Failed to install/update cryptomodels toolkit."
+    log_message "cryptomodels toolkit installed/updated."
 }
 
-log_message "Setting up local-ai toolkit..."
-if pip show local-ai &>/dev/null; then
-    log_message "local-ai is installed. Checking for updates..."
-    INSTALLED_VERSION=$(pip show local-ai | grep Version | awk '{print $2}')
+log_message "Setting up cryptomodels toolkit..."
+if pip show cryptomodels &>/dev/null; then
+    log_message "cryptomodels is installed. Checking for updates..."
+    INSTALLED_VERSION=$(pip show cryptomodels | grep Version | awk '{print $2}')
     log_message "Current version: $INSTALLED_VERSION"
     log_message "Checking latest version from repository..."
     TEMP_VERSION_FILE=$(mktemp)
-    if curl -s https://raw.githubusercontent.com/eternalai-org/local-ai/main/local_ai/__init__.py | grep -o "__version__ = \"[0-9.]*\"" | cut -d'"' -f2 > "$TEMP_VERSION_FILE"; then
+    if curl -s https://raw.githubusercontent.com/eternalai-org/CryptoModels/main/crypto_models/__init__.py | grep -o "__version__ = \"[0-9.]*\"" | cut -d'"' -f2 > "$TEMP_VERSION_FILE"; then
         REMOTE_VERSION=$(cat "$TEMP_VERSION_FILE")
         rm "$TEMP_VERSION_FILE"
         log_message "Latest version: $REMOTE_VERSION"
         if [ "$(printf '%s\n' "$INSTALLED_VERSION" "$REMOTE_VERSION" | sort -V | head -n1)" = "$INSTALLED_VERSION" ] && [ "$INSTALLED_VERSION" != "$REMOTE_VERSION" ]; then
             log_message "New version available. Updating..."
             install_or_update_local_ai
-            log_message "local-ai toolkit updated to version $REMOTE_VERSION."
+            log_message "cryptomodels toolkit updated to version $REMOTE_VERSION."
         else
             log_message "Already running the latest version. No update needed."
         fi
     else
         log_message "Could not check latest version. Proceeding with update to be safe..."
         install_or_update_local_ai
-        log_message "local-ai toolkit updated."
+        log_message "cryptomodels toolkit updated."
     fi
 else
-    log_message "Installing local-ai toolkit..."
+    log_message "Installing cryptomodels toolkit..."
     install_or_update_local_ai
-    log_message "local-ai toolkit installed."
+    log_message "cryptomodels toolkit installed."
 fi
 
 log_message "Setup completed successfully."
@@ -387,4 +387,4 @@ if [ "${PATH_UPDATE_NEEDED:-0}" = "1" ]; then
     echo "      To use it in this session, run: export PATH=\"$LLAMA_WRAPPER_DIR:\$PATH\""
     echo "      Or restart your terminal or run: source ~/.bashrc (or ~/.zshrc)"
     echo
-fi
+fi  
