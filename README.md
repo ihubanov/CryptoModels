@@ -52,10 +52,6 @@ In an era of increasing AI centralization, CryptoModels puts you back in control
 
 ##  Before You Start
 
-### Prerequisites
-1. A model in `gguf` format (compatible with `llama.cpp`)
-2. A [Lighthouse](https://lighthouse.storage/) account and API key
-
 ### System Requirements
 - macOS or Linux operating system
 - Sufficient RAM for your chosen model (see model specifications below)
@@ -219,6 +215,10 @@ curl -X POST http://localhost:8080/v1/embeddings \
 ```
 
 ## Advanced Usage
+
+### Prerequisites for Model Preservation
+1. A model in `gguf` format (compatible with `llama.cpp`)
+2. A [Lighthouse](https://lighthouse.storage/) account and API key
 
 ### Uploading Custom Models
 
