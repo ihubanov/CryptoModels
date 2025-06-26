@@ -1,9 +1,10 @@
 # 🚀 CryptoModels: Sovereign Weights
 ![Sovereign Weights](./images/crypto_models.jpg)
 
-## Deploy AI Models to CryptoAgents
+## The Easiest Way to Run Your Own AI Models with Complete Sovereignty
 
-This guide will help you deploy your AI models using decentralized infrastructure. Whether you're a developer or AI enthusiast, you'll learn how to run your models with complete sovereignty - maintaining full control over your AI weights through decentralized storage and private local execution with the CryptoModels command-line tool.
+
+This guide will help you deploy your AI models using decentralized infrastructure. Whether you're a developer or AI enthusiast, you'll learn how to run your models with complete sovereignty - maintaining full control over your AI weights through decentralized storage.
 
 ## 📑 Table of Contents
 - [Key Features](#-key-features)
@@ -159,6 +160,11 @@ We've prepared several models for you to test with. Each model is listed with it
 ## 💻 Using the API
 
 The API follows the OpenAI-compatible format, making it easy to integrate with existing applications.
+
+### Prefer a UI?
+If you would rather interact with your models through a user-friendly desktop interface, download the **CryptoAgents** app from our Agent Store: [eternalai.org/agent-store](https://eternalai.org/agent-store).
+
+![CryptoAgents UI](./images/app.jpg)
 
 ### Text Chat Example
 ```bash
