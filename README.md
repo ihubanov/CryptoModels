@@ -148,20 +148,28 @@ We've prepared several models for you to test with. Each model is listed with it
 | qwen3-30b-a3b | 31 GB | 37.35 GB | `eai model run qwen3-30b-a3b` |
 | qwen3-32b | 34.8 GB | 45.3 GB | `eai model run qwen3-32b` |
 
-#### 👁️ Gemma3 Series (Vision Support)
+#### 👁️ Gemma-3 Series (Vision Support)
 [Learn more about Gemma3](https://deepmind.google/models/gemma/gemma-3/)
 
 | Model | Size | RAM | Command |
 |-------|------|-----|---------|
-| gemma3-4b | 3.16 GB | 7.9 GB | `eai model run gemma3-4b` |
-| gemma3-12b | 8.07 GB | 21.46 GB | `eai model run gemma3-12b` |
-| gemma3-27b | 17.2 GB | 38.0 GB | `eai model run gemma3-27b` |
+| gemma-3-4b | 3.16 GB | 7.9 GB | `eai model run gemma-3-4b` |
+| gemma-3-12b | 8.07 GB | 21.46 GB | `eai model run gemma-3-12b` |
+| gemma-3-27b | 17.2 GB | 38.0 GB | `eai model run gemma-3-27b` |
+
+#### 🔤 Gemma-3n Series 
+[Learn more about Gemma-3n](https://deepmind.google/models/gemma/gemma-3n/)
+
+| Model | Size | RAM | Command |
+|-------|------|-----|---------|
+| gemma-3n-e4b | 7.35 GB | 10.08 GB | `eai model run gemma-3n-e4b` |
+
 
 ## 💻 Using the API
 
 The API follows the OpenAI-compatible format, making it easy to integrate with existing applications.
 
-### Prefer a UI?
+### Prefer a GUI?
 If you would rather interact with your models through a user-friendly desktop interface, download the **CryptoAgents** app from our Agent Store: [eternalai.org/agent-store](https://eternalai.org/agent-store).
 
 ![CryptoAgents UI](./images/app.jpg)
