@@ -240,10 +240,14 @@ class CryptoModelsManager:
                         task, is_multimodal, projector_path
                     )
 
-                    if "gemma" in folder_name.lower():
-                        template_path, best_practice_path = self._get_family_template_and_practice("gemma")
-                        # Gemma models are memory intensive, so we reduce the context length
+                    if "gemma-3n" in folder_name.lower():
+                        template_path, best_practice_path = self._get_family_template_and_practice("gemma-3n")
+                        running_ai_command = self._build_ai_command(
+                            local_model_path, local_ai_port, host, context_length, template_path
+                        )
+                    elif "gemma-3" in folder_name.lower():
                         context_length = context_length // 2
+                        template_path, best_practice_path = self._get_family_template_and_practice("gemma-3")
                         running_ai_command = self._build_ai_command(
                             local_model_path, local_ai_port, host, context_length, template_path
                         )
@@ -885,7 +889,6 @@ class CryptoModelsManager:
             "-fa",
             "--no-webui",
             "-ngl", "9999",
-            "--pooling", "cls",
             "--jinja",
             "--reasoning-format", "none"
         ]
