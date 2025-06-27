@@ -131,7 +131,7 @@ log_message "Checking llama.cpp version..."
 #     log_message "llama.cpp not found. Installing..."
 #     brew install llama.cpp.rb || handle_error $? "Failed to install llama.cpp"
 # fi
-brew unlink llama.cpp
+brew uninstall --force llama.cpp
 brew install llama.cpp --HEAD
 
 log_message "Verifying llama.cpp version..."
