@@ -16,7 +16,7 @@ except ImportError:
 from crypto_models import __version__
 from crypto_models.core import CryptoModelsManager
 from crypto_models.upload import upload_folder_to_lighthouse
-from crypto_models.download import download_model_from_filecoin_async
+from crypto_models.download import download_model_from_filecoin_async, check_downloaded_model
 from crypto_models.preseved_models import PRESERVED_MODELS
 
 manager = CryptoModelsManager()
@@ -221,6 +221,19 @@ def parse_args():
         metavar="DIR"
     )
     
+    # Model check command
+    check_command = model_subparsers.add_parser(
+        "check", 
+        help="🔍 Check if model is downloaded",
+        description="Check if a model with the specified hash has been downloaded"
+    )
+    check_command.add_argument(
+        "--hash", 
+        required=True,
+        help="🔗 IPFS hash of the model to check",
+        metavar="HASH"
+    )
+    
     # Model status command
     status_command = model_subparsers.add_parser(
         "status", 
@@ -406,6 +419,20 @@ def handle_preserve(args):
         print_error(f"Preservation failed: {str(e)}")
         sys.exit(1)
 
+def handle_check(args):
+    """Handle model check with beautiful output"""
+    print_info(f"Checking if model is downloaded for hash: {args.hash}")
+    try:
+        is_downloaded = check_downloaded_model(args.hash)
+        if is_downloaded:
+            print_success("True")
+        else:
+            print_info("False")
+    except Exception as e:
+        print_error(f"Check failed: {str(e)}")
+        print_info("False")
+        sys.exit(1)
+
 def main():
     """Main CLI entry point with enhanced error handling"""
     # Show banner
@@ -432,9 +459,11 @@ def main():
             handle_status(known_args)
         elif known_args.model_command == "preserve":
             handle_preserve(known_args)
+        elif known_args.model_command == "check":
+            handle_check(known_args)
         else:
             print_error(f"Unknown model command: {known_args.model_command}")
-            print_info("Available model commands: run, stop, download, status, preserve")
+            print_info("Available model commands: run, stop, download, status, preserve, check")
             sys.exit(2)
     else:
         print_error(f"Unknown command: {known_args.command}")
