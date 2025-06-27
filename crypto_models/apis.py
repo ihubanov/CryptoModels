@@ -224,13 +224,18 @@ class ServiceHandler:
             for tool_call_index, tool_call in tool_calls.items():
                 try:
                     tool_call_obj = json.loads(repair_json(json.dumps(tool_call)))
+                    tool_call_id = tool_call_obj.get("id", None)
+                    tool_call_name = tool_call_obj.get("name", "")
+                    tool_call_arguments = tool_call_obj.get("arguments", "")
+                    if tool_call_arguments == "":
+                        tool_call_arguments = "{}"
                     function_call = ChoiceDeltaFunctionCall(
-                        name=tool_call_obj["name"],
-                        arguments=tool_call_obj["arguments"]
+                        name=tool_call_name,
+                        arguments=tool_call_arguments
                     )
                     delta_tool_call = ChoiceDeltaToolCall(
                         index=int(tool_call_index),
-                        id=tool_call_obj["id"],
+                        id=tool_call_id,
                         function=function_call,
                         type="function"
                     )
