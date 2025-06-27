@@ -889,9 +889,10 @@ class CryptoModelsManager:
             "-fa",
             "--no-webui",
             "-ngl", "9999",
-            "--pooling", "cls",
             "--jinja",
-            "--reasoning-format", "none"
+            "--reasoning-format", "none",
+            "--no-mmap",
+            "--mlock"
         ]
         
         if template_path:
