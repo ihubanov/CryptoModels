@@ -887,6 +887,8 @@ class CryptoModelsManager:
             "--host", host,
             "-c", str(context_length),
             "-fa",
+            "--pooling", "cls",
+            "--embeddings",
             "--no-webui",
             "-ngl", "9999",
             "--jinja",
