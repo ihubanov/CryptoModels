@@ -141,6 +141,7 @@ We've prepared several models for you to test with. Each model is listed with it
 | Model | Size | RAM | Command |
 |-------|------|-----|---------|
 | qwen3-embedding-0.6b | 649 MB | 1.16 GB | `eai model run qwen3-embedding-0.6b` |
+| qwen3-embedding-4b | 4.28 GB | 5.13 GB | `eai model run qwen3-embedding-4b` |
 | qwen3-1.7b | 1.83 GB | 5.71 GB | `eai model run qwen3-1.7b` |
 | qwen3-4b | 4.28 GB | 9.5 GB | `eai model run qwen3-4b` |
 | qwen3-8b | 6.21 GB | 12 GB | `eai model run qwen3-8b` |

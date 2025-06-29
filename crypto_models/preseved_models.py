@@ -1,5 +1,6 @@
 PRESERVED_MODELS = {
     "qwen3-embedding-0.6b": "bafkreiacd5mwy4a5wkdmvxsk42nsupes5uf4q3dm52k36mvbhgdrez422y",
+    "qwen3-embedding-4b": "bafkreia7nzedkxlr6tebfxvo552zq7cba6sncloxwyivfl3tpj7hl5dz5u",
     "qwen3-1.7b": "bafkreib6pws5dx5ur6exbhulmf35twfcizdkxvup4cklzprlvaervfz5zy",
     "qwen3-4b": "bafkreiekokvzioogj5hoxgxlorqvbw2ed3w4mwieium5old5jq3iubixza",
     "qwen3-8b": "bafkreid5z4lddvv4qbgdlz2nqo6eumxwetwmkpesrumisx72k3ahq73zpy",
