@@ -10,7 +10,6 @@ This module provides centralized configuration management with support for:
 
 import os
 from typing import Optional, Union
-from pathlib import Path
 
 
 class PerformanceConfig:
