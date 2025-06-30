@@ -14,22 +14,6 @@ from crypto_models.config import config
 # Precompile regex patterns for better performance
 UNICODE_BOX_PATTERN = re.compile(r'\\u25[0-9a-fA-F]{2}')
 
-class Config:
-    """
-    Legacy configuration class. Use crypto_models.config.config instead.
-    """
-    @property
-    def TEXT_MODEL(self):
-        return config.model.TEXT_MODEL
-    
-    @property  
-    def VISION_MODEL(self):
-        return config.model.VISION_MODEL
-    
-    @property
-    def EMBEDDING_MODEL(self):
-        return config.model.EMBEDDING_MODEL
-
 # Common models used in both streaming and non-streaming contexts
 class ImageUrl(BaseModel):
     """
@@ -94,7 +78,7 @@ class ChatCompletionRequestBase(BaseModel):
     """
     Base model for chat completion requests.
     """
-    model: str = Field(Config.TEXT_MODEL, description="Model to use for completion")
+    model: str = Field(config.model.DEFAULT_CHAT_MODEL, description="Model to use for completion")
     messages: List[Message] = Field(..., description="List of messages in the conversation")
     tools: Optional[List[Dict[str, Any]]] = Field(None, description="Available tools for the model")
     tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(None, description="Tool choice configuration")
@@ -239,7 +223,7 @@ class EmbeddingRequest(BaseModel):
     """
     Model for embedding requests.
     """
-    model: str = Field(Config.EMBEDDING_MODEL, description="Model to use for embedding")
+    model: str = Field(config.model.DEFAULT_EMBED_MODEL, description="Model to use for embedding")
     input: List[str] = Field(..., min_items=1, description="List of text inputs for embedding")
 
     @validator("input")
