@@ -173,3 +173,9 @@ cython_debug/
 
 llms-storage/
 llms-upload/
+
+# ignore virtual environment
+cryptomodels/
+
+# msgpack
+running_service.msgpack
