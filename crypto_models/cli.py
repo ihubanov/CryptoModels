@@ -14,6 +14,7 @@ except ImportError:
     RICH_AVAILABLE = False
     
 from crypto_models import __version__
+from crypto_models.config import config
 from crypto_models.core import CryptoModelsManager
 from crypto_models.upload import upload_folder_to_lighthouse
 from crypto_models.download import download_model_from_filecoin_async, check_downloaded_model
@@ -168,22 +169,22 @@ def parse_args():
     run_command.add_argument(
         "--port", 
         type=int, 
-        default=8080,
-        help="🌐 Port number for the server (default: 8080)",
+        default=config.network.DEFAULT_PORT,
+        help=f"🌐 Port number for the server (default: {config.network.DEFAULT_PORT})",
         metavar="PORT"
     )
     run_command.add_argument(
         "--host", 
         type=str, 
-        default="0.0.0.0",
-        help="🏠 Host address for the server (default: 0.0.0.0)",
+        default=config.network.DEFAULT_HOST,
+        help=f"🏠 Host address for the server (default: {config.network.DEFAULT_HOST})",
         metavar="HOST"
     )
     run_command.add_argument(
         "--context-length", 
         type=int, 
-        default=32768,
-        help="📏 Context length for the model (default: 32768)",
+        default=config.model.DEFAULT_CONTEXT_LENGTH,
+        help=f"📏 Context length for the model (default: {config.model.DEFAULT_CONTEXT_LENGTH})",
         metavar="LENGTH"
     )
     
@@ -209,8 +210,8 @@ def parse_args():
     download_command.add_argument(
         "--chunk-size", 
         type=int, 
-        default=8192,
-        help="📦 Download chunk size in bytes (default: 8192)",
+        default=config.network.DEFAULT_CHUNK_SIZE,
+        help=f"📦 Download chunk size in bytes (default: {config.network.DEFAULT_CHUNK_SIZE})",
         metavar="SIZE"
     )
     download_command.add_argument(

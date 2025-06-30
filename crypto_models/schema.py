@@ -8,18 +8,11 @@ from pydantic import BaseModel, Field, validator, root_validator
 from typing import List, Dict, Optional, Union, Any, ClassVar
 import time
 import uuid
+# Import configuration settings
+from crypto_models.config import config
 
 # Precompile regex patterns for better performance
 UNICODE_BOX_PATTERN = re.compile(r'\\u25[0-9a-fA-F]{2}')
-
-# Configuration
-class Config:
-    """
-    Configuration class holding the default model names for different types of requests.
-    """
-    TEXT_MODEL = "default-text-model"          # Default model for text-based chat completions
-    VISION_MODEL = "default-vision-model"  # Model used for vision-based requests
-    EMBEDDING_MODEL = "default-embedding-model"  # Model used for generating embeddings
 
 # Common models used in both streaming and non-streaming contexts
 class ImageUrl(BaseModel):
@@ -85,7 +78,7 @@ class ChatCompletionRequestBase(BaseModel):
     """
     Base model for chat completion requests.
     """
-    model: str = Field(Config.TEXT_MODEL, description="Model to use for completion")
+    model: str = Field(config.model.DEFAULT_CHAT_MODEL, description="Model to use for completion")
     messages: List[Message] = Field(..., description="List of messages in the conversation")
     tools: Optional[List[Dict[str, Any]]] = Field(None, description="Available tools for the model")
     tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(None, description="Tool choice configuration")
@@ -230,7 +223,7 @@ class EmbeddingRequest(BaseModel):
     """
     Model for embedding requests.
     """
-    model: str = Field(Config.EMBEDDING_MODEL, description="Model to use for embedding")
+    model: str = Field(config.model.DEFAULT_EMBED_MODEL, description="Model to use for embedding")
     input: List[str] = Field(..., min_items=1, description="List of text inputs for embedding")
 
     @validator("input")

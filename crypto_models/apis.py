@@ -11,6 +11,8 @@ import time
 import json
 import uuid
 import psutil
+# Import configuration settings
+from crypto_models.config import config
 from json_repair import repair_json
 from typing import Dict, Any, Optional
 from crypto_models.core import CryptoModelsManager, CryptoAgentsServiceError
@@ -42,19 +44,20 @@ app = FastAPI()
 # Initialize CryptoModels Manager for service management
 crypto_models_manager = CryptoModelsManager()
 
-# Constants for dynamic unload feature - Optimized for performance
-IDLE_TIMEOUT = 600  # 10 minutes in seconds
-UNLOAD_CHECK_INTERVAL = 30  # Check every 30 seconds (reduced from 60)
-SERVICE_START_TIMEOUT = 120  # Reduced timeout for faster failure detection
-POOL_CONNECTIONS = 50  # Further optimized for better resource usage
-POOL_KEEPALIVE = 10  # Reduced keepalive to free connections faster
-HTTP_TIMEOUT = 180.0  # Reduced timeout for faster failure detection
-STREAM_TIMEOUT = 300.0  # Keep streaming timeout longer for large responses
-MAX_RETRIES = 2  # Reduced retries for faster failure handling
-RETRY_DELAY = 0.5  # Reduced delay between retries
-MAX_QUEUE_SIZE = 50  # Further reduced for better memory usage
-HEALTH_CHECK_INTERVAL = 2  # Faster health checks
-STREAM_CHUNK_SIZE = 16384  # Increased chunk size for better throughput
+
+# Performance constants from config
+IDLE_TIMEOUT = config.performance.IDLE_TIMEOUT
+UNLOAD_CHECK_INTERVAL = config.performance.UNLOAD_CHECK_INTERVAL
+SERVICE_START_TIMEOUT = config.performance.SERVICE_START_TIMEOUT
+POOL_CONNECTIONS = config.performance.POOL_CONNECTIONS
+POOL_KEEPALIVE = config.performance.POOL_KEEPALIVE
+HTTP_TIMEOUT = config.performance.HTTP_TIMEOUT
+STREAM_TIMEOUT = config.performance.STREAM_TIMEOUT
+MAX_RETRIES = config.performance.MAX_RETRIES
+RETRY_DELAY = config.performance.RETRY_DELAY
+MAX_QUEUE_SIZE = config.performance.MAX_QUEUE_SIZE
+HEALTH_CHECK_INTERVAL = config.performance.HEALTH_CHECK_INTERVAL
+STREAM_CHUNK_SIZE = config.performance.STREAM_CHUNK_SIZE
 
 # Utility functions
 def get_service_info() -> Dict[str, Any]:
