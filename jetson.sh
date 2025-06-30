@@ -194,46 +194,71 @@ fi
 log_message "Building llama_cpp Docker image with jetson-containers..."
 jetson-containers run $(autotag llama_cpp) /bin/true || handle_error $? "Failed to pull llama_cpp image"
 
-# Only launch the build container if the image does not already exist
-if ! docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "^my-llama-build-mmsupport:latest$"; then
-    log_message "Building my-llama-build-mmsupport image (container will be launched)..."
-    nohup script -q -c "jetson-containers run --name my-llama-build-mmsupport $(autotag llama_cpp) bash -c 'apt-get update && apt-get install -y git cmake build-essential && rm -rf /opt/llama.cpp && git clone https://github.com/ggerganov/llama.cpp.git /opt/llama.cpp && cd /opt/llama.cpp && rm -rf build && mkdir build && cd build && cmake .. -DGGML_CUDA=ON -DLLAVA_BUILD=ON -DLLAMA_BUILD_SERVER=ON && make -j\$(nproc) && make install && echo \"/usr/local/lib\" > /etc/ld.so.conf.d/local.conf && ldconfig && touch /tmp/build_complete && tail -f /dev/null'" /dev/null > /tmp/build.log 2>&1 &
+# Check if the current llama_cpp image supports --mmproj
+log_message "Checking if the current llama_cpp image supports --mmproj..."
+MM_SUPPORT_CHECK_OUTPUT=$(mktemp)
+# Run the command and capture both stdout and stderr
+jetson-containers run $(autotag llama_cpp) llama-server --mmproj > "$MM_SUPPORT_CHECK_OUTPUT" 2>&1
+MM_SUPPORT_RESULT=$?
 
-    # Wait for the container to appear (timeout after 60 seconds)
-    for i in {1..12}; do
-        if docker ps -a --format '{{.Names}}' | grep -q "^my-llama-build-mmsupport$"; then
-            log_message "Container my-llama-build-mmsupport is now running."
-            break
-        fi
-        log_message "Waiting for container my-llama-build-mmsupport to start..."
-        sleep 5
-    done
+if grep -q "error: invalid argument: --mmproj" "$MM_SUPPORT_CHECK_OUTPUT"; then
+    log_message "Current llama_cpp image does NOT support --mmproj. Proceeding with custom build."
+    NEED_CUSTOM_LLAMA_BUILD=1
+elif grep -q "error while handling argument \"--mmproj\": expected value for argument" "$MM_SUPPORT_CHECK_OUTPUT"; then
+    log_message "Current llama_cpp image supports --mmproj. Skipping custom build."
+    NEED_CUSTOM_LLAMA_BUILD=0
+else
+    log_error "Could not determine --mmproj support from output. Output was:"
+    cat "$MM_SUPPORT_CHECK_OUTPUT"
+    log_message "Proceeding with custom build to be safe."
+    NEED_CUSTOM_LLAMA_BUILD=1
+fi
+rm -f "$MM_SUPPORT_CHECK_OUTPUT"
 
-    # If still not found, exit with error
-    if ! docker ps -a --format '{{.Names}}' | grep -q "^my-llama-build-mmsupport$"; then
-        log_error "Container my-llama-build-mmsupport did not start within expected time."
-        exit 1
-    fi
+# Only launch the build container if the image does not already exist and NEED_CUSTOM_LLAMA_BUILD=1
+if [ "$NEED_CUSTOM_LLAMA_BUILD" = "1" ]; then
+    if ! docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "^my-llama-build-mmsupport:latest$"; then
+        log_message "Building my-llama-build-mmsupport image (container will be launched)..."
+        nohup script -q -c "jetson-containers run --name my-llama-build-mmsupport $(autotag llama_cpp) bash -c 'apt-get update && apt-get install -y git cmake build-essential && rm -rf /opt/llama.cpp && git clone https://github.com/ggerganov/llama.cpp.git /opt/llama.cpp && cd /opt/llama.cpp && rm -rf build && mkdir build && cd build && cmake .. -DGGML_CUDA=ON -DLLAVA_BUILD=ON -DLLAMA_BUILD_SERVER=ON && make -j\$(nproc) && make install && echo \"/usr/local/lib\" > /etc/ld.so.conf.d/local.conf && ldconfig && touch /tmp/build_complete && tail -f /dev/null'" /dev/null > /tmp/build.log 2>&1 &
 
-    # Now enter the build-complete waiting loop as before
-    while true; do
-        OUTPUT=$(docker exec my-llama-build-mmsupport test -f /tmp/build_complete 2>&1)
-        if echo "$OUTPUT" | grep -q "No such container"; then
-            log_error "No such container: my-llama-build-mmsupport"
+        # Wait for the container to appear (timeout after 60 seconds)
+        for i in {1..12}; do
+            if docker ps -a --format '{{.Names}}' | grep -q "^my-llama-build-mmsupport$"; then
+                log_message "Container my-llama-build-mmsupport is now running."
+                break
+            fi
+            log_message "Waiting for container my-llama-build-mmsupport to start..."
+            sleep 5
+        done
+
+        # If still not found, exit with error
+        if ! docker ps -a --format '{{.Names}}' | grep -q "^my-llama-build-mmsupport$"; then
+            log_error "Container my-llama-build-mmsupport did not start within expected time."
             exit 1
         fi
-        if docker exec my-llama-build-mmsupport test -f /tmp/build_complete 2>/dev/null; then
-            log_message "Build complete! Committing container..."
-            docker commit my-llama-build-mmsupport my-llama-build-mmsupport
-            log_message "Committed to my-llama-build-mmsupport!"
-            docker stop my-llama-build-mmsupport
-            break
-        fi
-        log_message "Waiting for build to finish inside container..."
-        sleep 10
-    done
+
+        # Now enter the build-complete waiting loop as before
+        while true; do
+            OUTPUT=$(docker exec my-llama-build-mmsupport test -f /tmp/build_complete 2>&1)
+            if echo "$OUTPUT" | grep -q "No such container"; then
+                log_error "No such container: my-llama-build-mmsupport"
+                exit 1
+            fi
+            if docker exec my-llama-build-mmsupport test -f /tmp/build_complete 2>/dev/null; then
+                log_message "Build complete! Committing container..."
+                docker commit my-llama-build-mmsupport my-llama-build-mmsupport
+                log_message "Committed to my-llama-build-mmsupport!"
+                docker stop my-llama-build-mmsupport
+                break
+            fi
+            log_message "Waiting for build to finish inside container..."
+            sleep 10
+        done
+    else
+        log_message "Image my-llama-build-mmsupport:latest already exists. Skipping build container launch."
+    fi
 else
-    log_message "Image my-llama-build-mmsupport:latest already exists. Skipping build container launch."
+    log_message "Skipping custom build of llama_cpp; native image supports --mmproj."
 fi
 
 # Step 5: Create wrapper script for llama-server
@@ -248,6 +273,13 @@ TEMPLATES_DIR="$(pwd)/cryptomodels/examples/templates"
 USER_HOME="$HOME"
 ABS_TEMPLATE_PATH="$(pwd)/cryptomodels/lib/$PYTHON_VERSION/site-packages/crypto_models/examples/templates"
 
+# Determine which container to use in the wrapper
+if [ "${NEED_CUSTOM_LLAMA_BUILD:-0}" = "1" ]; then
+    CONTAINER="my-llama-build-mmsupport"
+else
+    CONTAINER="$(autotag llama_cpp)"
+fi
+
 cat > "$LLAMA_WRAPPER_DIR/llama-server" << EOF
 #!/bin/bash
 # Wrapper script to run llama-server using jetson-containers docker image.
@@ -255,7 +287,7 @@ cat > "$LLAMA_WRAPPER_DIR/llama-server" << EOF
 MODELS_DIR="$MODELS_DIR"
 TEMPLATES_DIR="$TEMPLATES_DIR"
 ABS_TEMPLATE_PATH="$ABS_TEMPLATE_PATH"
-CONTAINER="my-llama-build-mmsupport"
+CONTAINER="$CONTAINER"
 
 # Mount model and template directories for Docker.
 MODEL_MOUNT="-v \$MODELS_DIR:\$MODELS_DIR"
