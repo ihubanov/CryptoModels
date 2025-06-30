@@ -12,6 +12,7 @@ import pkg_resources
 from pathlib import Path
 from loguru import logger
 from typing import Optional, Dict, Any
+from crypto_models.config import config
 from crypto_models.utils import wait_for_health
 from crypto_models.download import download_model_from_filecoin_async
 
@@ -30,22 +31,23 @@ class ModelNotFoundError(CryptoAgentsServiceError):
 class CryptoModelsManager:
     """Manages a CryptoModels service with optimized performance."""
     
-    # Performance constants
-    LOCK_TIMEOUT = 1800  # 30 minutes
-    PORT_CHECK_TIMEOUT = 2
-    HEALTH_CHECK_TIMEOUT = 300  # 5 minutes  
-    PROCESS_TERM_TIMEOUT = 15
-    MAX_PORT_RETRIES = 5
-    
     def __init__(self):
-        """Initialize the CryptoModelsManager with optimized defaults."""       
-        self.msgpack_file = Path(os.getenv("RUNNING_SERVICE_FILE", "running_service.msgpack"))
+        """Initialize the CryptoModelsManager with optimized defaults."""
+        # Performance constants from config
+        self.LOCK_TIMEOUT = config.core.LOCK_TIMEOUT
+        self.PORT_CHECK_TIMEOUT = config.core.PORT_CHECK_TIMEOUT
+        self.HEALTH_CHECK_TIMEOUT = config.core.HEALTH_CHECK_TIMEOUT
+        self.PROCESS_TERM_TIMEOUT = config.core.PROCESS_TERM_TIMEOUT
+        self.MAX_PORT_RETRIES = config.core.MAX_PORT_RETRIES
+        
+        # File paths from config
+        self.msgpack_file = Path(config.file_paths.RUNNING_SERVICE_FILE)
         self.loaded_models: Dict[str, Any] = {}
-        self.llama_server_path = os.getenv("LLAMA_SERVER")
+        self.llama_server_path = config.file_paths.LLAMA_SERVER or os.getenv("LLAMA_SERVER")
         if not self.llama_server_path or not os.path.exists(self.llama_server_path):
             raise CryptoAgentsServiceError("llama-server executable not found in LLAMA_SERVER or PATH")
-        self.start_lock_file = Path(os.getenv("START_LOCK_FILE", "start_lock.lock"))
-        self.logs_dir = Path("logs")
+        self.start_lock_file = Path(config.file_paths.START_LOCK_FILE)
+        self.logs_dir = Path(config.file_paths.LOGS_DIR)
         self.logs_dir.mkdir(exist_ok=True)
         
     def _get_free_port(self) -> int:
@@ -92,11 +94,16 @@ class CryptoModelsManager:
             self._get_model_best_practice_path(model_family)
         )
     
-    def _retry_request_json(self, url: str, retries: int = 2, delay: int = 2, timeout: int = 8) -> Optional[dict]:
+    def _retry_request_json(self, url: str, retries: int = None, delay: int = None, timeout: int = None) -> Optional[dict]:
         """
         Utility to retry a GET request for JSON data with optimized parameters.
         Returns parsed JSON data or None on failure.
         """
+        # Use config values as defaults
+        retries = retries or config.core.REQUEST_RETRIES
+        delay = delay or config.core.REQUEST_DELAY
+        timeout = timeout or config.core.REQUEST_TIMEOUT
+        
         backoff_delay = delay
         last_error = None
         
@@ -133,15 +140,15 @@ class CryptoModelsManager:
         logger.error(f"Failed to fetch {url} after {retries} attempts. Last error: {last_error}")
         return None
 
-    def start(self, hash: str, port: int = 11434, host: str = "0.0.0.0", context_length: int = 32768) -> bool:
+    def start(self, hash: str, port: int = None, host: str = None, context_length: int = None) -> bool:
         """
         Start the CryptoModels service in the background.
 
         Args:
             hash (str): Filecoin hash of the model to download and run.
-            port (int): Port number for the CryptoModels service (default: 11434).
-            host (str): Host address for the CryptoModels service (default: "0.0.0.0").
-            context_length (int): Context length for the model (default: 32768).
+            port (int): Port number for the CryptoModels service (default from config).
+            host (str): Host address for the CryptoModels service (default from config).
+            context_length (int): Context length for the model (default from config).
 
         Returns:
             bool: True if service started successfully, False otherwise.
@@ -153,6 +160,11 @@ class CryptoModelsManager:
         """
         if not hash:
             raise ValueError("Filecoin hash is required to start the service")
+        
+        # Use config defaults if not provided
+        port = port or config.network.DEFAULT_PORT
+        host = host or config.network.DEFAULT_HOST
+        context_length = context_length or config.model.DEFAULT_CONTEXT_LENGTH
 
         # Acquire process lock to prevent concurrent starts
         if not self._acquire_start_lock(hash, host, port):

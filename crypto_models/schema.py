@@ -8,18 +8,27 @@ from pydantic import BaseModel, Field, validator, root_validator
 from typing import List, Dict, Optional, Union, Any, ClassVar
 import time
 import uuid
+# Import configuration settings
+from crypto_models.config import config
 
 # Precompile regex patterns for better performance
 UNICODE_BOX_PATTERN = re.compile(r'\\u25[0-9a-fA-F]{2}')
 
-# Configuration
 class Config:
     """
-    Configuration class holding the default model names for different types of requests.
+    Legacy configuration class. Use crypto_models.config.config instead.
     """
-    TEXT_MODEL = "default-text-model"          # Default model for text-based chat completions
-    VISION_MODEL = "default-vision-model"  # Model used for vision-based requests
-    EMBEDDING_MODEL = "default-embedding-model"  # Model used for generating embeddings
+    @property
+    def TEXT_MODEL(self):
+        return config.model.TEXT_MODEL
+    
+    @property  
+    def VISION_MODEL(self):
+        return config.model.VISION_MODEL
+    
+    @property
+    def EMBEDDING_MODEL(self):
+        return config.model.EMBEDDING_MODEL
 
 # Common models used in both streaming and non-streaming contexts
 class ImageUrl(BaseModel):
