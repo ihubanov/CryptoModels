@@ -295,17 +295,26 @@ class CryptoModelsManager:
                 logger.info(f"Starting process: {' '.join(running_ai_command)}")
                 service_metadata["running_ai_command"] = running_ai_command
                 # Create log files for stdout and stderr for AI process
-                ai_log_stderr = self.logs_dir / "ai.log"
+                ai_log_stdout = self.logs_dir / "ai_stdout.log"
+                ai_log_stderr = self.logs_dir / "ai_stderr.log" # Renamed from ai.log for clarity
+
                 try:
-                    with open(ai_log_stderr, 'w') as stderr_log:
+                    # Open stdin from /dev/null
+                    with open(os.devnull, 'rb') as devnull_in, \
+                         open(ai_log_stdout, 'w') as stdout_log, \
+                         open(ai_log_stderr, 'w') as stderr_log:
                         ai_process = subprocess.Popen(
                             running_ai_command,
+                            stdin=devnull_in,
+                            stdout=stdout_log,
                             stderr=stderr_log,
-                            preexec_fn=os.setsid
+                            preexec_fn=os.setsid,
+                            close_fds=True
                         )
-                    logger.info(f"AI logs written to {ai_log_stderr}")
+                    logger.info(f"AI stdout logs: {ai_log_stdout}")
+                    logger.info(f"AI stderr logs: {ai_log_stderr}")
                 except Exception as e:
-                    logger.error(f"Error starting CryptoModels service: {str(e)}", exc_info=True)
+                    logger.error(f"Error starting CryptoModels service (AI process): {str(e)}", exc_info=True)
                     cleanup_processes()
                     return False
         
@@ -326,17 +335,25 @@ class CryptoModelsManager:
                 ]
                 logger.info(f"Starting process: {' '.join(uvicorn_command)}")
                 # Create log files for stdout and stderr
-                api_log_stderr = self.logs_dir / "api.log"
+                api_log_stdout = self.logs_dir / "api_stdout.log"
+                api_log_stderr = self.logs_dir / "api_stderr.log" # Renamed from api.log for clarity
                 try:
-                    with open(api_log_stderr, 'w') as stderr_log:
+                    # Open stdin from /dev/null
+                    with open(os.devnull, 'rb') as devnull_in, \
+                         open(api_log_stdout, 'w') as stdout_log, \
+                         open(api_log_stderr, 'w') as stderr_log:
                         apis_process = subprocess.Popen(
                             uvicorn_command,
+                            stdin=devnull_in,
+                            stdout=stdout_log,
                             stderr=stderr_log,
-                            preexec_fn=os.setsid
+                            preexec_fn=os.setsid,
+                            close_fds=True
                         )
-                    logger.info(f"API logs written to {api_log_stderr}")
+                    logger.info(f"API stdout logs: {api_log_stdout}")
+                    logger.info(f"API stderr logs: {api_log_stderr}")
                 except Exception as e:
-                    logger.error(f"Error starting FastAPI app: {str(e)}", exc_info=True)
+                    logger.error(f"Error starting FastAPI app (API process): {str(e)}", exc_info=True)
                     cleanup_processes()
                     return False
                 
@@ -1163,18 +1180,25 @@ class CryptoModelsManager:
                 
             logger.info(f"Reloading AI server with command: {running_ai_command}")
 
-            ai_log_stderr = self.logs_dir / "ai.log"
+            ai_log_stdout = self.logs_dir / "ai_stdout.log"
+            ai_log_stderr = self.logs_dir / "ai_stderr.log" # Renamed from ai.log
             
             try:
-                with open(ai_log_stderr, 'w') as stderr_log:
+                with open(os.devnull, 'rb') as devnull_in, \
+                     open(ai_log_stdout, 'w') as stdout_log, \
+                     open(ai_log_stderr, 'w') as stderr_log:
                     ai_process = subprocess.Popen(
                         running_ai_command,
+                        stdin=devnull_in,
+                        stdout=stdout_log,
                         stderr=stderr_log,
-                        preexec_fn=os.setsid
+                        preexec_fn=os.setsid,
+                        close_fds=True
                     )
-                logger.info(f"AI logs written to {ai_log_stderr}")
+                logger.info(f"Reloaded AI stdout logs: {ai_log_stdout}")
+                logger.info(f"Reloaded AI stderr logs: {ai_log_stderr}")
             except Exception as e:
-                logger.error(f"Error starting CryptoModels service: {str(e)}", exc_info=True)
+                logger.error(f"Error reloading CryptoModels service (AI process): {str(e)}", exc_info=True)
                 return False
             
             # Wait for the process to start by checking the health endpoint
