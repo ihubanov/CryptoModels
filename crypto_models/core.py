@@ -940,7 +940,7 @@ class CryptoModelsManager:
                     pass
         
         # Fetch from remote
-        filecoin_url = f"https://gateway.lighthouse.storage/ipfs/{hash}"
+        filecoin_url = f"https://gateway.mesh3.network/ipfs/{hash}"
         response_json = self._retry_request_json(filecoin_url, retries=3, delay=5, timeout=10)
         
         if not response_json:
