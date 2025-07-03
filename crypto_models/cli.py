@@ -2,7 +2,6 @@ import sys
 import asyncio
 import argparse
 from pathlib import Path
-from loguru import logger
 try:
     from rich.console import Console
     from rich.panel import Panel

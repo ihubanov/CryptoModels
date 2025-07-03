@@ -144,6 +144,12 @@ class ChatCompletionRequestBase(BaseModel):
                 return True
 
         return False
+    
+class ChatTemplateKwargs(BaseModel):
+    """
+    Represents the arguments for a chat template.
+    """
+    enable_thinking: bool = Field(True, description="Whether to enable thinking mode")
 
 # Non-streaming request and response
 class ChatCompletionRequest(ChatCompletionRequestBase):
@@ -151,6 +157,7 @@ class ChatCompletionRequest(ChatCompletionRequestBase):
     Model for non-streaming chat completion requests.
     """
     stream: bool = Field(False, description="Whether to stream the response")
+    chat_template_kwargs: Optional[ChatTemplateKwargs] = Field(ChatTemplateKwargs(), description="Chat template kwargs")
 
     def clean_messages(self) -> None:
         """Fix the messages list to ensure proper formatting and ordering."""
