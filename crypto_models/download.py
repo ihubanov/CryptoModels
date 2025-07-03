@@ -8,10 +8,10 @@ from pathlib import Path
 from crypto_models.utils import compute_file_hash, async_extract_zip, async_move, async_rmtree
 
 # Constants
-GATEWAY_URL = "https://gateway.lighthouse.storage/ipfs/"
+GATEWAY_URL = "https://gateway.mesh3.network/ipfs/"
 DEFAULT_OUTPUT_DIR = Path.cwd() / "llms-storage"
 SLEEP_TIME = 60
-MAX_ATTEMPTS = 10
+MAX_ATTEMPTS = 2
 POSTFIX_MODEL_PATH = ".gguf"
 
 def check_downloaded_model(filecoin_hash: str, output_dir: Path = DEFAULT_OUTPUT_DIR) -> bool:
