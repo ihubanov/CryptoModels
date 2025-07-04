@@ -3,6 +3,7 @@ import random
 import requests
 import aiohttp
 import asyncio
+import time
 from tqdm import tqdm
 from pathlib import Path
 from crypto_models.utils import compute_file_hash, async_extract_zip, async_move, async_rmtree
@@ -41,7 +42,7 @@ def check_downloaded_model(filecoin_hash: str, output_dir: Path = DEFAULT_OUTPUT
         print(f"Failed to fetch model metadata: {e}")
         return False
 
-async def download_single_file_async(session: aiohttp.ClientSession, file_info: dict, folder_path: Path, max_attempts: int = MAX_ATTEMPTS) -> tuple:
+async def download_single_file_async(session: aiohttp.ClientSession, file_info: dict, folder_path: Path, max_attempts: int = MAX_ATTEMPTS, progress_callback=None) -> tuple:
     """
     Asynchronously download a single file and verify its SHA256 hash, with retries.
 
@@ -50,6 +51,7 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
         file_info (dict): Contains 'cid', 'file_hash', and 'file_name'.
         folder_path (Path): Directory to save the file.
         max_attempts (int): Number of retries on failure.
+        progress_callback: Optional callback for progress updates.
 
     Returns:
         tuple: (Path to file if successful, None) or (None, error message).
@@ -60,7 +62,7 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
     file_path = folder_path / file_name
     attempts = 0
     
-    # Try to use a temp file for download to avoid corrupt files on failure
+    # Use a simple temp file for atomic operations
     temp_path = folder_path / f"{file_name}.tmp"
     
     # Check if file already exists with correct hash
@@ -77,11 +79,9 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
             print(f"Error checking existing file {cid}: {e}")
             file_path.unlink(missing_ok=True)
 
-    # Check if we have a partial download to resume
-    resume_position = 0
+    # Clean up any existing temp file
     if temp_path.exists():
         temp_path.unlink(missing_ok=True)
-        resume_position = 0
 
     while attempts < max_attempts:
         try:
@@ -90,36 +90,17 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
             # Use a larger chunk size for faster downloads
             chunk_size = 1024 * 1024  # 1MB chunks
             
-            # Set up headers for resume if needed
-            headers = {}
-            if resume_position > 0:
-                headers['Range'] = f'bytes={resume_position}-'
-            
             # Use a longer timeout for large files
             timeout = aiohttp.ClientTimeout(total=600, connect=120, sock_read=300, sock_connect=120)
             
-            async with session.get(url, headers=headers, timeout=timeout) as response:
-                if response.status in (200, 206):
-                    # Get total size accounting for resumed downloads
+            async with session.get(url, timeout=timeout) as response:
+                if response.status == 200:
+                    # Get total size for progress tracking
                     total_size = int(response.headers.get("content-length", 0))
-                    if response.status == 206:
-                        # For partial content, content-length is the remaining bytes
-                        content_range = response.headers.get("content-range", "")
-                        if content_range:
-                            try:
-                                # Format is usually "bytes start-end/total"
-                                total_size = int(content_range.split("/")[1]) 
-                            except (IndexError, ValueError):
-                                # If parsing fails, use resume_position + content-length
-                                total_size += resume_position
                     
-                    # Open file in append mode if resuming, otherwise in write mode
-                    mode = "ab" if resume_position > 0 else "wb"
-                    
-                    # Prepare progress bar
-                    with temp_path.open(mode) as f, tqdm(
+                    # Download to temp file
+                    with temp_path.open("wb") as f, tqdm(
                         total=total_size,
-                        initial=resume_position,
                         unit="B",
                         unit_scale=True,
                         desc=f"Downloading {file_name}",
@@ -128,25 +109,36 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
                         # Add timeout protection for each chunk
                         last_data_time = asyncio.get_event_loop().time()
                         chunk_timeout = 180  # 180 seconds without data is a timeout
+                        bytes_written = 0
                         
-                        # Downloading with per-chunk timeout protection
+                        # Download with per-chunk timeout protection
                         async for chunk in response.content.iter_chunked(chunk_size):
                             # Reset timeout timer when data is received
                             last_data_time = asyncio.get_event_loop().time()
                             
                             # Write chunk and update progress
                             f.write(chunk)
+                            bytes_written += len(chunk)
                             progress.update(len(chunk))
                             
-                            # Regularly flush to disk to avoid data loss
-                            if random.random() < 0.1:  # ~10% of chunks
+                            # Report progress to overall tracker
+                            if progress_callback:
+                                progress_callback(len(chunk))
+                            
+                            # Flush to disk every 10MB to avoid data loss
+                            if bytes_written >= 10 * 1024 * 1024:  # 10MB
                                 f.flush()
                                 os.fsync(f.fileno())
+                                bytes_written = 0
                             
                             # Check if download has been idle
                             current_time = asyncio.get_event_loop().time()
                             if current_time - last_data_time > chunk_timeout:
                                 raise asyncio.TimeoutError(f"No data received for {chunk_timeout} seconds")
+                        
+                        # Final flush
+                        f.flush()
+                        os.fsync(f.fileno())
 
                     # Verify hash
                     computed_hash = compute_file_hash(temp_path)
@@ -159,9 +151,8 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
                         return file_path, None
                     else:
                         print(f"Hash mismatch for {cid}. Expected {expected_hash}, got {computed_hash}.")
-                        # Don't delete temp file on hash mismatch, it may be corrupted but we can resume
-                        # Just reset resume position to 0 to start over on next attempt
-                        resume_position = 0
+                        # Clean up temp file on hash mismatch
+                        temp_path.unlink(missing_ok=True)
                 else:
                     print(f"Failed to download {cid}. Status: {response.status}")
                     # For certain status codes, we might want to fail faster
@@ -171,14 +162,17 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
                         wait_time = min(SLEEP_TIME * (2 ** attempts), 300)
             
         except asyncio.TimeoutError:
-            print(f"Timeout downloading {cid} - will resume from position {resume_position}")
-            # On timeout, don't reset resume position - we'll keep what we have
+            print(f"Timeout downloading {cid}")
+            # Clean up temp file on timeout
+            temp_path.unlink(missing_ok=True)
             wait_time = min(SLEEP_TIME * (2 ** attempts), 300)
         except aiohttp.ClientError as e:
             print(f"Client error downloading {cid}: {e}")
+            temp_path.unlink(missing_ok=True)
             wait_time = min(SLEEP_TIME * (2 ** attempts), 300)
         except Exception as e:
             print(f"Exception downloading {cid}: {e}")
+            temp_path.unlink(missing_ok=True)
             wait_time = min(SLEEP_TIME * (2 ** attempts), 300)
 
         attempts += 1
@@ -187,8 +181,48 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
             await asyncio.sleep(wait_time)
         else:
             print(f"Failed to download {cid} after {max_attempts} attempts.")
-            # On final failure, leave the temp file for potential future resume
+            # Clean up temp file on final failure
+            temp_path.unlink(missing_ok=True)
             return None, f"Failed to download {cid} after {max_attempts} attempts."
+
+class ProgressTracker:
+    """Track download progress across multiple concurrent downloads"""
+    
+    def __init__(self, total_files: int, filecoin_hash: str):
+        self.total_files = total_files
+        self.filecoin_hash = filecoin_hash
+        self.total_bytes_downloaded = 0
+        self.completed_files = 0
+        self.start_time = time.time()
+        self.last_log_time = 0
+        self.lock = asyncio.Lock()
+    
+    async def update_progress(self, bytes_downloaded: int):
+        """Update progress and log if enough time has passed"""
+        async with self.lock:
+            self.total_bytes_downloaded += bytes_downloaded
+            current_time = time.time()
+            
+            # Log progress every 2 seconds
+            if current_time - self.last_log_time >= 2.0:
+                self.last_log_time = current_time
+                elapsed_time = current_time - self.start_time
+                speed_mbps = (self.total_bytes_downloaded / (1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
+                
+                # Calculate percentage based on completed files
+                percentage = (self.completed_files / self.total_files) * 100
+                
+                print(f"[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL] --progress {percentage:.1f}% ({self.completed_files}/{self.total_files} files) --speed {speed_mbps:.2f} MB/s")
+    
+    async def complete_file(self):
+        """Mark a file as completed"""
+        async with self.lock:
+            self.completed_files += 1
+            percentage = (self.completed_files / self.total_files) * 100
+            elapsed_time = time.time() - self.start_time
+            speed_mbps = (self.total_bytes_downloaded / (1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
+            
+            print(f"[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL] --progress {percentage:.1f}% ({self.completed_files}/{self.total_files} files) --speed {speed_mbps:.2f} MB/s")
 
 async def download_files_from_lighthouse_async(data: dict) -> list:
     """
@@ -215,10 +249,16 @@ async def download_files_from_lighthouse_async(data: dict) -> list:
     max_concurrent_downloads = min(os.cpu_count() * 2, minimum_workers)
     semaphore = asyncio.Semaphore(max_concurrent_downloads)
     
+    # Create progress tracker
+    progress_tracker = ProgressTracker(total_files, filecoin_hash)
+    
     # Wrapper for download with semaphore
     async def download_with_semaphore(session, file_info, folder_path):
         async with semaphore:
-            return await download_single_file_async(session, file_info, folder_path)
+            return await download_single_file_async(
+                session, file_info, folder_path, 
+                progress_callback=progress_tracker.update_progress
+            )
     
     connector = aiohttp.TCPConnector(limit=max_concurrent_downloads, ssl=False)
     timeout = aiohttp.ClientTimeout(total=None, connect=120, sock_connect=120, sock_read=300)
@@ -242,8 +282,7 @@ async def download_files_from_lighthouse_async(data: dict) -> list:
                 path, error = await future
                 if path:
                     successful_downloads.append(path)
-                    print(f"[LAUNCHER_LOGGER] [MODEL_INSTALL] --step {len(successful_downloads)}/{num_of_files} --hash {filecoin_hash}")
-                    print(f"Progress: {len(successful_downloads)}/{total_files} files downloaded")
+                    await progress_tracker.complete_file()
                 else:
                     failed_downloads.append(error)
                     print(f"Download failed: {error}")
