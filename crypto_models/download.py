@@ -119,7 +119,7 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
                             
                             # Report progress to overall tracker
                             if progress_callback:
-                                progress_callback(len(chunk))
+                                await progress_callback(len(chunk))
                             
                             # Flush to disk every 10MB to avoid data loss
                             if bytes_written >= 10 * 1024 * 1024:  # 10MB
