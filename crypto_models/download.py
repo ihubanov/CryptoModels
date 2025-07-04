@@ -4,7 +4,6 @@ import requests
 import aiohttp
 import asyncio
 import time
-from tqdm import tqdm
 from pathlib import Path
 from crypto_models.utils import compute_file_hash, async_extract_zip, async_move, async_rmtree
 
@@ -42,7 +41,7 @@ def check_downloaded_model(filecoin_hash: str, output_dir: Path = DEFAULT_OUTPUT
         print(f"Failed to fetch model metadata: {e}")
         return False
 
-async def download_single_file_async(session: aiohttp.ClientSession, file_info: dict, folder_path: Path, max_attempts: int = MAX_ATTEMPTS, progress_callback=None) -> tuple:
+async def download_single_file_async(session: aiohttp.ClientSession, file_info: dict, folder_path: Path, max_attempts: int = MAX_ATTEMPTS, progress_callback=None, progress_tracker=None) -> tuple:
     """
     Asynchronously download a single file and verify its SHA256 hash, with retries.
 
@@ -98,14 +97,12 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
                     # Get total size for progress tracking
                     total_size = int(response.headers.get("content-length", 0))
                     
+                    # Report file size to progress tracker
+                    if progress_tracker and total_size > 0:
+                        await progress_tracker.add_file_size(total_size)
+                    
                     # Download to temp file
-                    with temp_path.open("wb") as f, tqdm(
-                        total=total_size,
-                        unit="B",
-                        unit_scale=True,
-                        desc=f"Downloading {file_name}",
-                        ncols=80
-                    ) as progress:
+                    with temp_path.open("wb") as f:
                         # Add timeout protection for each chunk
                         last_data_time = asyncio.get_event_loop().time()
                         chunk_timeout = 180  # 180 seconds without data is a timeout
@@ -116,14 +113,13 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
                             # Reset timeout timer when data is received
                             last_data_time = asyncio.get_event_loop().time()
                             
-                            # Write chunk and update progress
+                            # Write chunk
                             f.write(chunk)
                             bytes_written += len(chunk)
-                            progress.update(len(chunk))
                             
                             # Report progress to overall tracker
                             if progress_callback:
-                                await progress_callback(len(chunk))
+                                progress_callback(len(chunk))
                             
                             # Flush to disk every 10MB to avoid data loss
                             if bytes_written >= 10 * 1024 * 1024:  # 10MB
@@ -192,10 +188,16 @@ class ProgressTracker:
         self.total_files = total_files
         self.filecoin_hash = filecoin_hash
         self.total_bytes_downloaded = 0
+        self.total_bytes_expected = 0
         self.completed_files = 0
         self.start_time = time.time()
         self.last_log_time = 0
         self.lock = asyncio.Lock()
+    
+    async def add_file_size(self, file_size: int):
+        """Add expected file size to total"""
+        async with self.lock:
+            self.total_bytes_expected += file_size
     
     async def update_progress(self, bytes_downloaded: int):
         """Update progress and log if enough time has passed"""
@@ -209,8 +211,13 @@ class ProgressTracker:
                 elapsed_time = current_time - self.start_time
                 speed_mbps = (self.total_bytes_downloaded / (1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
                 
-                # Calculate percentage based on completed files
-                percentage = (self.completed_files / self.total_files) * 100
+                # Calculate percentage based on bytes downloaded vs total expected
+                if self.total_bytes_expected > 0:
+                    percentage = (self.total_bytes_downloaded / self.total_bytes_expected) * 100
+                    percentage = min(percentage, 100.0)  # Cap at 100%
+                else:
+                    # Fall back to file-based progress if no total size available
+                    percentage = (self.completed_files / self.total_files) * 100
                 
                 print(f"[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL] --progress {percentage:.1f}% ({self.completed_files}/{self.total_files} files) --speed {speed_mbps:.2f} MB/s")
     
@@ -218,9 +225,16 @@ class ProgressTracker:
         """Mark a file as completed"""
         async with self.lock:
             self.completed_files += 1
-            percentage = (self.completed_files / self.total_files) * 100
             elapsed_time = time.time() - self.start_time
             speed_mbps = (self.total_bytes_downloaded / (1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
+            
+            # Calculate percentage based on bytes downloaded vs total expected
+            if self.total_bytes_expected > 0:
+                percentage = (self.total_bytes_downloaded / self.total_bytes_expected) * 100
+                percentage = min(percentage, 100.0)  # Cap at 100%
+            else:
+                # Fall back to file-based progress if no total size available
+                percentage = (self.completed_files / self.total_files) * 100
             
             print(f"[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL] --progress {percentage:.1f}% ({self.completed_files}/{self.total_files} files) --speed {speed_mbps:.2f} MB/s")
 
@@ -257,7 +271,8 @@ async def download_files_from_lighthouse_async(data: dict) -> list:
         async with semaphore:
             return await download_single_file_async(
                 session, file_info, folder_path, 
-                progress_callback=progress_tracker.update_progress
+                progress_callback=progress_tracker.update_progress,
+                progress_tracker=progress_tracker
             )
     
     connector = aiohttp.TCPConnector(limit=max_concurrent_downloads, ssl=False)
