@@ -82,7 +82,7 @@ class ChatCompletionRequestBase(BaseModel):
     messages: List[Message] = Field(..., description="List of messages in the conversation")
     tools: Optional[List[Dict[str, Any]]] = Field(None, description="Available tools for the model")
     tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(None, description="Tool choice configuration")
-    max_tokens: Optional[int] = Field(8192, ge=1, description="Maximum number of tokens to generate")
+    max_tokens: Optional[int] = Field(None, description="Maximum number of tokens to generate")
     seed: Optional[int] = Field(None, description="Random seed for generation")
     
     @validator("messages")
@@ -104,6 +104,15 @@ class ChatCompletionRequestBase(BaseModel):
             invalid_roles = [msg.role for msg in v if msg.role not in valid_roles]
             raise ValueError(f"invalid role(s): {invalid_roles[0]}")
                 
+        return v
+
+    @validator("max_tokens")
+    def validate_max_tokens(cls, v: Optional[int]) -> Optional[int]:
+        """Validate max_tokens - convert -1 to None and ensure positive values."""
+        if v is None or v == -1:
+            return None
+        if v < 1:
+            raise ValueError("max_tokens must be greater than or equal to 1")
         return v
 
     def is_vision_request(self) -> bool:
