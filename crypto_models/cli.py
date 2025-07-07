@@ -2,15 +2,11 @@ import sys
 import asyncio
 import argparse
 from pathlib import Path
-try:
-    from rich.console import Console
-    from rich.panel import Panel
-    from rich.text import Text
-    from rich.table import Table
-    from rich import print as rprint
-    RICH_AVAILABLE = True
-except ImportError:
-    RICH_AVAILABLE = False
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
+from rich.table import Table
+from rich import print as rprint
     
 from crypto_models import __version__
 from crypto_models.config import config
@@ -23,9 +19,8 @@ manager = CryptoModelsManager()
 
 def print_banner():
     """Display a beautiful banner for the CLI"""
-    if RICH_AVAILABLE:
-        console = Console()
-        banner_text = """
+    console = Console()
+    banner_text = """
  ██████╗██████╗ ██╗   ██╗██████╗ ████████╗ ██████╗ 
 ██╔════╝██╔══██╗╚██╗ ██╔╝██╔══██╗╚══██╔══╝██╔═══██╗
 ██║     ██████╔╝ ╚████╔╝ ██████╔╝   ██║   ██║   ██║
@@ -41,69 +36,42 @@ def print_banner():
 ╚═╝     ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝╚══════╝╚══════╝
         """
         
-        panel = Panel(
-            Text(banner_text, style="bold cyan"),
-            title=f"[bold green]CryptoModels CLI v{__version__}[/bold green]",
-            subtitle="[italic]Decentralized AI Model Management[/italic]",
-            border_style="bright_blue",
-            padding=(1, 2)
-        )
-        console.print(panel)
-    else:
-        print(f"""
-╔═══════════════════════════════════════════════════════════╗
-║                    CRYPTO MODELS CLI                      ║
-║                     Version {__version__:<10}                    ║
-║               Decentralized AI Model Management           ║
-╚═══════════════════════════════════════════════════════════╝
-        """)
+    panel = Panel(
+        Text(banner_text, style="bold cyan", justify="center"),
+        title=f"[bold green]CryptoModels CLI v{__version__}[/bold green]",
+        subtitle="[italic]Decentralized AI Model Management[/italic]",
+        border_style="bright_blue",
+        padding=(1, 2)
+    )
+    console.print(panel)
 
 def print_success(message):
     """Print success message with styling"""
-    if RICH_AVAILABLE:
-        rprint(f"[bold green]✅ {message}[/bold green]")
-    else:
-        print(f"✅ {message}")
+    rprint(f"[bold green]✅ {message}[/bold green]")
 
 def print_error(message):
     """Print error message with styling"""
-    if RICH_AVAILABLE:
-        rprint(f"[bold red]❌ {message}[/bold red]")
-    else:
-        print(f"❌ {message}")
+    rprint(f"[bold red]❌ {message}[/bold red]")
 
 def print_info(message):
     """Print info message with styling"""
-    if RICH_AVAILABLE:
-        rprint(f"[bold blue]ℹ️  {message}[/bold blue]")
-    else:
-        print(f"ℹ️  {message}")
+    rprint(f"[bold blue]ℹ️  {message}[/bold blue]")
 
 def print_warning(message):
     """Print warning message with styling"""
-    if RICH_AVAILABLE:
-        rprint(f"[bold yellow]⚠️  {message}[/bold yellow]")
-    else:
-        print(f"⚠️  {message}")
+    rprint(f"[bold yellow]⚠️  {message}[/bold yellow]")
 
 def show_available_models():
     """Display available models in a beautiful table"""
-    if RICH_AVAILABLE:
-        console = Console()
-        table = Table(title="🤖 Available Preserved Models", border_style="cyan")
-        table.add_column("Model Name", style="bold magenta", justify="left")
-        table.add_column("Hash", style="dim", justify="left")
+    console = Console()
+    table = Table(title="🤖 Available Preserved Models", border_style="cyan")
+    table.add_column("Model Name", style="bold magenta", justify="left")
+    table.add_column("Hash", style="dim", justify="left")
+    
+    for model_name, model_hash in PRESERVED_MODELS.items():
+        table.add_row(model_name, model_hash[:16] + "...")
         
-        for model_name, model_hash in PRESERVED_MODELS.items():
-            table.add_row(model_name, model_hash[:16] + "...")
-            
-        console.print(table)
-    else:
-        print("\n🤖 Available Preserved Models:")
-        print("=" * 50)
-        for model_name, model_hash in PRESERVED_MODELS.items():
-            print(f"  • {model_name:<20} {model_hash[:16]}...")
-        print("=" * 50)
+    console.print(table)
 
 class CustomHelpFormatter(argparse.HelpFormatter):
     """Custom help formatter for better styling"""
@@ -111,9 +79,7 @@ class CustomHelpFormatter(argparse.HelpFormatter):
         if not action.option_strings:
             return super()._format_action_invocation(action)
         default = super()._format_action_invocation(action)
-        if RICH_AVAILABLE:
-            return f"[bold cyan]{default}[/bold cyan]"
-        return default
+        return f"[bold cyan]{default}[/bold cyan]"
 
 def parse_args():
     """Parse command line arguments with beautiful help formatting"""
@@ -369,36 +335,22 @@ def handle_stop(args):
 def handle_status(args):
     """Handle status check with beautiful formatting"""
     running_model = manager.get_running_model()
+    console = Console()
     if running_model:
-        if RICH_AVAILABLE:
-            console = Console()
-            panel = Panel(
-                f"[bold green]Status:[/bold green] Running\n"
-                f"[bold blue]Details:[/bold blue] {running_model}",
-                title="🤖 Model Server Status",
-                border_style="green"
-            )
-            console.print(panel)
-        else:
-            print("🤖 Model Server Status")
-            print("=" * 30)
-            print(f"Status: ✅ Running")
-            print(f"Details: {running_model}")
-            print("=" * 30)
+        panel = Panel(
+            f"[bold green]Status:[/bold green] Running\n"
+            f"[bold blue]Details:[/bold blue] {running_model}",
+            title="🤖 Model Server Status",
+            border_style="green"
+        )
+        console.print(panel)
     else:
-        if RICH_AVAILABLE:
-            console = Console()
-            panel = Panel(
-                "[bold red]No model server is currently running[/bold red]",
-                title="🤖 Model Server Status",
-                border_style="red"
-            )
-            console.print(panel)
-        else:
-            print("🤖 Model Server Status")
-            print("=" * 30)
-            print("Status: ❌ Not Running")
-            print("=" * 30)
+        panel = Panel(
+            "[bold red]No model server is currently running[/bold red]",
+            title="🤖 Model Server Status",
+            border_style="red"
+        )
+        console.print(panel)
 
 def handle_preserve(args):
     """Handle model preservation with beautiful output"""

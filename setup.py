@@ -18,6 +18,7 @@ setup(
     },
     include_package_data=True,
     install_requires=[
+        "rich",
         "requests>=2.28.0",
         "tqdm>=4.64.0",
         "loguru>=0.6.0",
