@@ -23,6 +23,8 @@ from fastapi.responses import StreamingResponse
 from crypto_models.schema import (
     Choice,
     Message,
+    ModelCard,
+    ModelList,
     ChatCompletionRequest,
     ChatCompletionResponse,
     EmbeddingRequest,
@@ -31,8 +33,6 @@ from crypto_models.schema import (
     ChoiceDeltaFunctionCall,
     ChoiceDeltaToolCall,
     ChatCompletionResponse,
-    ModelCard,
-    ModelList
 )
 
 # Set up logging with both console and file output
@@ -798,7 +798,6 @@ async def list_models():
     model_card = ModelCard(
         id=model_id,
         root=model_id, # Consistent with OpenAI for base models
-        family=service_info.get("family"), # Assumes 'family' is in service_info
         ram=parsed_ram_value,    # Use 'ram' field, populated with parsed value
         folder_name=folder_name_from_info  # From Task 1
     )
