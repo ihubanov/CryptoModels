@@ -251,8 +251,8 @@ def parse_args():
         "--task", 
         type=str, 
         default="chat", 
-        choices=["chat", "embed"],
-        help="🎯 Model task type (default: chat)",
+        choices=["chat", "embed", "flux"],
+        help="🎯 Model task type (default: chat, embed, flux)",
         metavar="TYPE"
     )
     preserve_command.add_argument(
