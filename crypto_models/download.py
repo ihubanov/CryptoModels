@@ -110,15 +110,15 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
     if temp_path.exists():
         temp_path.unlink(missing_ok=True)
 
-    # Determine the order of gateways: fastest first, then the rest in round robin order
-    fastest_gateway = await pick_fastest_gateway(cid, GATEWAY_URLS)
-    # Create a list with fastest first, then the rest (excluding fastest)
-    gateways_order = [fastest_gateway] + [gw for gw in GATEWAY_URLS if gw != fastest_gateway]
-
     while attempts < max_attempts:
+        # For each attempt, pick the fastest gateway at this moment
+        fastest_gateway = await pick_fastest_gateway(cid, GATEWAY_URLS)
+        gateways_order = [fastest_gateway] + [gw for gw in GATEWAY_URLS if gw != fastest_gateway]
         # Use the fastest gateway for the first attempt, then round robin through the rest
         gateway = gateways_order[attempts % len(gateways_order)]
         url = f"{gateway}{cid}"
+        # Print which URL will be used for downloading
+        print(f"[download_single_file_async] Attempt {attempts+1}: Downloading from URL: {url} ---> {file_path}")
 
         try:
             # Use optimized chunk size for faster downloads
@@ -215,7 +215,7 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
             # Clean up temp file on final failure
             temp_path.unlink(missing_ok=True)
             return None, f"Failed to download {cid} after {max_attempts} attempts."
-
+    return None, ""
 
 class ProgressTracker:
     """Track download progress across multiple concurrent downloads with batched updates"""
@@ -295,7 +295,9 @@ class ProgressTracker:
                             percentage = (self.completed_files / self.total_files) * 100
 
                         print(
-                            f"[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL] --progress {percentage:.1f}% ({self.completed_files}/{self.total_files} files) --speed {speed_mbps:.2f} MB/s")
+                            f"[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL] --progress {percentage:.1f}% "
+                            f"({self.completed_files}/{self.total_files} files) --speed {speed_mbps:.2f} MB/s"
+                        )
 
             except asyncio.CancelledError:
                 break
@@ -431,27 +433,28 @@ async def pick_fastest_gateway(filecoin_hash: str, gateways: list[str], timeout:
 
     # If there is only one gateway, return it immediately (no need to check)
     if len(gateways) == 1:
-        print(f"[pick_fastest_gateway] Only one gateway provided, returning: {gateways[0]}")
+        print(f"[pick_fastest_gateway] ✅ Only one gateway provided, returning: {gateways[0]}")
         return gateways[0]
 
-    print(f"[pick_fastest_gateway] Checking speed for {len(gateways)} gateways with hash: {filecoin_hash}")
+    print(f"[pick_fastest_gateway] 🚦 Checking speed for {len(gateways)} gateways with hash: {filecoin_hash}")
 
     async def check_gateway(gateway: str) -> tuple[str, float]:
         url = f"{gateway}{filecoin_hash}"
-        print(f"[pick_fastest_gateway] Testing gateway: {url}")
+        print(f"[pick_fastest_gateway] 🔍 Testing gateway: {url}")
         start = asyncio.get_event_loop().time()
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
-                # Use HEAD request to check availability and response time
-                async with session.head(url) as resp:
-                    if resp.status == 200:
+                # Use GET with Range header to fetch only the first 1KB, since some gateways may not support HEAD
+                headers = {"Range": "bytes=0-1023"}
+                async with session.get(url, headers=headers) as resp:
+                    if resp.status in (200, 206):  # 206 = Partial Content
                         elapsed = asyncio.get_event_loop().time() - start
-                        print(f"[pick_fastest_gateway] Gateway {gateway} responded in {elapsed:.3f} seconds.")
+                        print(f"[pick_fastest_gateway] ⏱️ Gateway {gateway} responded in {elapsed:.3f} seconds.")
                         return gateway, elapsed
                     else:
-                        print(f"[pick_fastest_gateway] Gateway {gateway} returned status {resp.status}.")
+                        print(f"[pick_fastest_gateway] ⚠️ Gateway {gateway} returned status {resp.status}.")
         except Exception as e:
-            print(f"[pick_fastest_gateway] Error with gateway {gateway}: {e}")
+            print(f"[pick_fastest_gateway] ❌ Error with gateway {gateway}: {e}")
         # Return infinity if the gateway is not available or too slow
         return gateway, float('inf')
 
@@ -461,11 +464,11 @@ async def pick_fastest_gateway(filecoin_hash: str, gateways: list[str], timeout:
     # Select the gateway with the lowest response time
     for gw, t in results:
         if t != float('inf'):
-            print(f"[pick_fastest_gateway] Gateway {gw} time: {t:.3f} seconds.")
+            print(f"[pick_fastest_gateway] ✅ Gateway {gw} time: {t:.3f} seconds.")
         else:
-            print(f"[pick_fastest_gateway] Gateway {gw} is not available.")
+            print(f"[pick_fastest_gateway] ❌ Gateway {gw} is not available.")
     fastest = min(results, key=lambda x: x[1])
-    print(f"[pick_fastest_gateway] Fastest gateway selected: {fastest[0]} (time: {fastest[1]:.3f} seconds)\n")
+    print(f"[pick_fastest_gateway] 🚀 Fastest gateway selected: {fastest[0]} (time: {fastest[1]:.3f} seconds)\n")
     return fastest[0]
 
 
