@@ -583,3 +583,20 @@ async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Pat
 
     print("All download attempts failed")
     return None
+
+
+if __name__ == "__main__":
+    import sys
+    import asyncio
+
+    # Get filecoin_hash from command line argument or use a default for testing
+    if len(sys.argv) > 1:
+        filecoin_hash = sys.argv[1]
+    else:
+        # Replace this with a real hash for testing
+        filecoin_hash = "bafkreiclwlxc56ppozipczuwkmgnlrxrerrvaubc5uhvfs3g2hp3lftrwm"
+
+    # Run the async download function and print the result
+    print(f"Testing download_model_from_filecoin_async with hash: {filecoin_hash}")
+    result = asyncio.run(download_model_from_filecoin_async(filecoin_hash))
+    print("Download result:", result)
