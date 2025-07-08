@@ -418,6 +418,7 @@ async def download_files_from_lighthouse_async(data: dict) -> list:
 async def pick_fastest_gateway(filecoin_hash: str, gateways: list[str], timeout: int = 5) -> str:
     """
     Check the speed of each gateway and return the fastest one for the given filecoin_hash.
+    If only one gateway is provided, return it immediately.
     Args:
         filecoin_hash (str): The IPFS hash to test download speed for.
         gateways (list[str]): List of gateway URLs.
@@ -427,6 +428,11 @@ async def pick_fastest_gateway(filecoin_hash: str, gateways: list[str], timeout:
     """
     import aiohttp
     import asyncio
+
+    # If there is only one gateway, return it immediately (no need to check)
+    if len(gateways) == 1:
+        print(f"[pick_fastest_gateway] Only one gateway provided, returning: {gateways[0]}")
+        return gateways[0]
 
     print(f"[pick_fastest_gateway] Checking speed for {len(gateways)} gateways with hash: {filecoin_hash}")
 
