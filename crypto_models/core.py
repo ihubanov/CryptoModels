@@ -79,8 +79,8 @@ class CryptoModelsManager:
 
             logger.info(f"Restarting CryptoModels service '{hash}' running on port {port}...")
 
-            # Stop the current service
-            self.stop()
+            # Stop the current service with force for restart
+            self.stop(force=True)
 
             # Start the service with the same parameters
             return self.start(hash, port, context_length=context_length)
@@ -228,7 +228,7 @@ class CryptoModelsManager:
                         logger.warning(f"Model '{hash}' already running on port {port}")
                         return True
                     logger.info(f"Stopping existing model '{model_running}' on port {port}")
-                    self.stop()
+                    self.stop(force=True)
 
                 if not os.path.exists(local_model_path):
                     raise ModelNotFoundError(f"Model file not found at: {local_model_path}")
@@ -420,9 +420,12 @@ class CryptoModelsManager:
             logger.error(f"Error getting running model: {str(e)}")
             return None
     
-    def stop(self) -> bool:
+    def stop(self, force: bool = False) -> bool:
         """
         Stop the running CryptoModels service with optimized process termination.
+
+        Args:
+            force (bool): If True, force kill processes immediately without graceful termination.
 
         Returns:
             bool: True if the service stopped successfully, False otherwise.
@@ -442,11 +445,15 @@ class CryptoModelsManager:
             app_port = service_info.get("app_port")
             local_ai_port = service_info.get("port")
 
-            logger.info(f"Stopping CryptoModels service '{hash_val}' running on port {app_port} (AI PID: {pid}, API PID: {app_pid})...")
+            if force:
+                logger.info(f"Force stopping CryptoModels service '{hash_val}' running on port {app_port} (AI PID: {pid}, API PID: {app_pid})...")
+            else:
+                logger.info(f"Stopping CryptoModels service '{hash_val}' running on port {app_port} (AI PID: {pid}, API PID: {app_pid})...")
             
-            # Use the optimized termination methods
-            ai_stopped = self._terminate_process_safely(pid, "CryptoModels service", timeout=15)
-            api_stopped = self._terminate_process_safely(app_pid, "API service", timeout=15)
+            # Use the optimized termination methods with force parameter
+            timeout = 0 if force else 15
+            ai_stopped = self._terminate_process_safely(pid, "CryptoModels service", timeout=timeout, force=force)
+            api_stopped = self._terminate_process_safely(app_pid, "API service", timeout=timeout, force=force)
             
             # Brief pause to allow system cleanup
             time.sleep(1)
@@ -479,7 +486,7 @@ class CryptoModelsManager:
             logger.error(f"Error stopping CryptoModels service: {str(e)}", exc_info=True)
             return False
 
-    def _terminate_process_safely(self, pid: int, process_name: str, timeout: int = 15, use_process_group: bool = True) -> bool:
+    def _terminate_process_safely(self, pid: int, process_name: str, timeout: int = 15, use_process_group: bool = True, force: bool = False) -> bool:
         """
         Safely terminate a process with graceful fallback to force kill.
         
@@ -488,6 +495,7 @@ class CryptoModelsManager:
             process_name: Human-readable process name for logging
             timeout: Timeout for graceful termination in seconds
             use_process_group: Whether to try process group termination first
+            force: If True, force kill processes immediately without graceful termination
             
         Returns:
             bool: True if process was terminated successfully, False otherwise
@@ -523,57 +531,60 @@ class CryptoModelsManager:
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
             
-            # Phase 1: Graceful termination
-            try:
-                if use_process_group:
-                    # Try process group termination first (more efficient)
-                    try:
-                        pgid = os.getpgid(pid)
-                        os.killpg(pgid, signal.SIGTERM)
-                        logger.debug(f"Sent SIGTERM to process group {pgid}")
-                    except (ProcessLookupError, OSError, PermissionError):
-                        # Fall back to individual process termination
+            # Phase 1: Graceful termination (skip if force=True)
+            if not force:
+                try:
+                    if use_process_group:
+                        # Try process group termination first (more efficient)
+                        try:
+                            pgid = os.getpgid(pid)
+                            os.killpg(pgid, signal.SIGTERM)
+                            logger.debug(f"Sent SIGTERM to process group {pgid}")
+                        except (ProcessLookupError, OSError, PermissionError):
+                            # Fall back to individual process termination
+                            process.terminate()
+                            logger.debug(f"Sent SIGTERM to process {pid}")
+                            
+                            # Terminate children individually
+                            for child in children:
+                                try:
+                                    child.terminate()
+                                    logger.debug(f"Sent SIGTERM to child process {child.pid}")
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    pass
+                    else:
+                        # Individual process termination
                         process.terminate()
                         logger.debug(f"Sent SIGTERM to process {pid}")
                         
-                        # Terminate children individually
                         for child in children:
                             try:
                                 child.terminate()
                                 logger.debug(f"Sent SIGTERM to child process {child.pid}")
                             except (psutil.NoSuchProcess, psutil.AccessDenied):
                                 pass
-                else:
-                    # Individual process termination
-                    process.terminate()
-                    logger.debug(f"Sent SIGTERM to process {pid}")
-                    
-                    for child in children:
-                        try:
-                            child.terminate()
-                            logger.debug(f"Sent SIGTERM to child process {child.pid}")
-                        except (psutil.NoSuchProcess, psutil.AccessDenied):
-                            pass
-                            
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                logger.info(f"Process {process_name} disappeared during termination")
-                return True
-            
-            # Wait for graceful termination with exponential backoff
-            wait_time = 0.1
-            elapsed = 0
-            while elapsed < timeout and psutil.pid_exists(pid):
-                time.sleep(wait_time)
-                elapsed += wait_time
-                wait_time = min(wait_time * 1.5, 2.0)  # Cap at 2 seconds
-                
-                # Check if process became zombie
-                try:
-                    if process.status() == psutil.STATUS_ZOMBIE:
-                        logger.info(f"{process_name} became zombie, considering stopped")
-                        return True
+                                
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    logger.info(f"Process {process_name} disappeared during termination")
                     return True
+                
+                # Wait for graceful termination with exponential backoff
+                wait_time = 0.1
+                elapsed = 0
+                while elapsed < timeout and psutil.pid_exists(pid):
+                    time.sleep(wait_time)
+                    elapsed += wait_time
+                    wait_time = min(wait_time * 1.5, 2.0)  # Cap at 2 seconds
+                    
+                    # Check if process became zombie
+                    try:
+                        if process.status() == psutil.STATUS_ZOMBIE:
+                            logger.info(f"{process_name} became zombie, considering stopped")
+                            return True
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        return True
+            else:
+                logger.info(f"Force mode enabled - skipping graceful termination for {process_name} (PID: {pid})")
             
             # Phase 2: Force termination if still running
             if psutil.pid_exists(pid):
