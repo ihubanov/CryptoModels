@@ -148,9 +148,9 @@ log_message "Virtual environment activated."
 
 
 # Step 7: Install mflux dependencies
-log_message "Installing mflux..."
-pip install mflux
-log_message "mflux installed successfully."
+log_message "Installing mlx-flux"
+pip install git+https://github.com/0x9334/mlx-flux.git
+log_message "mlx-flux installed successfully."
 PYTHON_VERSION_MAJOR_MINOR=$("$PYTHON_CMD" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
 if [ "$PYTHON_VERSION_MAJOR_MINOR" = "3.13" ]; then
     log_message "Detected Python 3.13. Installing compatible SentencePiece wheel..."
