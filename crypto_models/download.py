@@ -3,6 +3,7 @@ import random
 import requests
 import aiohttp
 import asyncio
+import psutil
 import time
 from pathlib import Path
 from crypto_models.utils import compute_file_hash, async_extract_zip, async_move, async_rmtree
@@ -39,7 +40,14 @@ POSTFIX_MODEL_PATH = ".gguf"
 CHUNK_SIZE_MB = 4  # Increased from 1MB to 4MB
 FLUSH_INTERVAL_MB = 50  # Increased from 10MB to 50MB
 PROGRESS_BATCH_SIZE = 10 * 1024 * 1024  # Batch progress updates for 10MB chunks
-MAX_CONCURRENT_DOWNLOADS = 16  # Increased from 4
+# Set MAX_CONCURRENT_DOWNLOADS dynamically based on CPU cores and available RAM (capped at 32)
+cpu_cores = os.cpu_count() or 4  # Fallback to 4 if detection fails
+cpu_limit = cpu_cores * 2
+ram_limit = 32  # Default if psutil is not available
+if psutil is not None:
+    total_ram_gb = psutil.virtual_memory().total / (1024 ** 3)
+    ram_limit = int(total_ram_gb * 4)  # Estimate: 4 downloads per GB RAM
+MAX_CONCURRENT_DOWNLOADS = min(32, cpu_limit, ram_limit)
 CONNECTION_POOL_SIZE = 32  # Increased connection pool
 
 
