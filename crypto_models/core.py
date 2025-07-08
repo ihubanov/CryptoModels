@@ -9,6 +9,7 @@ import socket
 import requests
 import subprocess
 import pkg_resources
+import shutil
 from pathlib import Path
 from loguru import logger
 from typing import Optional, Dict, Any
@@ -246,6 +247,9 @@ class CryptoModelsManager:
                         hash, local_model_path, local_ai_port, port, context_length, task, False, None
                     )
                 elif task == "image-generation":
+                    # require command `mlx-flux`
+                    if not shutil.which("mlx-flux"):
+                        raise CryptoAgentsServiceError("mlx-flux command not found in PATH")
                     running_ai_command = self._build_image_generation_command(local_model_path, local_ai_port, host, config_name)
                     service_metadata = self._create_service_metadata(
                         hash, local_model_path, local_ai_port, port, context_length, task, False, None
