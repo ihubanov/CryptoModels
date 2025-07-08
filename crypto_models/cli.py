@@ -217,7 +217,7 @@ def parse_args():
         "--task", 
         type=str, 
         default="chat", 
-        choices=["chat", "embed", "flux"],
+        choices=["chat", "embed", "image-generation", "image-edit"],
         help="🎯 Model task type (default: chat)",
         metavar="TYPE"
     )
@@ -225,7 +225,7 @@ def parse_args():
         "--config-name",
         type=str,
         default=None,
-        help="🔍 Model config name (default: None), need for flux models",
+        help="🔍 Model config name (default: None), need for image-generation and image-edit models",
         metavar="CONFIG"
     )
     preserve_command.add_argument(
