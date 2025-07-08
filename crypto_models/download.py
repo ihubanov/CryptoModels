@@ -28,7 +28,11 @@ GATEWAY_URLS = [
 ]
 DEFAULT_OUTPUT_DIR = Path.cwd() / "llms-storage"
 SLEEP_TIME = 60
-MAX_ATTEMPTS = 2
+# Set MAX_ATTEMPTS: if only one gateway, try at least 3 times; otherwise, try once per gateway
+if len(GATEWAY_URLS) == 1:
+    MAX_ATTEMPTS = 3
+else:
+    MAX_ATTEMPTS = len(GATEWAY_URLS)
 POSTFIX_MODEL_PATH = ".gguf"
 
 # Performance optimizations
@@ -118,7 +122,11 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
         gateway = gateways_order[attempts % len(gateways_order)]
         url = f"{gateway}{cid}"
         # Print which URL will be used for downloading
-        print(f"[download_single_file_async] Attempt {attempts+1}: Downloading from URL: {url} ---> {file_path}")
+        print(f"[download_single_file_async] Attempt {attempts+1}/{max_attempts}: Downloading from URL: {url} ---> {file_path}")
+        # Update the current URL and file name in the progress tracker
+        if progress_tracker is not None:
+            progress_tracker.current_url = url
+            progress_tracker.current_file_name = file_name
 
         try:
             # Use optimized chunk size for faster downloads
@@ -234,6 +242,10 @@ class ProgressTracker:
         self.pending_bytes = 0
         self.pending_lock = asyncio.Lock()
 
+        # Track the current downloading URL and file name
+        self.current_url = None
+        self.current_file_name = None
+
         # Start background task for periodic progress updates
         self.progress_task = asyncio.create_task(self._periodic_progress_update())
 
@@ -295,9 +307,11 @@ class ProgressTracker:
                             percentage = (self.completed_files / self.total_files) * 100
 
                         print(
-                            f"[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL] --progress {percentage:.1f}% "
-                            f"({self.completed_files}/{self.total_files} files) --speed {speed_mbps:.2f} MB/s"
-                        )
+                            f"[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL] "
+                            f"--progress {percentage:.1f}% ({self.completed_files}/{self.total_files} files) "
+                            f"--speed {speed_mbps:.2f} MB/s "
+                            f"--url {self.current_url} "
+                            f"--file {self.current_file_name}")
 
             except asyncio.CancelledError:
                 break
