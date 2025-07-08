@@ -179,3 +179,5 @@ cryptomodels/
 
 # msgpack
 running_service.msgpack
+
+qwen*/
