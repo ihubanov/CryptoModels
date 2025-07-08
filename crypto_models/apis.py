@@ -33,6 +33,8 @@ from crypto_models.schema import (
     ChoiceDeltaFunctionCall,
     ChoiceDeltaToolCall,
     ChatCompletionResponse,
+    ImageGenerationRequest,
+    ImageGenerationResponse
 )
 
 # Set up logging with both console and file output
@@ -162,6 +164,17 @@ class ServiceHandler:
             object=response_data.get("object", "list"),
             data=response_data.get("data", []),
             model=request.model
+        )
+    
+    @staticmethod
+    async def generate_image_response(request: ImageGenerationRequest):
+        """Generate a response for image generation requests."""
+        port = get_service_port()
+        request_dict = convert_request_to_dict(request)
+        response_data = await ServiceHandler._make_api_call(port, "/v1/images/generations", request_dict)
+        return ImageGenerationResponse(
+            created=response_data.get("created", int(time.time())),
+            data=response_data.get("data", [])
         )
     
     @staticmethod
@@ -333,6 +346,7 @@ class RequestProcessor:
     MODEL_ENDPOINTS = {
         "/v1/chat/completions": (ChatCompletionRequest, ServiceHandler.generate_text_response),
         "/v1/embeddings": (EmbeddingRequest, ServiceHandler.generate_embeddings_response),
+        "/v1/images/generations": (ImageGenerationRequest, ServiceHandler.generate_image_response),
         "/chat/completions": (ChatCompletionRequest, ServiceHandler.generate_text_response),
         "/embeddings": (EmbeddingRequest, ServiceHandler.generate_embeddings_response),
     }
@@ -755,6 +769,18 @@ async def v1_embeddings(request: EmbeddingRequest):
     """Endpoint for embedding requests (v1 API)."""
     request_dict = convert_request_to_dict(request)
     return await RequestProcessor.process_request("/v1/embeddings", request_dict)
+
+@app.post("/v1/images/generations")
+async def v1_image_generations(request: ImageGenerationRequest):
+    """Endpoint for image generation requests (v1 API)."""
+    try:
+        service_info = get_service_info()
+        if service_info.get("task") != "image-generation":
+            raise HTTPException(status_code=400, detail="Image generation requests are only supported for image-generation models")
+    except HTTPException:
+        pass  # Service info not available, continue with request
+    request_dict = convert_request_to_dict(request)
+    return await RequestProcessor.process_request("/v1/images/generations", request_dict)
 
 @app.get("/v1/models", response_model=ModelList)
 async def list_models():
