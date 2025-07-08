@@ -254,7 +254,7 @@ class CryptoModelsManager:
                     service_metadata = self._create_service_metadata(
                         hash, local_model_path, local_ai_port, port, context_length, task, False, None
                     )
-                elif task == "chat":
+                else:
                     is_multimodal, projector_path = self._check_multimodal_support(local_model_path)
                     
                     service_metadata = self._create_service_metadata(
