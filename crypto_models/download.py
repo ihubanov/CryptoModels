@@ -8,7 +8,12 @@ from pathlib import Path
 from crypto_models.utils import compute_file_hash, async_extract_zip, async_move, async_rmtree
 
 # Constants
-GATEWAY_URL = "https://gateway.mesh3.network/ipfs/"
+GATEWAY_URLS = [
+    "https://gateway.mesh3.network/ipfs/",
+    # Add more gateways here
+    "https://ipfs.io/ipfs/",
+    "https://cloudflare-ipfs.com/ipfs/",
+]
 DEFAULT_OUTPUT_DIR = Path.cwd() / "llms-storage"
 SLEEP_TIME = 60
 MAX_ATTEMPTS = 2
@@ -95,7 +100,7 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
 
     while attempts < max_attempts:
         try:
-            url = f"{GATEWAY_URL}{cid}"
+            url = f"{GATEWAY_URLS[0]}{cid}" # Use the first gateway for now, will be updated later
 
             # Use optimized chunk size for faster downloads
             chunk_size = CHUNK_SIZE_MB * 1024 * 1024  # 4MB chunks
@@ -391,14 +396,50 @@ async def download_files_from_lighthouse_async(data: dict) -> list:
             return successful_downloads if successful_downloads else []
 
 
+async def pick_fastest_gateway(filecoin_hash: str, gateways: list[str], timeout: int = 5) -> str:
+    """
+    Check the speed of each gateway and return the fastest one for the given filecoin_hash.
+    Args:
+        filecoin_hash (str): The IPFS hash to test download speed for.
+        gateways (list[str]): List of gateway URLs.
+        timeout (int): Timeout in seconds for each speed test.
+    Returns:
+        str: The fastest gateway URL.
+    """
+    import aiohttp
+    import asyncio
+
+    async def check_gateway(gateway: str) -> tuple[str, float]:
+        url = f"{gateway}{filecoin_hash}"
+        start = asyncio.get_event_loop().time()
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+                # Use HEAD request to check availability and response time
+                async with session.head(url) as resp:
+                    if resp.status == 200:
+                        elapsed = asyncio.get_event_loop().time() - start
+                        return gateway, elapsed
+        except Exception:
+            pass
+        # Return infinity if the gateway is not available or too slow
+        return gateway, float('inf')
+
+    # Run all gateway checks concurrently
+    tasks = [check_gateway(gw) for gw in gateways]
+    results = await asyncio.gather(*tasks)
+    # Select the gateway with the lowest response time
+    fastest = min(results, key=lambda x: x[1])
+    return fastest[0]
+
+
 async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Path = DEFAULT_OUTPUT_DIR) -> str | None:
     """
     Asynchronously download a model from Filecoin using its IPFS hash.
-
+    This function will select the fastest gateway from a list of gateways by testing their response times,
+    and use the fastest one to download the model.
     Args:
         filecoin_hash (str): IPFS hash of the model metadata.
         output_dir (Path): Directory to save the downloaded model.
-
     Returns:
         str | None: Path to the downloaded model if successful, None otherwise.
     """
@@ -412,10 +453,13 @@ async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Pat
         print(f"Using existing model at {local_path_str}")
         return local_path_str
 
-    # Define input link
-    input_link = f"{GATEWAY_URL}{filecoin_hash}"
+    # Select the fastest gateway before downloading
+    print("Checking gateway speeds...")
+    best_gateway = await pick_fastest_gateway(filecoin_hash, GATEWAY_URLS)
+    print(f"Using fastest gateway: {best_gateway}")
+    input_link = f"{best_gateway}{filecoin_hash}"
 
-    # Setup more robust session parameters with optimized limits
+    # Set up session parameters with optimized limits
     timeout = aiohttp.ClientTimeout(total=180, connect=60)
     connector = aiohttp.TCPConnector(limit=CONNECTION_POOL_SIZE, ssl=False)
 
