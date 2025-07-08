@@ -9,10 +9,22 @@ from crypto_models.utils import compute_file_hash, async_extract_zip, async_move
 
 # Constants
 GATEWAY_URLS = [
+    # Lighthouse's own gateway (recommended for files stored on Lighthouse)
+    "https://gateway.lighthouse.storage/ipfs/",
+    # Mesh3 public gateway
     "https://gateway.mesh3.network/ipfs/",
-    # Add more gateways here
+    # IPFS official gateway
     "https://ipfs.io/ipfs/",
+    # Cloudflare IPFS gateway
     "https://cloudflare-ipfs.com/ipfs/",
+    # Cloudflare alternative
+    "https://cf-ipfs.com/ipfs/",
+    # Pinata-backed gateway
+    "https://dweb.link/ipfs/",
+    # 4everland Filecoin ecosystem gateway
+    "https://4everland.io/ipfs/",
+    # Infura IPFS gateway
+    "https://infura-ipfs.io/ipfs/",
 ]
 DEFAULT_OUTPUT_DIR = Path.cwd() / "llms-storage"
 SLEEP_TIME = 60
@@ -98,10 +110,17 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
     if temp_path.exists():
         temp_path.unlink(missing_ok=True)
 
-    while attempts < max_attempts:
-        try:
-            url = f"{GATEWAY_URLS[0]}{cid}" # Use the first gateway for now, will be updated later
+    # Determine the order of gateways: fastest first, then the rest in round robin order
+    fastest_gateway = await pick_fastest_gateway(cid, GATEWAY_URLS)
+    # Create a list with fastest first, then the rest (excluding fastest)
+    gateways_order = [fastest_gateway] + [gw for gw in GATEWAY_URLS if gw != fastest_gateway]
 
+    while attempts < max_attempts:
+        # Use the fastest gateway for the first attempt, then round robin through the rest
+        gateway = gateways_order[attempts % len(gateways_order)]
+        url = f"{gateway}{cid}"
+
+        try:
             # Use optimized chunk size for faster downloads
             chunk_size = CHUNK_SIZE_MB * 1024 * 1024  # 4MB chunks
 
@@ -265,7 +284,7 @@ class ProgressTracker:
                         self.last_log_time = current_time
                         elapsed_time = current_time - self.start_time
                         speed_mbps = (self.total_bytes_downloaded / (
-                                    1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
+                                1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
 
                         # Calculate percentage based on bytes downloaded vs total expected
                         if self.total_bytes_expected > 0:
@@ -409,8 +428,11 @@ async def pick_fastest_gateway(filecoin_hash: str, gateways: list[str], timeout:
     import aiohttp
     import asyncio
 
+    print(f"[pick_fastest_gateway] Checking speed for {len(gateways)} gateways with hash: {filecoin_hash}")
+
     async def check_gateway(gateway: str) -> tuple[str, float]:
         url = f"{gateway}{filecoin_hash}"
+        print(f"[pick_fastest_gateway] Testing gateway: {url}")
         start = asyncio.get_event_loop().time()
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
@@ -418,9 +440,12 @@ async def pick_fastest_gateway(filecoin_hash: str, gateways: list[str], timeout:
                 async with session.head(url) as resp:
                     if resp.status == 200:
                         elapsed = asyncio.get_event_loop().time() - start
+                        print(f"[pick_fastest_gateway] Gateway {gateway} responded in {elapsed:.3f} seconds.")
                         return gateway, elapsed
-        except Exception:
-            pass
+                    else:
+                        print(f"[pick_fastest_gateway] Gateway {gateway} returned status {resp.status}.")
+        except Exception as e:
+            print(f"[pick_fastest_gateway] Error with gateway {gateway}: {e}")
         # Return infinity if the gateway is not available or too slow
         return gateway, float('inf')
 
@@ -428,7 +453,13 @@ async def pick_fastest_gateway(filecoin_hash: str, gateways: list[str], timeout:
     tasks = [check_gateway(gw) for gw in gateways]
     results = await asyncio.gather(*tasks)
     # Select the gateway with the lowest response time
+    for gw, t in results:
+        if t != float('inf'):
+            print(f"[pick_fastest_gateway] Gateway {gw} time: {t:.3f} seconds.")
+        else:
+            print(f"[pick_fastest_gateway] Gateway {gw} is not available.")
     fastest = min(results, key=lambda x: x[1])
+    print(f"[pick_fastest_gateway] Fastest gateway selected: {fastest[0]} (time: {fastest[1]:.3f} seconds)\n")
     return fastest[0]
 
 
