@@ -239,12 +239,18 @@ class CryptoModelsManager:
                 family = metadata.get("family", None)
                 ram = metadata.get("ram", None)
                 task = metadata.get("task", "chat")
+                config_name = metadata.get("config_name", "flux-dev")
                 if task == "embed":
                     running_ai_command = self._build_embed_command(local_model_path, local_ai_port, host)
                     service_metadata = self._create_service_metadata(
                         hash, local_model_path, local_ai_port, port, context_length, task, False, None
                     )
-                else:
+                elif task == "image-generation":
+                    running_ai_command = self._build_image_generation_command(local_model_path, local_ai_port, host, config_name)
+                    service_metadata = self._create_service_metadata(
+                        hash, local_model_path, local_ai_port, port, context_length, task, False, None
+                    )
+                elif task == "chat":
                     is_multimodal, projector_path = self._check_multimodal_support(local_model_path)
                     
                     service_metadata = self._create_service_metadata(
@@ -1228,3 +1234,15 @@ class CryptoModelsManager:
         except Exception as e:
             logger.error(f"Failed to update service info: {str(e)}")
             return False
+
+    def _build_image_generation_command(self, model_path: str, port: int, host: str, config_name: str) -> list:
+        """Build the image-generation command with MLX Flux parameters."""
+        command = [
+            "mlx-flux",
+            "serve",
+            "--model-path", str(model_path),
+            "--config-name", config_name,
+            "--port", str(port),
+            "--host", host
+        ]
+        return command
