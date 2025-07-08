@@ -218,8 +218,15 @@ def parse_args():
         type=str, 
         default="chat", 
         choices=["chat", "embed", "flux"],
-        help="🎯 Model task type (default: chat, embed, flux)",
+        help="🎯 Model task type (default: chat)",
         metavar="TYPE"
+    )
+    preserve_command.add_argument(
+        "--config-name",
+        type=str,
+        default=None,
+        help="🔍 Model config name (default: None), need for flux models",
+        metavar="CONFIG"
     )
     preserve_command.add_argument(
         "--folder-path", 
@@ -360,6 +367,7 @@ def handle_preserve(args):
     kwargs = {
         "task": args.task,
         "ram": args.ram,
+        "config_name": args.config_name,
         "hf_repo": args.hf_repo,
         "hf_file": args.hf_file,
     }
