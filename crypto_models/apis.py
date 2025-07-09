@@ -712,6 +712,11 @@ class RequestProcessor:
         request_id = generate_request_id()
         queue_size = RequestProcessor.queue.qsize()
         
+        if request_data.get("model") is None:
+            # request_data `model` should be the active model
+            active_model = crypto_models_manager.get_active_model()
+            request_data["model"] = active_model
+        
         # Validate that model field is present and get service info
         service_info = validate_model_field(request_data)
         
@@ -743,7 +748,12 @@ class RequestProcessor:
         request_id = generate_request_id()
         logger.info(f"[{request_id}] Processing direct request for endpoint {endpoint}")
         
-        # Validate that model field is present and get service info
+        if request_data.get("model") is None:
+            # request_data `model` should be the active model
+            active_model = crypto_models_manager.get_active_model()
+            request_data["model"] = active_model
+        
+        # # Validate that model field is present and get service info
         service_info = validate_model_field(request_data)
         
         app.state.last_request_time = time.time()
