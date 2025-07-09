@@ -83,38 +83,35 @@ def convert_request_to_dict(request) -> Dict[str, Any]:
 def validate_model_field(request_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Validate that the model field is present and matches one of the available model hashes."""
 
-    # requested_model = request_data["model"]
+    requested_model = request_data["model"]
     
-    # try:
-    #     service_info = get_service_info()
-    #     models = service_info.get("models", {})
+    try:
+        service_info = get_service_info()
+        models = service_info.get("models", {})
         
-    #     # Check if the requested model hash is in the models dictionary
-    #     if requested_model not in models:
-    #         logger.warning(f"Requested model '{requested_model}' not found in available models: {list(models.keys())}")
-    #         raise HTTPException(
-    #             status_code=400,
-    #             detail="Requested model is not running"
-    #         )
+        # Check if the requested model hash is in the models dictionary
+        if requested_model not in models:
+            logger.warning(f"Requested model '{requested_model}' not found in available models: {list(models.keys())}")
+            raise HTTPException(
+                status_code=400,
+                detail="Requested model is not running"
+            )
         
-    #     logger.debug(f"Model validation passed for '{requested_model}'")
+        logger.debug(f"Model validation passed for '{requested_model}'")
         
-    #     # Return the service info to avoid redundant calls
-    #     return service_info
+        # Return the service info to avoid redundant calls
+        return service_info
             
-    # except HTTPException as e:
-    #     # If we can't get service info (503), it means no model is running
-    #     if e.status_code == 503:
-    #         logger.warning(f"Service info not available, requested model '{requested_model}' cannot be validated")
-    #         raise HTTPException(
-    #             status_code=400,
-    #             detail="Service is not running"
-    #         )
-    #     # Re-raise other HTTPExceptions
-    #     raise
-    service_info = get_service_info()
-    
-    return service_info
+    except HTTPException as e:
+        # If we can't get service info (503), it means no model is running
+        if e.status_code == 503:
+            logger.warning(f"Service info not available, requested model '{requested_model}' cannot be validated")
+            raise HTTPException(
+                status_code=400,
+                detail="Service is not running"
+            )
+        # Re-raise other HTTPExceptions
+        raise
 
 def generate_request_id() -> str:
     """Generate a short request ID for tracking."""
@@ -715,6 +712,11 @@ class RequestProcessor:
         request_id = generate_request_id()
         queue_size = RequestProcessor.queue.qsize()
         
+        if request_data.get("model") is None:
+            # request_data `model` should be the active model
+            active_model = crypto_models_manager.get_active_model()
+            request_data["model"] = active_model
+        
         # Validate that model field is present and get service info
         service_info = validate_model_field(request_data)
         
@@ -745,6 +747,11 @@ class RequestProcessor:
         """Process a request directly without queueing for administrative endpoints."""
         request_id = generate_request_id()
         logger.info(f"[{request_id}] Processing direct request for endpoint {endpoint}")
+        
+        if request_data.get("model") is None:
+            # request_data `model` should be the active model
+            active_model = crypto_models_manager.get_active_model()
+            request_data["model"] = active_model
         
         # # Validate that model field is present and get service info
         service_info = validate_model_field(request_data)
