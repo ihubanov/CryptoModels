@@ -16,13 +16,13 @@ class PerformanceConfig:
     """Performance and timeout configuration settings."""
     
     # Dynamic unload feature settings
-    IDLE_TIMEOUT: int = int(os.getenv("CRYPTO_IDLE_TIMEOUT", "600"))  # 10 minutes
+    IDLE_TIMEOUT: int = int(os.getenv("CRYPTO_IDLE_TIMEOUT", "1800"))  # 30 minutes
     UNLOAD_CHECK_INTERVAL: int = int(os.getenv("CRYPTO_UNLOAD_CHECK_INTERVAL", "30"))  # 30 seconds
     
     # Service timeouts
-    SERVICE_START_TIMEOUT: int = int(os.getenv("CRYPTO_SERVICE_START_TIMEOUT", "120"))  # 2 minutes
-    HTTP_TIMEOUT: float = float(os.getenv("CRYPTO_HTTP_TIMEOUT", "180.0"))  # 3 minutes
-    STREAM_TIMEOUT: float = float(os.getenv("CRYPTO_STREAM_TIMEOUT", "300.0"))  # 5 minutes
+    SERVICE_START_TIMEOUT: int = int(os.getenv("CRYPTO_SERVICE_START_TIMEOUT", "1800"))  # 30 minutes
+    HTTP_TIMEOUT: float = float(os.getenv("CRYPTO_HTTP_TIMEOUT", "1800.0"))  # 30 minutes
+    STREAM_TIMEOUT: float = float(os.getenv("CRYPTO_STREAM_TIMEOUT", "1800.0"))  # 30 minutes
     
     # HTTP connection pooling
     POOL_CONNECTIONS: int = int(os.getenv("CRYPTO_POOL_CONNECTIONS", "50"))
