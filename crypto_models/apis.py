@@ -87,11 +87,11 @@ def validate_model_field(request_data: Dict[str, Any]) -> Optional[Dict[str, Any
     
     try:
         service_info = get_service_info()
-        models = service_info.get("models", {})
+        models = list(service_info.get("models", {}).keys())
         
         # Check if the requested model hash is in the models dictionary
         if requested_model not in models:
-            logger.warning(f"Requested model '{requested_model}' not found in available models: {list(models.keys())}. Using the first model instead.")
+            logger.warning(f"Requested model '{requested_model}' not found in available models: {models}. Using model {models[0]} instead.")
             return service_info, models[0] 
         
         logger.debug(f"Model validation passed for '{requested_model}'")
