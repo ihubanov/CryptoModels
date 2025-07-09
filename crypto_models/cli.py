@@ -116,20 +116,20 @@ def parse_args():
     # Model run command
     run_command = model_subparsers.add_parser(
         "run", 
-        help="🚀 Launch a local AI model server",
-        description="Start serving a model locally with customizable settings"
+        help="🚀 Launch AI model server with multi-model support",
+        description="Start serving models locally with multi-model and on-demand loading support"
     )
     
     run_command.add_argument(
         "model_name", 
         nargs='?', 
-        help="🏷️  Model name (e.g., qwen3-1.7b) - automatically mapped to hash"
+        help="🏷️  Model name(s) - single: qwen3-1.7b or multi: qwen3-14b,qwen3-4b (first is main, others on-demand)"
     )
     run_command.add_argument(
         "--hash", 
         type=str,
-        help="🔗 Filecoin hash of the model (alternative to model name)",
-        metavar="HASH"
+        help="🔗 Comma-separated Filecoin hashes (alternative to model names)",
+        metavar="HASH1,HASH2,..."
     )
     run_command.add_argument(
         "--port", 
@@ -296,32 +296,55 @@ def handle_download(args):
         sys.exit(1)
 
 def handle_run(args):
-    """Handle model run with enhanced error handling and output"""
-    # Determine the hash to use
+    """Handle model run with multi-model support and enhanced error handling"""
+    # Determine the hash(es) to use
     if args.hash and args.model_name:
-        print_error("Please specify either a model name OR --hash, not both")
+        print_error("Please specify either model name(s) OR --hash, not both")
         print_info("Usage examples:")
         print("  • cryptomodels model run qwen3-1.7b")
-        print("  • cryptomodels model run --hash QmYourHashHere")
+        print("  • cryptomodels model run qwen3-14b,qwen3-4b")
+        print("  • cryptomodels model run --hash QmHash1,QmHash2")
         sys.exit(1)
     elif args.hash:
-        model_hash = args.hash
-        print_info(f"Using custom model hash: {model_hash[:16]}...")
+        model_hashes_str = args.hash
+        print_info(f"Using custom model hashes: {model_hashes_str}")
     elif args.model_name:
-        if args.model_name in PRESERVED_MODELS:
-            model_hash = PRESERVED_MODELS[args.model_name]
-            print_success(f"Found model '{args.model_name}' → {model_hash[:16]}...")
-        else:
-            print_error(f"Model '{args.model_name}' not found in preserved models")
-            print_warning("Here are the available models:")
-            show_available_models()
-            print_info("For custom models, use: cryptomodels model run --hash <your_hash>")
+        # Parse comma-separated model names
+        model_names = [name.strip() for name in args.model_name.split(',') if name.strip()]
+        
+        if not model_names:
+            print_error("No valid model names provided")
             sys.exit(1)
+        
+        # Map model names to hashes
+        model_hashes = []
+        for model_name in model_names:
+            if model_name in PRESERVED_MODELS:
+                model_hash = PRESERVED_MODELS[model_name]
+                model_hashes.append(model_hash)
+                print_success(f"Found model '{model_name}' → {model_hash[:16]}...")
+            else:
+                print_error(f"Model '{model_name}' not found in preserved models")
+                print_warning("Here are the available models:")
+                show_available_models()
+                print_info("For custom models, use: cryptomodels model run --hash <your_hash>")
+                sys.exit(1)
+        
+        # Join hashes into comma-separated string
+        model_hashes_str = ','.join(model_hashes)
+        
+        if len(model_names) > 1:
+            print_info(f"Multi-model setup:")
+            print_info(f"  Main model (loaded immediately): {model_names[0]}")
+            print_info(f"  On-demand models: {', '.join(model_names[1:])}")
+        else:
+            print_info(f"Single model: {model_names[0]}")
     else:
-        print_error("Either model name or --hash must be provided")
+        print_error("Either model name(s) or --hash must be provided")
         print_info("Usage examples:")
-        print("  • cryptomodels model run <model_name>")
-        print("  • cryptomodels model run --hash <hash>")
+        print("  • cryptomodels model run qwen3-1.7b")
+        print("  • cryptomodels model run qwen3-14b,qwen3-4b")
+        print("  • cryptomodels model run --hash <hash1,hash2>")
         print_warning("Available models:")
         show_available_models()
         sys.exit(1)
@@ -329,7 +352,7 @@ def handle_run(args):
     print_info(f"Starting model server...")
     print_info(f"Host: {args.host}, Port: {args.port}, Context: {args.context_length}")
     
-    if not manager.start(model_hash, args.port, args.host, args.context_length):
+    if not manager.start(model_hashes_str, args.port, args.host, args.context_length):
         print_error("Failed to start model server")
         sys.exit(1)
     else:

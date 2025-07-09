@@ -80,6 +80,39 @@ def convert_request_to_dict(request) -> Dict[str, Any]:
     """Convert request object to dictionary, supporting both Pydantic v1 and v2."""
     return request.model_dump() if hasattr(request, "model_dump") else request.dict()
 
+def validate_model_field(request_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Validate that the model field is present and matches one of the available model hashes."""
+
+    requested_model = request_data["model"]
+    
+    try:
+        service_info = get_service_info()
+        models = service_info.get("models", {})
+        
+        # Check if the requested model hash is in the models dictionary
+        if requested_model not in models:
+            logger.warning(f"Requested model '{requested_model}' not found in available models: {list(models.keys())}")
+            raise HTTPException(
+                status_code=400,
+                detail="Requested model is not running"
+            )
+        
+        logger.debug(f"Model validation passed for '{requested_model}'")
+        
+        # Return the service info to avoid redundant calls
+        return service_info
+            
+    except HTTPException as e:
+        # If we can't get service info (503), it means no model is running
+        if e.status_code == 503:
+            logger.warning(f"Service info not available, requested model '{requested_model}' cannot be validated")
+            raise HTTPException(
+                status_code=400,
+                detail="Service is not running"
+            )
+        # Re-raise other HTTPExceptions
+        raise
+
 def generate_request_id() -> str:
     """Generate a short request ID for tracking."""
     return str(uuid.uuid4())[:8]
@@ -124,12 +157,15 @@ class ServiceHandler:
             )
     
     @staticmethod
-    async def generate_text_response(request: ChatCompletionRequest):
+    async def generate_text_response(request: ChatCompletionRequest, service_info: Optional[Dict[str, Any]] = None):
         """Generate a response for chat completion requests, supporting both streaming and non-streaming."""
+        # Use provided service_info or get it if not provided
+        if service_info is None:
+            service_info = get_service_info()
+        
         port = get_service_port()
         
         if request.is_vision_request():
-            service_info = get_service_info()
             if not service_info.get("multimodal", False):
                 content = "Unfortunately, I'm not equipped to interpret images at this time. Please provide a text description if possible."
                 return ServiceHandler._create_vision_error_response(request, content)
@@ -139,12 +175,19 @@ class ServiceHandler:
         request_dict = convert_request_to_dict(request)
         
         if request.stream:
+            # For streaming requests, generate a stream ID 
+            stream_id = generate_request_id()
+            
+            logger.debug(f"Creating streaming response for model {request.model} with stream ID {stream_id}")
+            
+            # Registration happens inside the generator to avoid race conditions
             return StreamingResponse(
-                ServiceHandler._stream_generator(port, request_dict),
+                ServiceHandler._stream_generator(port, request_dict, stream_id),
                 media_type="text/event-stream"
             )
 
         # Make a non-streaming API call
+        logger.debug(f"Making non-streaming request for model {request.model}")
         response_data = await ServiceHandler._make_api_call(port, "/v1/chat/completions", request_dict)
         return ChatCompletionResponse(
             id=response_data.get("id", generate_chat_completion_id()),
@@ -155,8 +198,12 @@ class ServiceHandler:
         )
     
     @staticmethod
-    async def generate_embeddings_response(request: EmbeddingRequest):
+    async def generate_embeddings_response(request: EmbeddingRequest, service_info: Optional[Dict[str, Any]] = None):
         """Generate a response for embedding requests."""
+        # Use provided service_info or get it if not provided
+        if service_info is None:
+            service_info = get_service_info()
+        
         port = get_service_port()
         request_dict = convert_request_to_dict(request)
         response_data = await ServiceHandler._make_api_call(port, "/v1/embeddings", request_dict)
@@ -167,8 +214,12 @@ class ServiceHandler:
         )
     
     @staticmethod
-    async def generate_image_response(request: ImageGenerationRequest):
+    async def generate_image_response(request: ImageGenerationRequest, service_info: Optional[Dict[str, Any]] = None):
         """Generate a response for image generation requests."""
+        # Use provided service_info or get it if not provided
+        if service_info is None:
+            service_info = get_service_info()
+        
         port = get_service_port()
         request_dict = convert_request_to_dict(request)
         response_data = await ServiceHandler._make_api_call(port, "/v1/images/generations", request_dict)
@@ -204,135 +255,152 @@ class ServiceHandler:
             raise HTTPException(status_code=500, detail=str(e))
     
     @staticmethod
-    async def _stream_generator(port: int, data: Dict[str, Any]):
+    async def _stream_generator(port: int, data: Dict[str, Any], stream_id: str):
         """Generator for streaming responses from the service."""
-        buffer = ""
-        tool_calls = {}
-        
-        def _extract_json_data(line: str) -> Optional[str]:
-            """Extract JSON data from SSE line, return None if not valid data."""
-            line = line.strip()
-            if not line or line.startswith(': ping'):
-                return None
-            if line.startswith('data: '):
-                return line[6:].strip()
-            return None
-        
-        def _process_tool_call_delta(delta_tool_call, tool_calls: dict):
-            """Process tool call delta and update tool_calls dict."""
-            tool_call_index = str(delta_tool_call.index)
-            if tool_call_index not in tool_calls:
-                tool_calls[tool_call_index] = {"arguments": ""}
-            
-            if delta_tool_call.id is not None:
-                tool_calls[tool_call_index]["id"] = delta_tool_call.id
-                
-            function = delta_tool_call.function
-            if function.name is not None:
-                tool_calls[tool_call_index]["name"] = function.name
-            if function.arguments is not None:
-                tool_calls[tool_call_index]["arguments"] += function.arguments
-        
-        def _create_tool_call_chunks(tool_calls: dict, chunk_obj):
-            """Create tool call chunks for final output - yields each chunk separately."""
-            chunk_obj_copy = chunk_obj.copy()
-            
-            for tool_call_index, tool_call in tool_calls.items():
-                try:
-                    tool_call_obj = json.loads(repair_json(json.dumps(tool_call)))
-                    tool_call_id = tool_call_obj.get("id", None)
-                    tool_call_name = tool_call_obj.get("name", "")
-                    tool_call_arguments = tool_call_obj.get("arguments", "")
-                    if tool_call_arguments == "":
-                        tool_call_arguments = "{}"
-                    function_call = ChoiceDeltaFunctionCall(
-                        name=tool_call_name,
-                        arguments=tool_call_arguments
-                    )
-                    delta_tool_call = ChoiceDeltaToolCall(
-                        index=int(tool_call_index),
-                        id=tool_call_id,
-                        function=function_call,
-                        type="function"
-                    )
-                    chunk_obj_copy.choices[0].delta.content = None
-                    chunk_obj_copy.choices[0].delta.tool_calls = [delta_tool_call]  
-                    chunk_obj_copy.choices[0].finish_reason = "tool_calls"
-                    yield f"data: {chunk_obj_copy.json()}\n\n"
-                except Exception as e:
-                    logger.error(f"Failed to create tool call chunk: {e}")
-                    chunk_obj_copy.choices[0].delta.content = None
-                    chunk_obj_copy.choices[0].delta.tool_calls = []
-                    yield f"data: {chunk_obj_copy.json()}\n\n"
         try:
-            async with app.state.client.stream(
-                "POST", 
-                f"http://localhost:{port}/v1/chat/completions", 
-                json=data,
-                timeout=STREAM_TIMEOUT
-            ) as response:
-                if response.status_code != 200:
-                    error_text = await response.aread()
-                    error_msg = f"data: {{\"error\":{{\"message\":\"{error_text.decode()}\",\"code\":{response.status_code}}}}}\n\n"
-                    logger.error(f"Streaming error: {response.status_code} - {error_text.decode()}")
-                    yield error_msg
-                    return
+            # Register stream at the start of actual streaming to avoid race conditions
+            await RequestProcessor.register_stream(stream_id)
+            logger.debug(f"Starting stream {stream_id}")
+            
+            buffer = ""
+            tool_calls = {}
+            
+            def _extract_json_data(line: str) -> Optional[str]:
+                """Extract JSON data from SSE line, return None if not valid data."""
+                line = line.strip()
+                if not line or line.startswith(': ping'):
+                    return None
+                if line.startswith('data: '):
+                    return line[6:].strip()
+                return None
+            
+            def _process_tool_call_delta(delta_tool_call, tool_calls: dict):
+                """Process tool call delta and update tool_calls dict."""
+                tool_call_index = str(delta_tool_call.index)
+                if tool_call_index not in tool_calls:
+                    tool_calls[tool_call_index] = {"arguments": ""}
                 
-                async for chunk in response.aiter_bytes():
-                    buffer += chunk.decode('utf-8', errors='replace')
+                if delta_tool_call.id is not None:
+                    tool_calls[tool_call_index]["id"] = delta_tool_call.id
                     
-                    # Process complete lines
-                    while '\n' in buffer:
-                        line, buffer = buffer.split('\n', 1)
-                        json_str = _extract_json_data(line)
+                function = delta_tool_call.function
+                if function.name is not None:
+                    tool_calls[tool_call_index]["name"] = function.name
+                if function.arguments is not None:
+                    tool_calls[tool_call_index]["arguments"] += function.arguments
+            
+            def _create_tool_call_chunks(tool_calls: dict, chunk_obj):
+                """Create tool call chunks for final output - yields each chunk separately."""
+                chunk_obj_copy = chunk_obj.copy()
+                
+                for tool_call_index, tool_call in tool_calls.items():
+                    try:
+                        tool_call_obj = json.loads(repair_json(json.dumps(tool_call)))
+                        tool_call_id = tool_call_obj.get("id", None)
+                        tool_call_name = tool_call_obj.get("name", "")
+                        tool_call_arguments = tool_call_obj.get("arguments", "")
+                        if tool_call_arguments == "":
+                            tool_call_arguments = "{}"
+                        function_call = ChoiceDeltaFunctionCall(
+                            name=tool_call_name,
+                            arguments=tool_call_arguments
+                        )
+                        delta_tool_call = ChoiceDeltaToolCall(
+                            index=int(tool_call_index),
+                            id=tool_call_id,
+                            function=function_call,
+                            type="function"
+                        )
+                        chunk_obj_copy.choices[0].delta.content = None
+                        chunk_obj_copy.choices[0].delta.tool_calls = [delta_tool_call]  
+                        chunk_obj_copy.choices[0].finish_reason = "tool_calls"
+                        yield f"data: {chunk_obj_copy.json()}\n\n"
+                    except Exception as e:
+                        logger.error(f"Failed to create tool call chunk in {stream_id}: {e}")
+                        chunk_obj_copy.choices[0].delta.content = None
+                        chunk_obj_copy.choices[0].delta.tool_calls = []
+                        yield f"data: {chunk_obj_copy.json()}\n\n"
                         
-                        if json_str is None:
-                            continue
-                            
-                        if json_str == '[DONE]':
-                            yield 'data: [DONE]\n\n'
-                            continue
+            try:
+                async with app.state.client.stream(
+                    "POST", 
+                    f"http://localhost:{port}/v1/chat/completions", 
+                    json=data,
+                    timeout=STREAM_TIMEOUT
+                ) as response:
+                    if response.status_code != 200:
+                        error_text = await response.aread()
+                        error_msg = f"data: {{\"error\":{{\"message\":\"{error_text.decode()}\",\"code\":{response.status_code}}}}}\n\n"
+                        logger.error(f"Streaming error for {stream_id}: {response.status_code} - {error_text.decode()}")
+                        yield error_msg
+                        return
+                    
+                    async for chunk in response.aiter_bytes():
+                        buffer += chunk.decode('utf-8', errors='replace')
                         
-                        try:
-                            chunk_obj = ChatCompletionChunk.parse_raw(json_str)
-                            choice = chunk_obj.choices[0]
+                        # Process complete lines
+                        while '\n' in buffer:
+                            line, buffer = buffer.split('\n', 1)
+                            json_str = _extract_json_data(line)
                             
-                            # Handle finish reason - output accumulated tool calls
-                            if choice.finish_reason and tool_calls:
-                                for tool_call_chunk in _create_tool_call_chunks(tool_calls, chunk_obj):
-                                    yield tool_call_chunk
+                            if json_str is None:
+                                continue
+                                
+                            if json_str == '[DONE]':
+                                yield 'data: [DONE]\n\n'
+                                continue
+                            
+                            try:
+                                chunk_obj = ChatCompletionChunk.parse_raw(json_str)
+                                choice = chunk_obj.choices[0]
+                                
+                                # Handle finish reason - output accumulated tool calls
+                                if choice.finish_reason and tool_calls:
+                                    for tool_call_chunk in _create_tool_call_chunks(tool_calls, chunk_obj):
+                                        yield tool_call_chunk
 
-                                yield f"data: [DONE]\n\n"
-                                return
-                            
-                            # Handle tool call deltas
-                            if choice.delta.tool_calls:
-                                _process_tool_call_delta(choice.delta.tool_calls[0], tool_calls)
-                            else:
-                                # Regular content chunk
+                                    yield f"data: [DONE]\n\n"
+                                    return
+                                
+                                # Handle tool call deltas
+                                if choice.delta.tool_calls:
+                                    _process_tool_call_delta(choice.delta.tool_calls[0], tool_calls)
+                                else:
+                                    # Regular content chunk
+                                    yield f"data: {chunk_obj.json()}\n\n"
+                                        
+                            except Exception as e:
+                                logger.error(f"Failed to parse streaming chunk in {stream_id}: {e}")
+                                # Pass through unparseable data (except ping messages)
+                                if not line.strip().startswith(': ping'):
+                                    yield f"data: {line}\n\n"
+                                
+                    # Process any remaining buffer content
+                    if buffer.strip():
+                        json_str = _extract_json_data(buffer)
+                        if json_str and json_str != '[DONE]':
+                            try:
+                                chunk_obj = ChatCompletionChunk.parse_raw(json_str)
                                 yield f"data: {chunk_obj.json()}\n\n"
-                                    
-                        except Exception as e:
-                            logger.error(f"Failed to parse streaming chunk: {e}")
-                            # Pass through unparseable data (except ping messages)
-                            if not line.strip().startswith(': ping'):
-                                yield f"data: {line}\n\n"
+                            except Exception as e:
+                                logger.error(f"Failed to parse trailing chunk in {stream_id}: {e}")
+                        elif json_str == '[DONE]':
+                            yield 'data: [DONE]\n\n'
                             
-                # Process any remaining buffer content
-                if buffer.strip():
-                    json_str = _extract_json_data(buffer)
-                    if json_str and json_str != '[DONE]':
-                        try:
-                            chunk_obj = ChatCompletionChunk.parse_raw(json_str)
-                            yield f"data: {chunk_obj.json()}\n\n"
-                        except Exception as e:
-                            logger.error(f"Failed to parse trailing chunk: {e}")
-                    elif json_str == '[DONE]':
-                        yield 'data: [DONE]\n\n'
-                            
+            except Exception as e:
+                logger.error(f"Streaming error for {stream_id}: {e}")
+                yield f"data: {{\"error\":{{\"message\":\"{str(e)}\",\"code\":500}}}}\n\n"
+                
         except Exception as e:
-            logger.error(f"Streaming error: {e}")
+            logger.error(f"Critical error in stream generator {stream_id}: {e}")
             yield f"data: {{\"error\":{{\"message\":\"{str(e)}\",\"code\":500}}}}\n\n"
+        finally:
+            # Always unregister the stream when done
+            try:
+                await RequestProcessor.unregister_stream(stream_id)
+                logger.debug(f"Stream {stream_id} completed and unregistered")
+            except Exception as e:
+                logger.error(f"Error unregistering stream {stream_id}: {e}")
 
 
 # Request Processor
@@ -342,6 +410,11 @@ class RequestProcessor:
     queue = asyncio.Queue(maxsize=MAX_QUEUE_SIZE)
     processing_lock = asyncio.Lock()
     
+    # Track active streams to prevent model switching during streaming
+    active_streams = set()
+    active_streams_lock = asyncio.Lock()
+    stream_timestamps = {}  # Track when streams were registered
+    
     # Define which endpoints need to be processed sequentially
     MODEL_ENDPOINTS = {
         "/v1/chat/completions": (ChatCompletionRequest, ServiceHandler.generate_text_response),
@@ -350,6 +423,233 @@ class RequestProcessor:
         "/chat/completions": (ChatCompletionRequest, ServiceHandler.generate_text_response),
         "/embeddings": (EmbeddingRequest, ServiceHandler.generate_embeddings_response),
     }
+    
+    @staticmethod
+    async def register_stream(stream_id: str):
+        """Register an active stream to prevent model switching."""
+        async with RequestProcessor.active_streams_lock:
+            RequestProcessor.active_streams.add(stream_id)
+            RequestProcessor.stream_timestamps[stream_id] = time.time()
+            logger.debug(f"Registered active stream {stream_id}, total active: {len(RequestProcessor.active_streams)}")
+    
+    @staticmethod
+    async def unregister_stream(stream_id: str):
+        """Unregister a completed stream."""
+        async with RequestProcessor.active_streams_lock:
+            RequestProcessor.active_streams.discard(stream_id)
+            RequestProcessor.stream_timestamps.pop(stream_id, None)
+            logger.debug(f"Unregistered stream {stream_id}, total active: {len(RequestProcessor.active_streams)}")
+    
+    @staticmethod
+    async def has_active_streams() -> bool:
+        """Check if there are any active streams."""
+        async with RequestProcessor.active_streams_lock:
+            return len(RequestProcessor.active_streams) > 0
+    
+    @staticmethod
+    async def terminate_active_streams():
+        """Forcefully terminate all active streams."""
+        async with RequestProcessor.active_streams_lock:
+            terminated_count = len(RequestProcessor.active_streams)
+            RequestProcessor.active_streams.clear()
+            RequestProcessor.stream_timestamps.clear()
+            logger.warning(f"Force terminated {terminated_count} active streams")
+    
+    @staticmethod
+    async def wait_for_streams_to_complete(timeout: float = 30.0, force_terminate: bool = False):
+        """Wait for all active streams to complete before proceeding."""
+        start_time = time.time()
+        initial_count = len(RequestProcessor.active_streams)
+        
+        if initial_count > 0:
+            logger.info(f"Waiting for {initial_count} active streams to complete (timeout: {timeout}s)")
+        
+        check_interval = 0.1
+        last_log_time = start_time
+        
+        while await RequestProcessor.has_active_streams():
+            current_time = time.time()
+            elapsed = current_time - start_time
+            
+            if elapsed > timeout:
+                remaining_streams = len(RequestProcessor.active_streams)
+                if force_terminate:
+                    logger.warning(f"Timeout waiting for streams to complete after {elapsed:.1f}s, "
+                                  f"force terminating {remaining_streams} active streams")
+                    # Log the active stream IDs for debugging
+                    async with RequestProcessor.active_streams_lock:
+                        active_stream_ids = list(RequestProcessor.active_streams)
+                        logger.warning(f"Force terminating stream IDs: {active_stream_ids}")
+                    
+                    await RequestProcessor.terminate_active_streams()
+                    break
+                else:
+                    logger.error(f"Timeout waiting for streams to complete after {elapsed:.1f}s, "
+                                f"{remaining_streams} still active. Refusing to proceed without force_terminate=True")
+                    # Log the active stream IDs for debugging
+                    async with RequestProcessor.active_streams_lock:
+                        active_stream_ids = list(RequestProcessor.active_streams)
+                        logger.error(f"Active stream IDs: {active_stream_ids}")
+                    return False
+            
+            # Log progress every 5 seconds
+            if current_time - last_log_time >= 5.0:
+                remaining_streams = len(RequestProcessor.active_streams)
+                logger.info(f"Still waiting for {remaining_streams} streams to complete "
+                           f"(elapsed: {elapsed:.1f}s/{timeout}s)")
+                last_log_time = current_time
+            
+            await asyncio.sleep(check_interval)
+        
+        final_count = len(RequestProcessor.active_streams)
+        if initial_count > 0:
+            logger.info(f"Stream wait completed. Initial: {initial_count}, Final: {final_count}")
+        
+        return True
+    
+    @staticmethod
+    async def cleanup_stale_streams():
+        """Clean up any stale streams that might be stuck in the active list."""
+        current_time = time.time()
+        stale_streams = []
+        
+        async with RequestProcessor.active_streams_lock:
+            for stream_id in list(RequestProcessor.active_streams):
+                if stream_id in RequestProcessor.stream_timestamps:
+                    if current_time - RequestProcessor.stream_timestamps[stream_id] > 600:  # 10 minutes
+                        stale_streams.append(stream_id)
+                else:
+                    # Stream without timestamp is considered stale
+                    stale_streams.append(stream_id)
+            
+            for stream_id in stale_streams:
+                RequestProcessor.active_streams.discard(stream_id)
+                RequestProcessor.stream_timestamps.pop(stream_id, None)
+                logger.warning(f"Cleaned up stale stream {stream_id}")
+            
+            if stale_streams:
+                logger.warning(f"Cleaned up {len(stale_streams)} stale streams")
+            elif RequestProcessor.active_streams:
+                logger.info(f"No stale streams found, {len(RequestProcessor.active_streams)} active streams are healthy")
+    
+    @staticmethod
+    async def _verify_model_switch(model_requested: str, request_id: str, max_retries: int = 3) -> bool:
+        """Verify model switch with retry logic."""
+        for attempt in range(max_retries):
+            try:
+                await asyncio.sleep(0.5)  # Brief delay for service info update
+                
+                updated_service_info = crypto_models_manager.get_service_info()
+                updated_models = updated_service_info.get("models", {})
+                
+                if model_requested in updated_models and updated_models[model_requested].get("active", False):
+                    logger.debug(f"[{request_id}] Model switch verification successful (attempt {attempt + 1})")
+                    return True
+                    
+            except Exception as e:
+                logger.warning(f"[{request_id}] Verification attempt {attempt + 1} failed: {e}")
+        
+        logger.error(f"[{request_id}] Model switch verification failed after {max_retries} attempts")
+        return False
+    
+    @staticmethod
+    async def _add_to_queue_with_backpressure(item, timeout: float = 30.0):
+        """Add item to queue with timeout and backpressure handling."""
+        try:
+            await asyncio.wait_for(
+                RequestProcessor.queue.put(item),
+                timeout=timeout
+            )
+            return True
+        except asyncio.TimeoutError:
+            current_size = RequestProcessor.queue.qsize()
+            logger.error(f"Queue full (size: {current_size}), request timed out after {timeout}s")
+            raise HTTPException(
+                status_code=503, 
+                detail=f"Service overloaded. Queue size: {current_size}/{MAX_QUEUE_SIZE}"
+            )
+    
+    @staticmethod
+    async def _ensure_model_active_in_queue(model_requested: str, request_id: str) -> bool:
+        """
+        Ensure the requested model is active within the queue processing context.
+        This method is called within the processing lock to ensure atomic model switching.
+        
+        Args:
+            model_requested (str): The model hash requested by the client
+            request_id (str): The request ID for logging
+            
+        Returns:
+            bool: True if the model is active or was successfully switched to
+        """
+        try:
+            # Get current service info
+            service_info = get_service_info()
+            models = service_info.get("models", {})
+            
+            # Check if the requested model exists
+            if model_requested not in models:
+                logger.error(f"[{request_id}] Requested model {model_requested} not found in available models")
+                return False
+            
+            model_info = models[model_requested]
+            
+            # Check if model is already active
+            if model_info.get("active", False):
+                logger.debug(f"[{request_id}] Model {model_requested} is already active")
+                return True
+                
+            # Model exists but not active, need to switch
+            logger.info(f"[{request_id}] Model switch required to {model_requested}")
+            
+            # Wait for any active streams to complete before switching
+            if await RequestProcessor.has_active_streams():
+                stream_count = len(RequestProcessor.active_streams)
+                logger.info(f"[{request_id}] Waiting for {stream_count} active streams to complete before model switch")
+                if not await RequestProcessor.wait_for_streams_to_complete(timeout=30.0, force_terminate=True):
+                    logger.error(f"[{request_id}] Failed to wait for streams to complete")
+                    return False
+                logger.info(f"[{request_id}] All streams completed, proceeding with model switch")
+            
+            # Perform the model switch
+            logger.info(f"[{request_id}] Switching to model {model_requested}")
+            switch_start_time = time.time()
+            
+            # Get current active model for logging
+            active_model = crypto_models_manager.get_active_model()
+            
+            # Perform the model switch
+            success = await crypto_models_manager.switch_model(model_requested)
+            
+            switch_duration = time.time() - switch_start_time
+            
+            if success:
+                logger.info(f"[{request_id}] Successfully switched from {active_model} to {model_requested} "
+                           f"(switch time: {switch_duration:.2f}s)")
+                
+                # Update app state with new service info and verify the switch
+                try:
+                    # Use the new verification method with retry logic
+                    if await RequestProcessor._verify_model_switch(model_requested, request_id):
+                        # Update app state with new service info after successful verification
+                        updated_service_info = crypto_models_manager.get_service_info()
+                        app.state.service_info = updated_service_info
+                        return True
+                    else:
+                        logger.error(f"[{request_id}] Model switch verification failed - model not active after switch")
+                        return False
+                        
+                except Exception as e:
+                    logger.error(f"[{request_id}] Error verifying model switch: {str(e)}")
+                    return False
+            else:
+                logger.error(f"[{request_id}] Failed to switch to model {model_requested} "
+                           f"(attempted for {switch_duration:.2f}s)")
+                return False
+                
+        except Exception as e:
+            logger.error(f"[{request_id}] Error ensuring model active: {str(e)}", exc_info=True)
+            return False
     
     @staticmethod
     async def _ensure_server_running(request_id: str) -> bool:
@@ -412,6 +712,9 @@ class RequestProcessor:
         request_id = generate_request_id()
         queue_size = RequestProcessor.queue.qsize()
         
+        # Validate that model field is present and get service info
+        service_info = validate_model_field(request_data)
+        
         logger.info(f"[{request_id}] Adding request to queue for endpoint {endpoint} (queue size: {queue_size})")
         
         # Update the last request time
@@ -422,7 +725,9 @@ class RequestProcessor:
         
         start_wait_time = time.time()
         future = asyncio.Future()
-        await RequestProcessor.queue.put((endpoint, request_data, future, request_id, start_wait_time))
+        # Pass service_info to avoid redundant lookups
+        queue_item = (endpoint, request_data, future, request_id, start_wait_time, service_info)
+        await RequestProcessor._add_to_queue_with_backpressure(queue_item)
         
         logger.info(f"[{request_id}] Waiting for result from endpoint {endpoint}")
         result = await future
@@ -438,6 +743,9 @@ class RequestProcessor:
         request_id = generate_request_id()
         logger.info(f"[{request_id}] Processing direct request for endpoint {endpoint}")
         
+        # Validate that model field is present and get service info
+        service_info = validate_model_field(request_data)
+        
         app.state.last_request_time = time.time()
         await RequestProcessor._ensure_server_running(request_id)
         
@@ -445,7 +753,23 @@ class RequestProcessor:
         if endpoint in RequestProcessor.MODEL_ENDPOINTS:
             model_cls, handler = RequestProcessor.MODEL_ENDPOINTS[endpoint]
             request_obj = model_cls(**request_data)
-            result = await handler(request_obj)
+            
+            # Ensure model is active before processing (for direct requests)
+            if hasattr(request_obj, 'model') and request_obj.model:
+                logger.debug(f"[{request_id}] Ensuring model {request_obj.model} is active for direct request")
+                
+                # Use the same centralized model switching logic as the queue
+                if not await RequestProcessor._ensure_model_active_in_queue(request_obj.model, request_id):
+                    error_msg = f"Model {request_obj.model} is not available or failed to switch"
+                    logger.error(f"[{request_id}] {error_msg}")
+                    raise HTTPException(status_code=400, detail=error_msg)
+                
+                # Refresh service info after potential model switch
+                service_info = get_service_info()
+                logger.debug(f"[{request_id}] Model {request_obj.model} confirmed active for direct request")
+            
+            # Process the request with the updated service info
+            result = await handler(request_obj, service_info)
             
             process_time = time.time() - start_time
             logger.info(f"[{request_id}] Direct request completed for endpoint {endpoint} (time: {process_time:.2f}s)")
@@ -457,13 +781,15 @@ class RequestProcessor:
     
     @staticmethod
     async def worker():
-        """Worker function to process requests from the queue sequentially."""
+        """Enhanced worker function with better error recovery."""
         logger.info("Request processor worker started")
         processed_count = 0
+        consecutive_errors = 0
+        max_consecutive_errors = 5
         
         while True:
             try:
-                endpoint, request_data, future, request_id, start_wait_time = await RequestProcessor.queue.get()
+                endpoint, request_data, future, request_id, start_wait_time, service_info = await RequestProcessor.queue.get()
                 
                 wait_time = time.time() - start_wait_time
                 queue_size = RequestProcessor.queue.qsize()
@@ -472,6 +798,7 @@ class RequestProcessor:
                 logger.info(f"[{request_id}] Processing request from queue for endpoint {endpoint} "
                            f"(wait time: {wait_time:.2f}s, queue size: {queue_size}, processed: {processed_count})")
                 
+                # Process the request within the lock to ensure sequential execution
                 async with RequestProcessor.processing_lock:
                     processing_start = time.time()
                     
@@ -479,7 +806,33 @@ class RequestProcessor:
                         model_cls, handler = RequestProcessor.MODEL_ENDPOINTS[endpoint]
                         try:
                             request_obj = model_cls(**request_data)
-                            result = await handler(request_obj)
+                            
+                            # Check if this is a streaming request
+                            is_streaming = hasattr(request_obj, 'stream') and request_obj.stream
+                            if is_streaming:
+                                logger.debug(f"[{request_id}] Processing streaming request for model {request_obj.model}")
+                            
+                            # Ensure model is active before processing (within the lock)
+                            if hasattr(request_obj, 'model') and request_obj.model:
+                                logger.debug(f"[{request_id}] Ensuring model {request_obj.model} is active")
+                                
+                                # Check current active streams before model switching
+                                active_stream_count = len(RequestProcessor.active_streams)
+                                if active_stream_count > 0:
+                                    logger.info(f"[{request_id}] Found {active_stream_count} active streams before model check")
+                                
+                                if not await RequestProcessor._ensure_model_active_in_queue(request_obj.model, request_id):
+                                    error_msg = f"Model {request_obj.model} is not available or failed to switch"
+                                    logger.error(f"[{request_id}] {error_msg}")
+                                    future.set_exception(HTTPException(status_code=400, detail=error_msg))
+                                    continue
+                                
+                                # Refresh service info after potential model switch
+                                service_info = get_service_info()
+                                logger.debug(f"[{request_id}] Model {request_obj.model} confirmed active, proceeding with request")
+                            
+                            # Process the request with the updated service info
+                            result = await handler(request_obj, service_info)
                             future.set_result(result)
                             
                             processing_time = time.time() - processing_start
@@ -496,15 +849,39 @@ class RequestProcessor:
                 
                 RequestProcessor.queue.task_done()
                 
+                # Reset consecutive errors on successful processing
+                consecutive_errors = 0
+                
                 # Log periodic status about queue health
                 if processed_count % 10 == 0:
-                    logger.info(f"Queue status: current size={queue_size}, processed={processed_count}")
+                    active_stream_count = len(RequestProcessor.active_streams)
+                    logger.info(f"Queue status: current size={queue_size}, processed={processed_count}, active streams={active_stream_count}")
                 
             except asyncio.CancelledError:
                 logger.info("Worker task cancelled, exiting")
                 break
             except Exception as e:
-                logger.error(f"Worker error: {str(e)}")
+                consecutive_errors += 1
+                logger.error(f"Worker error (consecutive: {consecutive_errors}/{max_consecutive_errors}): {str(e)}")
+                
+                # If we have too many consecutive errors, pause before continuing
+                if consecutive_errors >= max_consecutive_errors:
+                    logger.critical(f"Too many consecutive worker errors, pausing for recovery")
+                    await asyncio.sleep(5)  # Brief pause before continuing
+                    consecutive_errors = 0  # Reset counter after recovery pause
+                    
+                    # Clean up any potential issues
+                    try:
+                        await RequestProcessor.cleanup_stale_streams()
+                    except Exception as cleanup_error:
+                        logger.error(f"Error during worker recovery cleanup: {cleanup_error}")
+                
+                # Mark the task as done to prevent queue from getting stuck
+                try:
+                    RequestProcessor.queue.task_done()
+                except ValueError:
+                    # task_done() called more times than items in queue
+                    pass
 
 # Background Tasks
 async def unload_checker():
@@ -583,6 +960,25 @@ async def unload_checker():
             # Wait a bit longer before retrying on critical errors
             await asyncio.sleep(UNLOAD_CHECK_INTERVAL * 2)
 
+async def stream_cleanup_task():
+    """Periodic cleanup of stale streams."""
+    logger.info("Stream cleanup task started")
+    
+    while True:
+        try:
+            await asyncio.sleep(60)  # Check every minute
+            
+            # Clean up stale streams
+            await RequestProcessor.cleanup_stale_streams()
+            
+        except asyncio.CancelledError:
+            logger.info("Stream cleanup task cancelled")
+            break
+        except Exception as e:
+            logger.error(f"Error in stream cleanup task: {str(e)}", exc_info=True)
+            # Wait a bit longer before retrying on critical errors
+            await asyncio.sleep(120)
+
 # Performance monitoring middleware
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
@@ -618,6 +1014,7 @@ async def startup_event():
     # Start background tasks
     app.state.worker_task = asyncio.create_task(RequestProcessor.worker())
     app.state.unload_checker_task = asyncio.create_task(unload_checker())
+    app.state.stream_cleanup_task = asyncio.create_task(stream_cleanup_task())
     
     logger.info("Service started successfully")
 
@@ -633,7 +1030,7 @@ async def shutdown_event():
     tasks_to_cancel = []
     task_names = []
     
-    for task_attr in ["worker_task", "unload_checker_task"]:
+    for task_attr in ["worker_task", "unload_checker_task", "stream_cleanup_task"]:
         if hasattr(app.state, task_attr):
             task = getattr(app.state, task_attr)
             if not task.done():
@@ -693,9 +1090,12 @@ async def shutdown_event():
         except Exception as e:
             logger.error(f"Error closing HTTP client: {str(e)}")
     
-    # Phase 4: Clean up any remaining request queue
+    # Phase 4: Clean up any remaining request queue and streams
     if hasattr(RequestProcessor, 'queue'):
         try:
+            # Clean up any remaining active streams
+            await RequestProcessor.cleanup_stale_streams()
+            
             queue_size = RequestProcessor.queue.qsize()
             if queue_size > 0:
                 logger.warning(f"Request queue still has {queue_size} pending requests during shutdown")
@@ -703,7 +1103,7 @@ async def shutdown_event():
                 pending_requests = []
                 while not RequestProcessor.queue.empty():
                     try:
-                        _, _, future, request_id, _ = RequestProcessor.queue.get_nowait()
+                        _, _, future, request_id, _, _ = RequestProcessor.queue.get_nowait()
                         if not future.done():
                             future.cancel()
                             pending_requests.append(request_id)
@@ -737,56 +1137,53 @@ async def update(request: Dict[str, Any]):
 @app.post("/chat/completions")
 async def chat_completions(request: ChatCompletionRequest):
     """Endpoint for chat completion requests."""
-    try:
-        service_info = get_service_info()
-        if service_info.get("task") == "embed":
-            raise HTTPException(status_code=400, detail="Chat completion requests are not supported for embedding models")
-    except HTTPException:
-        pass  # Service info not available, continue with request
     request_dict = convert_request_to_dict(request)
+    task = request_dict.get("task")
     return await RequestProcessor.process_request("/chat/completions", request_dict)
+
+@app.post("/v1/chat/completions")
+async def v1_chat_completions(request: ChatCompletionRequest):
+    """Endpoint for chat completion requests (v1 API)."""
+    request_dict = convert_request_to_dict(request)
+    task = request_dict.get("task")
+    return await RequestProcessor.process_request("/v1/chat/completions", request_dict)
+
 
 @app.post("/embeddings")
 async def embeddings(request: EmbeddingRequest):
     """Endpoint for embedding requests."""
     request_dict = convert_request_to_dict(request)
+    task = request_dict.get("task")
     return await RequestProcessor.process_request("/embeddings", request_dict)
-
-@app.post("/v1/chat/completions")
-async def v1_chat_completions(request: ChatCompletionRequest):
-    """Endpoint for chat completion requests (v1 API)."""
-    try:
-        service_info = get_service_info()
-        if service_info.get("task") == "embed":
-            raise HTTPException(status_code=400, detail="Chat completion requests are not supported for embedding models")
-    except HTTPException:
-        pass  # Service info not available, continue with request
-    request_dict = convert_request_to_dict(request)
-    return await RequestProcessor.process_request("/v1/chat/completions", request_dict)
 
 @app.post("/v1/embeddings")
 async def v1_embeddings(request: EmbeddingRequest):
     """Endpoint for embedding requests (v1 API)."""
     request_dict = convert_request_to_dict(request)
+    task = request_dict.get("task")
     return await RequestProcessor.process_request("/v1/embeddings", request_dict)
+
+
+@app.post("/images/generations")
+async def image_generations(request: ImageGenerationRequest):
+    """Endpoint for image generation requests."""
+    request_dict = convert_request_to_dict(request)
+    task = request_dict.get("task")
+    return await RequestProcessor.process_request("/images/generations", request_dict)
+    
 
 @app.post("/v1/images/generations")
 async def v1_image_generations(request: ImageGenerationRequest):
     """Endpoint for image generation requests (v1 API)."""
-    try:
-        service_info = get_service_info()
-        if service_info.get("task") != "image-generation":
-            raise HTTPException(status_code=400, detail="Image generation requests are only supported for image-generation models")
-    except HTTPException:
-        pass  # Service info not available, continue with request
     request_dict = convert_request_to_dict(request)
+    task = request_dict.get("task")
     return await RequestProcessor.process_request("/v1/images/generations", request_dict)
 
-@app.get("/v1/models", response_model=ModelList)
+@app.get("/models")
 async def list_models():
     """
     Provides a list of available models, compatible with OpenAI's /v1/models endpoint.
-    Currently lists the single loaded model if available.
+    Returns all models in multi-model service including main and on-demand models.
     """
     try:
         service_info = get_service_info()
@@ -798,35 +1195,183 @@ async def list_models():
         logger.error(f"/v1/models: Unexpected HTTPException while fetching service_info: {e.detail}")
         raise # Re-raise other or unexpected HTTPExceptions
 
-    model_hash = service_info.get("hash")
-    folder_name_from_info = service_info.get("folder_name") # From Task 1
+    model_cards = []
+    
+    # Check if this is a multi-model service
+    models = service_info.get("models", {})
+    
+    if models:
+        # Multi-model service - return all available models
+        logger.info(f"/v1/models: Multi-model service detected with {len(models)} models")
+        
+        for model_hash, model_info in models.items():
+            metadata = model_info.get("metadata", {})
+            folder_name = metadata.get("folder_name", "")
+            is_active = model_info.get("active", False)
+            is_on_demand = model_info.get("on_demand", False)
+            task = metadata.get("task", "chat")  # Default to chat if not specified
+            
+            # Prefer folder_name for user-facing ID, fallback to hash
+            model_id = folder_name if folder_name else model_hash
+            
+            # Parse RAM value from metadata
+            raw_ram_value = metadata.get("ram")
+            parsed_ram_value = None
+            if isinstance(raw_ram_value, (int, float)):
+                parsed_ram_value = float(raw_ram_value)
+            elif isinstance(raw_ram_value, str):
+                try:
+                    parsed_ram_value = float(raw_ram_value.lower().replace("gb", "").strip())
+                except ValueError:
+                    logger.warning(f"/v1/models: Could not parse RAM value '{raw_ram_value}' to float for model {model_id}")
+            
+            # Create model card with additional multi-model information
+            model_card = ModelCard(
+                id=model_hash,  # Use hash as ID for API compatibility
+                root=model_id,  # Use folder name as root for display
+                ram=parsed_ram_value,
+                folder_name=folder_name,
+                task=task
+            )
+            
+            model_cards.append(model_card)
+            
+            status = "🟢 Active" if is_active else ("🔴 On-demand" if is_on_demand else "⚪ Unknown")
+            logger.debug(f"/v1/models: Added model {model_id} ({model_hash[:16]}...) - {status}")
+    
+    else:
+        # Legacy single-model service - return the single model
+        model_hash = service_info.get("hash")
+        folder_name_from_info = service_info.get("folder_name")
+        task = service_info.get("task", "chat")  # Default to chat if not specified
+        
+        if not model_hash:
+            logger.warning("/v1/models: No model hash found in service_info, though service_info itself was present. Returning empty list.")
+            return ModelList(data=[])
+        
+        # Prefer folder_name for user-facing ID, fallback to hash
+        model_id = folder_name_from_info if folder_name_from_info else model_hash
+        
+        # Parse RAM value
+        raw_ram_value = service_info.get("ram")
+        parsed_ram_value = None
+        if isinstance(raw_ram_value, (int, float)):
+            parsed_ram_value = float(raw_ram_value)
+        elif isinstance(raw_ram_value, str):
+            try:
+                parsed_ram_value = float(raw_ram_value.lower().replace("gb", "").strip())
+            except ValueError:
+                logger.warning(f"/v1/models: Could not parse RAM value '{raw_ram_value}' to float.")
+        
+        model_card = ModelCard(
+            id=model_hash,  # Use hash as ID for API compatibility
+            root=model_id,  # Use folder name as root for display
+            ram=parsed_ram_value,
+            folder_name=folder_name_from_info,
+            task=task
+        )
+        
+        model_cards.append(model_card)
+        logger.info(f"/v1/models: Single-model service - returning model {model_id}")
 
-    if not model_hash:
-        logger.warning("/v1/models: No model hash found in service_info, though service_info itself was present. Returning empty list.")
-        return ModelList(data=[])
+    logger.info(f"/v1/models: Returning {len(model_cards)} models")
+    return ModelList(data=model_cards)
 
-    # Prefer folder_name for user-facing ID, fallback to hash
-    model_id = folder_name_from_info if folder_name_from_info else model_hash
 
-    # Construct the ModelCard, similar to how other response objects are built
-    # Ensure 'ram' from service_info is correctly parsed
-    raw_ram_value = service_info.get("ram")
-    parsed_ram_value = None
-    if isinstance(raw_ram_value, (int, float)):
-        parsed_ram_value = float(raw_ram_value)
-    elif isinstance(raw_ram_value, str):
-        try:
-            # Attempt to parse if it's a string like "8GB", "8gb", or "8"
-            parsed_ram_value = float(raw_ram_value.lower().replace("gb", "").strip())
-        except ValueError:
-            logger.warning(f"/v1/models: Could not parse RAM value '{raw_ram_value}' to float.")
+@app.get("/v1/models", response_model=ModelList)
+async def v1_list_models():
+    """
+    Provides a list of available models, compatible with OpenAI's /v1/models endpoint.
+    Returns all models in multi-model service including main and on-demand models.
+    """
+    try:
+        service_info = get_service_info()
+    except HTTPException as e:
+        # This pattern of handling 503 for missing service_info is consistent
+        if e.status_code == 503:
+            logger.info("/v1/models: Service information not available. No model loaded or /update not called.")
+            return ModelList(data=[])
+        logger.error(f"/v1/models: Unexpected HTTPException while fetching service_info: {e.detail}")
+        raise # Re-raise other or unexpected HTTPExceptions
 
-    model_card = ModelCard(
-        id=model_id,
-        root=model_id, # Consistent with OpenAI for base models
-        ram=parsed_ram_value,    # Use 'ram' field, populated with parsed value
-        folder_name=folder_name_from_info  # From Task 1
-    )
+    model_cards = []
+    
+    # Check if this is a multi-model service
+    models = service_info.get("models", {})
+    
+    if models:
+        # Multi-model service - return all available models
+        logger.info(f"/v1/models: Multi-model service detected with {len(models)} models")
+        
+        for model_hash, model_info in models.items():
+            metadata = model_info.get("metadata", {})
+            folder_name = metadata.get("folder_name", "")
+            is_active = model_info.get("active", False)
+            is_on_demand = model_info.get("on_demand", False)
+            task = metadata.get("task", "chat")  # Default to chat if not specified
+            
+            # Prefer folder_name for user-facing ID, fallback to hash
+            model_id = folder_name if folder_name else model_hash
+            
+            # Parse RAM value from metadata
+            raw_ram_value = metadata.get("ram")
+            parsed_ram_value = None
+            if isinstance(raw_ram_value, (int, float)):
+                parsed_ram_value = float(raw_ram_value)
+            elif isinstance(raw_ram_value, str):
+                try:
+                    parsed_ram_value = float(raw_ram_value.lower().replace("gb", "").strip())
+                except ValueError:
+                    logger.warning(f"/v1/models: Could not parse RAM value '{raw_ram_value}' to float for model {model_id}")
+            
+            # Create model card with additional multi-model information
+            model_card = ModelCard(
+                id=model_hash,  # Use hash as ID for API compatibility
+                root=model_id,  # Use folder name as root for display
+                ram=parsed_ram_value,
+                folder_name=folder_name,
+                task=task
+            )
+            
+            model_cards.append(model_card)
+            
+            status = "🟢 Active" if is_active else ("🔴 On-demand" if is_on_demand else "⚪ Unknown")
+            logger.debug(f"/v1/models: Added model {model_id} ({model_hash[:16]}...) - {status}")
+    
+    else:
+        # Legacy single-model service - return the single model
+        model_hash = service_info.get("hash")
+        folder_name_from_info = service_info.get("folder_name")
+        task = service_info.get("task", "chat")  # Default to chat if not specified
+        
+        if not model_hash:
+            logger.warning("/v1/models: No model hash found in service_info, though service_info itself was present. Returning empty list.")
+            return ModelList(data=[])
+        
+        # Prefer folder_name for user-facing ID, fallback to hash
+        model_id = folder_name_from_info if folder_name_from_info else model_hash
+        
+        # Parse RAM value
+        raw_ram_value = service_info.get("ram")
+        parsed_ram_value = None
+        if isinstance(raw_ram_value, (int, float)):
+            parsed_ram_value = float(raw_ram_value)
+        elif isinstance(raw_ram_value, str):
+            try:
+                parsed_ram_value = float(raw_ram_value.lower().replace("gb", "").strip())
+            except ValueError:
+                logger.warning(f"/v1/models: Could not parse RAM value '{raw_ram_value}' to float.")
+        
+        model_card = ModelCard(
+            id=model_hash,  # Use hash as ID for API compatibility
+            root=model_id,  # Use folder name as root for display
+            ram=parsed_ram_value,
+            folder_name=folder_name_from_info,
+            task=task
+        )
+        
+        model_cards.append(model_card)
+        logger.info(f"/v1/models: Single-model service - returning model {model_id}")
 
-    logger.info(f"/v1/models: Returning information for model ID: {model_id}")
-    return ModelList(data=[model_card])
+    logger.info(f"/v1/models: Returning {len(model_cards)} models")
+    return ModelList(data=model_cards)
