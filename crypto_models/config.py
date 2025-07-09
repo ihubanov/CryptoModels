@@ -62,6 +62,7 @@ class ModelConfig:
     # Default model names
     DEFAULT_CHAT_MODEL: str = os.getenv("CRYPTO_DEFAULT_CHAT_MODEL", "default-chat-model")
     DEFAULT_EMBED_MODEL: str = os.getenv("CRYPTO_DEFAULT_EMBED_MODEL", "default-embed-model")
+    DEFAULT_IMAGE_MODEL: str = os.getenv("CRYPTO_DEFAULT_IMAGE_MODEL", "default-image-model")
     
     # Model limits
     MAX_MESSAGES: int = int(os.getenv("CRYPTO_MAX_MESSAGES", "50"))

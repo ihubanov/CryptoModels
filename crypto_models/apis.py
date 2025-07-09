@@ -712,8 +712,8 @@ class RequestProcessor:
         request_id = generate_request_id()
         queue_size = RequestProcessor.queue.qsize()
         
-        # Validate that model field is present and get service info
-        service_info = validate_model_field(request_data)
+        # # Validate that model field is present and get service info
+        # service_info = validate_model_field(request_data)
         
         logger.info(f"[{request_id}] Adding request to queue for endpoint {endpoint} (queue size: {queue_size})")
         
@@ -743,8 +743,8 @@ class RequestProcessor:
         request_id = generate_request_id()
         logger.info(f"[{request_id}] Processing direct request for endpoint {endpoint}")
         
-        # Validate that model field is present and get service info
-        service_info = validate_model_field(request_data)
+        # # Validate that model field is present and get service info
+        # service_info = validate_model_field(request_data)
         
         app.state.last_request_time = time.time()
         await RequestProcessor._ensure_server_running(request_id)
