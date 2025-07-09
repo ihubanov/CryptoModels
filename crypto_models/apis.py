@@ -175,12 +175,20 @@ class ServiceHandler:
         request_dict = convert_request_to_dict(request)
         
         if request.stream:
+            # For streaming requests, generate a stream ID and register it before returning
+            stream_id = generate_request_id()
+            await RequestProcessor.register_stream(stream_id)
+            
+            logger.debug(f"Creating streaming response for model {request.model} with stream ID {stream_id}")
+            
+            # The stream will be unregistered inside the generator
             return StreamingResponse(
-                ServiceHandler._stream_generator(port, request_dict),
+                ServiceHandler._stream_generator(port, request_dict, stream_id),
                 media_type="text/event-stream"
             )
 
         # Make a non-streaming API call
+        logger.debug(f"Making non-streaming request for model {request.model}")
         response_data = await ServiceHandler._make_api_call(port, "/v1/chat/completions", request_dict)
         return ChatCompletionResponse(
             id=response_data.get("id", generate_chat_completion_id()),
@@ -248,135 +256,150 @@ class ServiceHandler:
             raise HTTPException(status_code=500, detail=str(e))
     
     @staticmethod
-    async def _stream_generator(port: int, data: Dict[str, Any]):
+    async def _stream_generator(port: int, data: Dict[str, Any], stream_id: str):
         """Generator for streaming responses from the service."""
-        buffer = ""
-        tool_calls = {}
-        
-        def _extract_json_data(line: str) -> Optional[str]:
-            """Extract JSON data from SSE line, return None if not valid data."""
-            line = line.strip()
-            if not line or line.startswith(': ping'):
-                return None
-            if line.startswith('data: '):
-                return line[6:].strip()
-            return None
-        
-        def _process_tool_call_delta(delta_tool_call, tool_calls: dict):
-            """Process tool call delta and update tool_calls dict."""
-            tool_call_index = str(delta_tool_call.index)
-            if tool_call_index not in tool_calls:
-                tool_calls[tool_call_index] = {"arguments": ""}
-            
-            if delta_tool_call.id is not None:
-                tool_calls[tool_call_index]["id"] = delta_tool_call.id
-                
-            function = delta_tool_call.function
-            if function.name is not None:
-                tool_calls[tool_call_index]["name"] = function.name
-            if function.arguments is not None:
-                tool_calls[tool_call_index]["arguments"] += function.arguments
-        
-        def _create_tool_call_chunks(tool_calls: dict, chunk_obj):
-            """Create tool call chunks for final output - yields each chunk separately."""
-            chunk_obj_copy = chunk_obj.copy()
-            
-            for tool_call_index, tool_call in tool_calls.items():
-                try:
-                    tool_call_obj = json.loads(repair_json(json.dumps(tool_call)))
-                    tool_call_id = tool_call_obj.get("id", None)
-                    tool_call_name = tool_call_obj.get("name", "")
-                    tool_call_arguments = tool_call_obj.get("arguments", "")
-                    if tool_call_arguments == "":
-                        tool_call_arguments = "{}"
-                    function_call = ChoiceDeltaFunctionCall(
-                        name=tool_call_name,
-                        arguments=tool_call_arguments
-                    )
-                    delta_tool_call = ChoiceDeltaToolCall(
-                        index=int(tool_call_index),
-                        id=tool_call_id,
-                        function=function_call,
-                        type="function"
-                    )
-                    chunk_obj_copy.choices[0].delta.content = None
-                    chunk_obj_copy.choices[0].delta.tool_calls = [delta_tool_call]  
-                    chunk_obj_copy.choices[0].finish_reason = "tool_calls"
-                    yield f"data: {chunk_obj_copy.json()}\n\n"
-                except Exception as e:
-                    logger.error(f"Failed to create tool call chunk: {e}")
-                    chunk_obj_copy.choices[0].delta.content = None
-                    chunk_obj_copy.choices[0].delta.tool_calls = []
-                    yield f"data: {chunk_obj_copy.json()}\n\n"
         try:
-            async with app.state.client.stream(
-                "POST", 
-                f"http://localhost:{port}/v1/chat/completions", 
-                json=data,
-                timeout=STREAM_TIMEOUT
-            ) as response:
-                if response.status_code != 200:
-                    error_text = await response.aread()
-                    error_msg = f"data: {{\"error\":{{\"message\":\"{error_text.decode()}\",\"code\":{response.status_code}}}}}\n\n"
-                    logger.error(f"Streaming error: {response.status_code} - {error_text.decode()}")
-                    yield error_msg
-                    return
+            logger.debug(f"Starting stream {stream_id}")
+            
+            buffer = ""
+            tool_calls = {}
+            
+            def _extract_json_data(line: str) -> Optional[str]:
+                """Extract JSON data from SSE line, return None if not valid data."""
+                line = line.strip()
+                if not line or line.startswith(': ping'):
+                    return None
+                if line.startswith('data: '):
+                    return line[6:].strip()
+                return None
+            
+            def _process_tool_call_delta(delta_tool_call, tool_calls: dict):
+                """Process tool call delta and update tool_calls dict."""
+                tool_call_index = str(delta_tool_call.index)
+                if tool_call_index not in tool_calls:
+                    tool_calls[tool_call_index] = {"arguments": ""}
                 
-                async for chunk in response.aiter_bytes():
-                    buffer += chunk.decode('utf-8', errors='replace')
+                if delta_tool_call.id is not None:
+                    tool_calls[tool_call_index]["id"] = delta_tool_call.id
                     
-                    # Process complete lines
-                    while '\n' in buffer:
-                        line, buffer = buffer.split('\n', 1)
-                        json_str = _extract_json_data(line)
+                function = delta_tool_call.function
+                if function.name is not None:
+                    tool_calls[tool_call_index]["name"] = function.name
+                if function.arguments is not None:
+                    tool_calls[tool_call_index]["arguments"] += function.arguments
+            
+            def _create_tool_call_chunks(tool_calls: dict, chunk_obj):
+                """Create tool call chunks for final output - yields each chunk separately."""
+                chunk_obj_copy = chunk_obj.copy()
+                
+                for tool_call_index, tool_call in tool_calls.items():
+                    try:
+                        tool_call_obj = json.loads(repair_json(json.dumps(tool_call)))
+                        tool_call_id = tool_call_obj.get("id", None)
+                        tool_call_name = tool_call_obj.get("name", "")
+                        tool_call_arguments = tool_call_obj.get("arguments", "")
+                        if tool_call_arguments == "":
+                            tool_call_arguments = "{}"
+                        function_call = ChoiceDeltaFunctionCall(
+                            name=tool_call_name,
+                            arguments=tool_call_arguments
+                        )
+                        delta_tool_call = ChoiceDeltaToolCall(
+                            index=int(tool_call_index),
+                            id=tool_call_id,
+                            function=function_call,
+                            type="function"
+                        )
+                        chunk_obj_copy.choices[0].delta.content = None
+                        chunk_obj_copy.choices[0].delta.tool_calls = [delta_tool_call]  
+                        chunk_obj_copy.choices[0].finish_reason = "tool_calls"
+                        yield f"data: {chunk_obj_copy.json()}\n\n"
+                    except Exception as e:
+                        logger.error(f"Failed to create tool call chunk in {stream_id}: {e}")
+                        chunk_obj_copy.choices[0].delta.content = None
+                        chunk_obj_copy.choices[0].delta.tool_calls = []
+                        yield f"data: {chunk_obj_copy.json()}\n\n"
                         
-                        if json_str is None:
-                            continue
-                            
-                        if json_str == '[DONE]':
-                            yield 'data: [DONE]\n\n'
-                            continue
+            try:
+                async with app.state.client.stream(
+                    "POST", 
+                    f"http://localhost:{port}/v1/chat/completions", 
+                    json=data,
+                    timeout=STREAM_TIMEOUT
+                ) as response:
+                    if response.status_code != 200:
+                        error_text = await response.aread()
+                        error_msg = f"data: {{\"error\":{{\"message\":\"{error_text.decode()}\",\"code\":{response.status_code}}}}}\n\n"
+                        logger.error(f"Streaming error for {stream_id}: {response.status_code} - {error_text.decode()}")
+                        yield error_msg
+                        return
+                    
+                    async for chunk in response.aiter_bytes():
+                        buffer += chunk.decode('utf-8', errors='replace')
                         
-                        try:
-                            chunk_obj = ChatCompletionChunk.parse_raw(json_str)
-                            choice = chunk_obj.choices[0]
+                        # Process complete lines
+                        while '\n' in buffer:
+                            line, buffer = buffer.split('\n', 1)
+                            json_str = _extract_json_data(line)
                             
-                            # Handle finish reason - output accumulated tool calls
-                            if choice.finish_reason and tool_calls:
-                                for tool_call_chunk in _create_tool_call_chunks(tool_calls, chunk_obj):
-                                    yield tool_call_chunk
+                            if json_str is None:
+                                continue
+                                
+                            if json_str == '[DONE]':
+                                yield 'data: [DONE]\n\n'
+                                continue
+                            
+                            try:
+                                chunk_obj = ChatCompletionChunk.parse_raw(json_str)
+                                choice = chunk_obj.choices[0]
+                                
+                                # Handle finish reason - output accumulated tool calls
+                                if choice.finish_reason and tool_calls:
+                                    for tool_call_chunk in _create_tool_call_chunks(tool_calls, chunk_obj):
+                                        yield tool_call_chunk
 
-                                yield f"data: [DONE]\n\n"
-                                return
-                            
-                            # Handle tool call deltas
-                            if choice.delta.tool_calls:
-                                _process_tool_call_delta(choice.delta.tool_calls[0], tool_calls)
-                            else:
-                                # Regular content chunk
+                                    yield f"data: [DONE]\n\n"
+                                    return
+                                
+                                # Handle tool call deltas
+                                if choice.delta.tool_calls:
+                                    _process_tool_call_delta(choice.delta.tool_calls[0], tool_calls)
+                                else:
+                                    # Regular content chunk
+                                    yield f"data: {chunk_obj.json()}\n\n"
+                                        
+                            except Exception as e:
+                                logger.error(f"Failed to parse streaming chunk in {stream_id}: {e}")
+                                # Pass through unparseable data (except ping messages)
+                                if not line.strip().startswith(': ping'):
+                                    yield f"data: {line}\n\n"
+                                
+                    # Process any remaining buffer content
+                    if buffer.strip():
+                        json_str = _extract_json_data(buffer)
+                        if json_str and json_str != '[DONE]':
+                            try:
+                                chunk_obj = ChatCompletionChunk.parse_raw(json_str)
                                 yield f"data: {chunk_obj.json()}\n\n"
-                                    
-                        except Exception as e:
-                            logger.error(f"Failed to parse streaming chunk: {e}")
-                            # Pass through unparseable data (except ping messages)
-                            if not line.strip().startswith(': ping'):
-                                yield f"data: {line}\n\n"
+                            except Exception as e:
+                                logger.error(f"Failed to parse trailing chunk in {stream_id}: {e}")
+                        elif json_str == '[DONE]':
+                            yield 'data: [DONE]\n\n'
                             
-                # Process any remaining buffer content
-                if buffer.strip():
-                    json_str = _extract_json_data(buffer)
-                    if json_str and json_str != '[DONE]':
-                        try:
-                            chunk_obj = ChatCompletionChunk.parse_raw(json_str)
-                            yield f"data: {chunk_obj.json()}\n\n"
-                        except Exception as e:
-                            logger.error(f"Failed to parse trailing chunk: {e}")
-                    elif json_str == '[DONE]':
-                        yield 'data: [DONE]\n\n'
-                            
+            except Exception as e:
+                logger.error(f"Streaming error for {stream_id}: {e}")
+                yield f"data: {{\"error\":{{\"message\":\"{str(e)}\",\"code\":500}}}}\n\n"
+                
         except Exception as e:
-            logger.error(f"Streaming error: {e}")
+            logger.error(f"Critical error in stream generator {stream_id}: {e}")
             yield f"data: {{\"error\":{{\"message\":\"{str(e)}\",\"code\":500}}}}\n\n"
+        finally:
+            # Always unregister the stream when done
+            try:
+                await RequestProcessor.unregister_stream(stream_id)
+                logger.debug(f"Stream {stream_id} completed and unregistered")
+            except Exception as e:
+                logger.error(f"Error unregistering stream {stream_id}: {e}")
 
 
 # Request Processor
@@ -386,6 +409,10 @@ class RequestProcessor:
     queue = asyncio.Queue(maxsize=MAX_QUEUE_SIZE)
     processing_lock = asyncio.Lock()
     
+    # Track active streams to prevent model switching during streaming
+    active_streams = set()
+    active_streams_lock = asyncio.Lock()
+    
     # Define which endpoints need to be processed sequentially
     MODEL_ENDPOINTS = {
         "/v1/chat/completions": (ChatCompletionRequest, ServiceHandler.generate_text_response),
@@ -394,6 +421,73 @@ class RequestProcessor:
         "/chat/completions": (ChatCompletionRequest, ServiceHandler.generate_text_response),
         "/embeddings": (EmbeddingRequest, ServiceHandler.generate_embeddings_response),
     }
+    
+    @staticmethod
+    async def register_stream(stream_id: str):
+        """Register an active stream to prevent model switching."""
+        async with RequestProcessor.active_streams_lock:
+            RequestProcessor.active_streams.add(stream_id)
+            logger.debug(f"Registered active stream {stream_id}, total active: {len(RequestProcessor.active_streams)}")
+    
+    @staticmethod
+    async def unregister_stream(stream_id: str):
+        """Unregister a completed stream."""
+        async with RequestProcessor.active_streams_lock:
+            RequestProcessor.active_streams.discard(stream_id)
+            logger.debug(f"Unregistered stream {stream_id}, total active: {len(RequestProcessor.active_streams)}")
+    
+    @staticmethod
+    async def has_active_streams() -> bool:
+        """Check if there are any active streams."""
+        async with RequestProcessor.active_streams_lock:
+            return len(RequestProcessor.active_streams) > 0
+    
+    @staticmethod
+    async def wait_for_streams_to_complete(timeout: float = 30.0):
+        """Wait for all active streams to complete before proceeding."""
+        start_time = time.time()
+        initial_count = len(RequestProcessor.active_streams)
+        
+        if initial_count > 0:
+            logger.info(f"Waiting for {initial_count} active streams to complete (timeout: {timeout}s)")
+        
+        check_interval = 0.1
+        last_log_time = start_time
+        
+        while await RequestProcessor.has_active_streams():
+            current_time = time.time()
+            elapsed = current_time - start_time
+            
+            if elapsed > timeout:
+                remaining_streams = len(RequestProcessor.active_streams)
+                logger.warning(f"Timeout waiting for streams to complete after {elapsed:.1f}s, "
+                              f"{remaining_streams} still active. Force proceeding.")
+                # Log the active stream IDs for debugging
+                async with RequestProcessor.active_streams_lock:
+                    active_stream_ids = list(RequestProcessor.active_streams)
+                    logger.warning(f"Active stream IDs: {active_stream_ids}")
+                break
+            
+            # Log progress every 5 seconds
+            if current_time - last_log_time >= 5.0:
+                remaining_streams = len(RequestProcessor.active_streams)
+                logger.info(f"Still waiting for {remaining_streams} streams to complete "
+                           f"(elapsed: {elapsed:.1f}s/{timeout}s)")
+                last_log_time = current_time
+            
+            await asyncio.sleep(check_interval)
+        
+        final_count = len(RequestProcessor.active_streams)
+        if initial_count > 0:
+            logger.info(f"Stream wait completed. Initial: {initial_count}, Final: {final_count}")
+    
+    @staticmethod
+    async def cleanup_stale_streams():
+        """Clean up any stale streams that might be stuck in the active list."""
+        async with RequestProcessor.active_streams_lock:
+            if RequestProcessor.active_streams:
+                logger.warning(f"Cleaning up {len(RequestProcessor.active_streams)} potentially stale streams")
+                RequestProcessor.active_streams.clear()
     
     @staticmethod
     async def _ensure_model_active_in_queue(model_requested: str, request_id: str) -> bool:
@@ -425,7 +519,17 @@ class RequestProcessor:
                 logger.debug(f"[{request_id}] Model {model_requested} is already active")
                 return True
                 
-            # Model exists but not active, switch to it
+            # Model exists but not active, need to switch
+            logger.info(f"[{request_id}] Model switch required to {model_requested}")
+            
+            # Wait for any active streams to complete before switching
+            if await RequestProcessor.has_active_streams():
+                stream_count = len(RequestProcessor.active_streams)
+                logger.info(f"[{request_id}] Waiting for {stream_count} active streams to complete before model switch")
+                await RequestProcessor.wait_for_streams_to_complete()
+                logger.info(f"[{request_id}] All streams completed, proceeding with model switch")
+            
+            # Perform the model switch
             logger.info(f"[{request_id}] Switching to model {model_requested}")
             switch_start_time = time.time()
             
@@ -620,9 +724,19 @@ class RequestProcessor:
                         try:
                             request_obj = model_cls(**request_data)
                             
+                            # Check if this is a streaming request
+                            is_streaming = hasattr(request_obj, 'stream') and request_obj.stream
+                            if is_streaming:
+                                logger.debug(f"[{request_id}] Processing streaming request for model {request_obj.model}")
+                            
                             # Ensure model is active before processing (within the lock)
                             if hasattr(request_obj, 'model') and request_obj.model:
                                 logger.debug(f"[{request_id}] Ensuring model {request_obj.model} is active")
+                                
+                                # Check current active streams before model switching
+                                active_stream_count = len(RequestProcessor.active_streams)
+                                if active_stream_count > 0:
+                                    logger.info(f"[{request_id}] Found {active_stream_count} active streams before model check")
                                 
                                 if not await RequestProcessor._ensure_model_active_in_queue(request_obj.model, request_id):
                                     error_msg = f"Model {request_obj.model} is not available or failed to switch"
@@ -654,7 +768,8 @@ class RequestProcessor:
                 
                 # Log periodic status about queue health
                 if processed_count % 10 == 0:
-                    logger.info(f"Queue status: current size={queue_size}, processed={processed_count}")
+                    active_stream_count = len(RequestProcessor.active_streams)
+                    logger.info(f"Queue status: current size={queue_size}, processed={processed_count}, active streams={active_stream_count}")
                 
             except asyncio.CancelledError:
                 logger.info("Worker task cancelled, exiting")
@@ -849,9 +964,12 @@ async def shutdown_event():
         except Exception as e:
             logger.error(f"Error closing HTTP client: {str(e)}")
     
-    # Phase 4: Clean up any remaining request queue
+    # Phase 4: Clean up any remaining request queue and streams
     if hasattr(RequestProcessor, 'queue'):
         try:
+            # Clean up any remaining active streams
+            await RequestProcessor.cleanup_stale_streams()
+            
             queue_size = RequestProcessor.queue.qsize()
             if queue_size > 0:
                 logger.warning(f"Request queue still has {queue_size} pending requests during shutdown")
