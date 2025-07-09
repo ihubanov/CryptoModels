@@ -134,6 +134,19 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
             computed_hash = compute_file_hash(file_path)
             if computed_hash == expected_hash:
                 logger.info(f"File {cid} already exists with correct hash.")
+                
+                # Account for cached files in progress tracking
+                if progress_tracker:
+                    # Get file size from file_info (in MB) and convert to bytes
+                    file_size_mb = file_info.get("size_mb", 0)
+                    if file_size_mb > 0:
+                        file_size_bytes = int(file_size_mb * 1024 * 1024)
+                        # Add to expected size
+                        await progress_tracker.add_file_size(file_size_bytes)
+                        # Add to downloaded size (since it's effectively "downloaded" from cache)
+                        await progress_tracker.update_progress_batched(file_size_bytes)
+                        logger.info(f"Added cached file size to progress: {file_size_mb} MB")
+                
                 return file_path, None
             else:
                 logger.warning(f"File {cid} exists but hash mismatch. Retrying...")
