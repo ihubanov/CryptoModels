@@ -990,6 +990,7 @@ async def list_models():
             folder_name = metadata.get("folder_name", "")
             is_active = model_info.get("active", False)
             is_on_demand = model_info.get("on_demand", False)
+            task = metadata.get("task", "chat")  # Default to chat if not specified
             
             # Prefer folder_name for user-facing ID, fallback to hash
             model_id = folder_name if folder_name else model_hash
@@ -1010,7 +1011,8 @@ async def list_models():
                 id=model_hash,  # Use hash as ID for API compatibility
                 root=model_id,  # Use folder name as root for display
                 ram=parsed_ram_value,
-                folder_name=folder_name
+                folder_name=folder_name,
+                task=task
             )
             
             model_cards.append(model_card)
@@ -1022,6 +1024,7 @@ async def list_models():
         # Legacy single-model service - return the single model
         model_hash = service_info.get("hash")
         folder_name_from_info = service_info.get("folder_name")
+        task = service_info.get("task", "chat")  # Default to chat if not specified
         
         if not model_hash:
             logger.warning("/v1/models: No model hash found in service_info, though service_info itself was present. Returning empty list.")
@@ -1045,7 +1048,8 @@ async def list_models():
             id=model_hash,  # Use hash as ID for API compatibility
             root=model_id,  # Use folder name as root for display
             ram=parsed_ram_value,
-            folder_name=folder_name_from_info
+            folder_name=folder_name_from_info,
+            task=task
         )
         
         model_cards.append(model_card)

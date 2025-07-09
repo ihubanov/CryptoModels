@@ -337,6 +337,7 @@ class ModelCard(BaseModel):
     permission: List[ModelPermission] = Field(default_factory=lambda: [ModelPermission()])
     ram: Optional[float] = None
     folder_name: Optional[str] = None
+    task: Optional[str] = None
 
 class ModelList(BaseModel):
     object: str = "list"
