@@ -57,7 +57,7 @@ def extract_zip(paths: List[Path]):
     # Use the absolute path only once.
     target_abs = Path.cwd().absolute()
     target_dir = f"'{target_abs}'"
-    print(f"Extracting files to: {target_dir}")
+    print(f"📦 Extracting files to: {target_dir}")
 
     # Get absolute paths for required commands.
     cat_path = os.environ.get("CAT_COMMAND")
@@ -70,7 +70,7 @@ def extract_zip(paths: List[Path]):
     sorted_paths = sorted(paths, key=lambda p: str(p))
     # Quote each path after converting to its absolute path.
     paths_str = " ".join(f"'{p.absolute()}'" for p in sorted_paths)
-    print(f"Extracting files: {paths_str}")
+    print(f"🗂️ Extracting files: {paths_str}")
 
     cpus = os.cpu_count() or 1
 
@@ -82,17 +82,17 @@ def extract_zip(paths: List[Path]):
         # Step 1: Concatenate all parts into a single gzipped file
         cat_command = f"{cat_path} {paths_str} > '{temp_gz}'"
         run_with_retries(cat_command)
-        print(f"[extract_zip] Step 1 completed: {temp_gz}")
+        print(f"✅ [extract_zip] Step 1 completed: {temp_gz}")
 
         # Step 2: Decompress the gzipped file to a tar file using pigz
         pigz_command = f"{pigz_cmd} -p {cpus} -d -c '{temp_gz}' > '{temp_tar}'"
         run_with_retries(pigz_command)
-        print(f"[extract_zip] Step 2 completed: {temp_tar}")
+        print(f"✅ [extract_zip] Step 2 completed: {temp_tar}")
 
         # Step 3: Extract the tar file to the target directory
         tar_command = f"{tar_cmd} -xf '{temp_tar}' -C {target_dir}"
         run_with_retries(tar_command)
-        print(f"[extract_zip] Step 3 completed: extracted to {target_dir}")
+        print(f"🎉 [extract_zip] Step 3 completed: extracted to {target_dir}")
     finally:
         # Remove temporary files if they exist
         if temp_gz.exists():
@@ -108,10 +108,34 @@ def compute_file_hash(file_path: Path, hash_algo: str = "sha256") -> str:
             hash_func.update(chunk)
     return hash_func.hexdigest()
 
+
 async def async_move(src: str, dst: str) -> None:
-    """Asynchronously move a file or directory from src to dst."""
+    """Asynchronously move a file or directory from src to dst, with retries and source existence check."""
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, shutil.move, src, dst)
+    max_retries = 3
+    delay = 2
+    for attempt in range(1, max_retries + 1):
+        if not Path(src).exists():
+            print(f"😕 [async_move] Source does not exist: {src} (attempt {attempt})")
+            if attempt < max_retries:
+                print(f"⏳ [async_move] Waiting {delay} seconds for source to appear...")
+                await asyncio.sleep(delay)
+                continue
+            else:
+                print(f"❌ [async_move] Source does not exist after {max_retries} attempts: {src}")
+                raise FileNotFoundError(f"Source does not exist after {max_retries} attempts: {src}")
+        try:
+            await loop.run_in_executor(None, shutil.move, src, dst)
+            print(f"🚚 [async_move] Move succeeded: {src} -> {dst}")
+            return
+        except Exception as e:
+            print(f"⚠️ [async_move] Move failed (attempt {attempt}): {e}")
+            if attempt < max_retries:
+                print(f"🔁 [async_move] Retrying in {delay} seconds...")
+                await asyncio.sleep(delay)
+            else:
+                print(f"💥 [async_move] All {max_retries} attempts failed for: {src} -> {dst}")
+                raise
 
 async def async_rmtree(path: str) -> None:
     """Asynchronously remove a directory tree."""
