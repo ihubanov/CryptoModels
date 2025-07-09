@@ -1148,14 +1148,12 @@ async def update(request: Dict[str, Any]):
 async def chat_completions(request: ChatCompletionRequest):
     """Endpoint for chat completion requests."""
     request_dict = convert_request_to_dict(request)
-    task = request_dict.get("task")
     return await RequestProcessor.process_request("/chat/completions", request_dict)
 
 @app.post("/v1/chat/completions")
 async def v1_chat_completions(request: ChatCompletionRequest):
     """Endpoint for chat completion requests (v1 API)."""
     request_dict = convert_request_to_dict(request)
-    task = request_dict.get("task")
     return await RequestProcessor.process_request("/v1/chat/completions", request_dict)
 
 
@@ -1163,14 +1161,12 @@ async def v1_chat_completions(request: ChatCompletionRequest):
 async def embeddings(request: EmbeddingRequest):
     """Endpoint for embedding requests."""
     request_dict = convert_request_to_dict(request)
-    task = request_dict.get("task")
     return await RequestProcessor.process_request("/embeddings", request_dict)
 
 @app.post("/v1/embeddings")
 async def v1_embeddings(request: EmbeddingRequest):
     """Endpoint for embedding requests (v1 API)."""
     request_dict = convert_request_to_dict(request)
-    task = request_dict.get("task")
     return await RequestProcessor.process_request("/v1/embeddings", request_dict)
 
 
@@ -1178,7 +1174,6 @@ async def v1_embeddings(request: EmbeddingRequest):
 async def image_generations(request: ImageGenerationRequest):
     """Endpoint for image generation requests."""
     request_dict = convert_request_to_dict(request)
-    task = request_dict.get("task")
     return await RequestProcessor.process_request("/images/generations", request_dict)
     
 
@@ -1186,7 +1181,6 @@ async def image_generations(request: ImageGenerationRequest):
 async def v1_image_generations(request: ImageGenerationRequest):
     """Endpoint for image generation requests (v1 API)."""
     request_dict = convert_request_to_dict(request)
-    task = request_dict.get("task")
     return await RequestProcessor.process_request("/v1/images/generations", request_dict)
 
 @app.get("/models")
