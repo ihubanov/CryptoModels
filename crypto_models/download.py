@@ -589,6 +589,9 @@ async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Pat
                     await async_extract_zip(paths)
                 except Exception as e:
                     print(f"Failed to extract files: {e}")
+                    # Do not retry if disk full
+                    if "Not enough disk space" in str(e):
+                        raise Exception(f"Failed to extract files due to insufficient disk space: {e}")
                     if attempt < MAX_ATTEMPTS:
                         print(f"Retrying in {backoff} seconds")
                         await asyncio.sleep(backoff)
@@ -649,6 +652,8 @@ async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Pat
                     raise Exception(f"HTTP error after {MAX_ATTEMPTS} attempts: {e}")
             except Exception as e:
                 print(f"Download attempt {attempt} failed: {e}")
+                if "Not enough disk space" in str(e):
+                    raise Exception(f"Failed to extract files due to insufficient disk space: {e}")
                 if attempt < MAX_ATTEMPTS:
                     print(f"Retrying in {backoff} seconds")
                     await asyncio.sleep(backoff)

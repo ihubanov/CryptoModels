@@ -62,6 +62,17 @@ def extract_zip(paths: List[Path]):
     target_dir = f"'{target_abs}'"
     logger.info(f"📦 Extracting files to: {target_dir}")
 
+    # Check disk space before extraction
+    total_parts_size = sum(p.stat().st_size for p in paths)
+    # Estimate required space: parts + tar + extracted files (safety factor 2.5)
+    required_bytes = int(total_parts_size * 2.5)
+    usage = shutil.disk_usage(target_abs)
+    free = usage.free
+    logger.info(f"Disk space check: required={required_bytes/1024/1024/1024:.2f} GB, available={free/1024/1024/1024:.2f} GB")
+    if free < required_bytes:
+        logger.error(f"Not enough disk space: required {required_bytes/1024/1024/1024:.2f} GB, available {free/1024/1024/1024:.2f} GB")
+        raise RuntimeError(f"Not enough disk space: required {required_bytes/1024/1024/1024:.2f} GB, available {free/1024/1024/1024:.2f} GB")
+
     # Get absolute paths for required commands.
     cat_path = os.environ.get("CAT_COMMAND")
     pigz_cmd = os.environ.get("PIGZ_COMMAND")
