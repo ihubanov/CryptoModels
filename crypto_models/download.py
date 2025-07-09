@@ -460,7 +460,8 @@ async def download_files_from_lighthouse_async(data: dict) -> list:
                     logger.warning(f"  {i}. {error}")
                 if len(failed_downloads) > 5:
                     logger.warning(f"  ... and {len(failed_downloads) - 5} more errors")
-            return successful_downloads if successful_downloads else []
+            # return successful_downloads if successful_downloads else []
+            raise Exception("Failed downloads")
 
 
 async def pick_fastest_gateway(filecoin_hash: str, gateways: list[str], timeout: int = 5) -> str:
