@@ -141,9 +141,11 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
                     file_size_mb = file_info.get("size_mb", 0)
                     if file_size_mb > 0:
                         file_size_bytes = int(file_size_mb * 1024 * 1024)
-                        # Add to expected size only (not to downloaded - that happens when complete_file is called)
+                        # Add to expected size
                         await progress_tracker.add_file_size(file_size_bytes)
-                        logger.info(f"Added cached file size to expected: {file_size_mb} MB")
+                        # Add to downloaded size (since cached files are effectively "downloaded")
+                        await progress_tracker.update_progress_batched(file_size_bytes)
+                        logger.info(f"Added cached file size to progress: {file_size_mb} MB")
                 
                 return file_path, None
             else:
