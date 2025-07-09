@@ -464,7 +464,7 @@ async def pick_fastest_gateway(filecoin_hash: str, gateways: list[str], timeout:
         gateways (list[str]): List of gateway URLs.
         timeout (int): Timeout in seconds for each speed test.
     Returns:
-        str: The fastest gateway URL.
+        str: The fastest gateway URL, or the first in the list if all fail.
     """
     import aiohttp
     import asyncio
@@ -499,15 +499,15 @@ async def pick_fastest_gateway(filecoin_hash: str, gateways: list[str], timeout:
     # Run all gateway checks concurrently
     tasks = [check_gateway(gw) for gw in gateways]
     results = await asyncio.gather(*tasks)
-    # Select the gateway with the lowest response time
-    for gw, t in results:
-        if t != float('inf'):
-            print(f"[pick_fastest_gateway] ✅ Gateway {gw} time: {t:.3f} seconds.")
-        else:
-            print(f"[pick_fastest_gateway] ❌ Gateway {gw} is not available.")
-    fastest = min(results, key=lambda x: x[1])
-    print(f"[pick_fastest_gateway] 🚀 Fastest gateway selected: {fastest[0]} (time: {fastest[1]:.3f} seconds)\n")
-    return fastest[0]
+    # Filter for gateways that responded successfully
+    valid_results = [r for r in results if r[1] != float('inf')]
+    if valid_results:
+        fastest = min(valid_results, key=lambda x: x[1])
+        print(f"[pick_fastest_gateway] 🚀 Fastest gateway selected: {fastest[0]} (time: {fastest[1]:.3f} seconds)\n")
+        return fastest[0]
+    else:
+        print(f"[pick_fastest_gateway] ⚠️ All gateways timed out or failed. Using the first gateway as fallback: {gateways[0]}")
+        return gateways[0]
 
 
 async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Path = DEFAULT_OUTPUT_DIR) -> str | None:
