@@ -80,6 +80,36 @@ def convert_request_to_dict(request) -> Dict[str, Any]:
     """Convert request object to dictionary, supporting both Pydantic v1 and v2."""
     return request.model_dump() if hasattr(request, "model_dump") else request.dict()
 
+def validate_model_field(request_data: Dict[str, Any]) -> None:
+    """Validate that the model field is present and matches one of the running model hashes."""
+
+    requested_model = request_data["model"]
+    
+    try:
+        service_info = get_service_info()
+        running_model_hashes = service_info.get("running_model_hashes", [])
+        
+        # Check if the requested model is in the running model hashes
+        if requested_model not in running_model_hashes:
+            logger.warning(f"Requested model '{requested_model}' not in running model hashes: {running_model_hashes}")
+            raise HTTPException(
+                status_code=400,
+                detail="Requested model is not running"
+            )
+        
+        logger.debug(f"Model validation passed for '{requested_model}'")
+            
+    except HTTPException as e:
+        # If we can't get service info (503), it means no model is running
+        if e.status_code == 503:
+            logger.warning(f"Service info not available, requested model '{requested_model}' cannot be validated")
+            raise HTTPException(
+                status_code=400,
+                detail="Service is not running"
+            )
+        # Re-raise other HTTPExceptions
+        raise
+
 def generate_request_id() -> str:
     """Generate a short request ID for tracking."""
     return str(uuid.uuid4())[:8]
@@ -412,6 +442,9 @@ class RequestProcessor:
         request_id = generate_request_id()
         queue_size = RequestProcessor.queue.qsize()
         
+        # Validate that model field is present
+        validate_model_field(request_data)
+        
         logger.info(f"[{request_id}] Adding request to queue for endpoint {endpoint} (queue size: {queue_size})")
         
         # Update the last request time
@@ -437,6 +470,9 @@ class RequestProcessor:
         """Process a request directly without queueing for administrative endpoints."""
         request_id = generate_request_id()
         logger.info(f"[{request_id}] Processing direct request for endpoint {endpoint}")
+        
+        # Validate that model field is present
+        validate_model_field(request_data)
         
         app.state.last_request_time = time.time()
         await RequestProcessor._ensure_server_running(request_id)
