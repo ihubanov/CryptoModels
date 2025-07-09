@@ -59,7 +59,7 @@ class CryptoModelsManager:
     
     def restart(self):
         """
-        Restart the currently running CryptoModels service.
+        Restart the currently running CryptoModels service with multi-model support.
 
         Returns:
             bool: True if the service restarted successfully, False otherwise.
@@ -73,17 +73,52 @@ class CryptoModelsManager:
             with open(self.msgpack_file, "rb") as f:
                 service_info = msgpack.load(f)
             
-            hash = service_info.get("hash")
             port = service_info.get("app_port")
             context_length = service_info.get("context_length")
+            models = service_info.get("models", {})
 
-            logger.info(f"Restarting CryptoModels service '{hash}' running on port {port}...")
+            # Check if this is a multi-model service
+            if models:
+                # Extract hashes in the order they were originally provided
+                # The active model should be first, followed by on-demand models
+                active_hash = None
+                on_demand_hashes = []
+                
+                for hash_val, model_info in models.items():
+                    if model_info.get("active", False):
+                        active_hash = hash_val
+                    elif model_info.get("on_demand", False):
+                        on_demand_hashes.append(hash_val)
+                
+                # Reconstruct the original hash order
+                if active_hash:
+                    hashes = [active_hash] + on_demand_hashes
+                else:
+                    # Fallback: use all model hashes
+                    hashes = list(models.keys())
+                
+                logger.info(f"Restarting multi-model CryptoModels service with {len(hashes)} models on port {port}...")
+                logger.info(f"Main model: {hashes[0]}")
+                if len(hashes) > 1:
+                    logger.info(f"On-demand models: {hashes[1:]}")
+                
+                # Stop the current service with force for restart
+                self.stop(force=True)
 
-            # Stop the current service with force for restart
-            self.stop(force=True)
+                # Start the service with the same parameters (convert list back to string)
+                hashes_str = ','.join(hashes)
+                return self.start(hashes_str, port, context_length=context_length)
+            else:
+                # Legacy single-model service
+                hash_val = service_info.get("hash")
+                logger.info(f"Restarting single-model CryptoModels service '{hash_val}' on port {port}...")
+                
+                # Stop the current service with force for restart
+                self.stop(force=True)
 
-            # Start the service with the same parameters
-            return self.start(hash, port, context_length=context_length)
+                # Start the service with the same parameters
+                return self.start(hash_val, port, context_length=context_length)
+                
         except Exception as e:
             logger.error(f"Error restarting CryptoModels service: {str(e)}", exc_info=True)
             return False
@@ -141,12 +176,13 @@ class CryptoModelsManager:
         logger.error(f"Failed to fetch {url} after {retries} attempts. Last error: {last_error}")
         return None
 
-    def start(self, hash: str, port: int = None, host: str = None, context_length: int = None) -> bool:
+    def start(self, hashes: str, port: int = None, host: str = None, context_length: int = None) -> bool:
         """
-        Start the CryptoModels service in the background.
+        Start the CryptoModels service with multi-model support and on-demand loading.
 
         Args:
-            hash (str): Filecoin hash of the model to download and run.
+            hashes (str): Comma-separated string of model hashes. First hash is main model (loaded immediately),
+                         subsequent hashes are stored for on-demand loading. Single hash also supported.
             port (int): Port number for the CryptoModels service (default from config).
             host (str): Host address for the CryptoModels service (default from config).
             context_length (int): Context length for the model (default from config).
@@ -155,20 +191,31 @@ class CryptoModelsManager:
             bool: True if service started successfully, False otherwise.
 
         Raises:
-            ValueError: If hash is not provided when no model is running.
+            ValueError: If no hashes are provided.
             ModelNotFoundError: If model file is not found.
             ServiceStartError: If service fails to start.
         """
-        if not hash:
-            raise ValueError("Filecoin hash is required to start the service")
+        # Parse comma-separated hashes
+        if not hashes or not hashes.strip():
+            raise ValueError("At least one model hash is required to start the service")
+        
+        # Split by comma and clean whitespace
+        hashes_list = [h.strip() for h in hashes.split(',') if h.strip()]
+        
+        if not hashes_list:
+            raise ValueError("At least one model hash is required to start the service")
         
         # Use config defaults if not provided
         port = port or config.network.DEFAULT_PORT
         host = host or config.network.DEFAULT_HOST
         context_length = context_length or config.model.DEFAULT_CONTEXT_LENGTH
 
+        # Main model is the first hash (on_demand: false)
+        main_hash = hashes_list[0]
+        on_demand_hashes = hashes_list[1:] if len(hashes_list) > 1 else []
+
         # Acquire process lock to prevent concurrent starts
-        if not self._acquire_start_lock(hash, host, port):
+        if not self._acquire_start_lock(main_hash, host, port):
             return False
         
         # Track processes for cleanup on interruption
@@ -212,99 +259,106 @@ class CryptoModelsManager:
             # Check if the requested port is available before doing expensive operations
             if not self._check_port_availability(host, port):
                 raise ServiceStartError(f"Port {port} is already in use on {host}")
-                # Connection refused means port is free, which is what we want
 
             try:
-                logger.info(f"Starting CryptoModels service for model with hash: {hash}")
+                logger.info(f"Starting CryptoModels service with {len(hashes_list)} models")
+                logger.info(f"Main model hash: {main_hash}")
+                if on_demand_hashes:
+                    logger.info(f"On-demand models: {on_demand_hashes}")
                 
-                local_model_path = asyncio.run(download_model_from_filecoin_async(hash))
-                if not isinstance(local_model_path, str) or not local_model_path:
-                    raise ModelNotFoundError(f"Model file not found for hash: {hash}")
-                local_projector_path = local_model_path + "-projector"
+                # Download and prepare all models
+                models_info = {}
+                for i, hash_val in enumerate(hashes_list):
+                    logger.info(f"Downloading model {i+1}/{len(hashes_list)}: {hash_val}")
+                    local_model_path = asyncio.run(download_model_from_filecoin_async(hash_val))
+                    if not isinstance(local_model_path, str) or not local_model_path:
+                        raise ModelNotFoundError(f"Model file not found for hash: {hash_val}")
+                    
+                    if not os.path.exists(local_model_path):
+                        raise ModelNotFoundError(f"Model file not found at: {local_model_path}")
+
+                    # Load metadata for this model
+                    model_dir = os.path.dirname(local_model_path)
+                    metadata = self._load_or_fetch_metadata(hash_val, model_dir)
+                    
+                    models_info[hash_val] = {
+                        "local_model_path": local_model_path,
+                        "metadata": metadata,
+                        "on_demand": i > 0,  # First model is not on-demand
+                        "local_projector_path": local_model_path + "-projector"
+                    }
+
+                # Check if any existing model is running
                 model_running = self.get_running_model()
-                local_ai_port = self._get_free_port()
                 if model_running:
-                    if model_running == hash:
-                        logger.warning(f"Model '{hash}' already running on port {port}")
+                    if model_running == main_hash:
+                        logger.warning(f"Main model '{main_hash}' already running on port {port}")
                         return True
                     logger.info(f"Stopping existing model '{model_running}' on port {port}")
                     self.stop(force=True)
 
-                if not os.path.exists(local_model_path):
-                    raise ModelNotFoundError(f"Model file not found at: {local_model_path}")
-
-                # Optimized metadata and multimodal checking
-                model_dir = os.path.dirname(local_model_path)
-                metadata = self._load_or_fetch_metadata(hash, model_dir)
+                # Start the main model
+                main_model_info = models_info[main_hash]
+                local_model_path = main_model_info["local_model_path"]
+                metadata = main_model_info["metadata"]
+                
                 folder_name = metadata.get("folder_name", "")
                 family = metadata.get("family", None)
                 ram = metadata.get("ram", None)
                 task = metadata.get("task", "chat")
                 config_name = metadata.get("config_name", "flux-dev")
+                
+                local_ai_port = self._get_free_port()
+                
+                # Build command and service metadata for main model
                 if task == "embed":
                     running_ai_command = self._build_embed_command(local_model_path, local_ai_port, host)
                     service_metadata = self._create_service_metadata(
-                        hash, local_model_path, local_ai_port, port, context_length, task, False, None
+                        main_hash, local_model_path, local_ai_port, port, context_length, task, False, None
                     )
                 elif task == "image-generation":
-                    # require command `mlx-flux`
                     if not shutil.which("mlx-flux"):
                         raise CryptoAgentsServiceError("mlx-flux command not found in PATH")
                     running_ai_command = self._build_image_generation_command(local_model_path, local_ai_port, host, config_name)
                     service_metadata = self._create_service_metadata(
-                        hash, local_model_path, local_ai_port, port, context_length, task, False, None
+                        main_hash, local_model_path, local_ai_port, port, context_length, task, False, None
                     )
                 else:
                     is_multimodal, projector_path = self._check_multimodal_support(local_model_path)
                     
                     service_metadata = self._create_service_metadata(
-                        hash, local_model_path, local_ai_port, port, context_length, 
+                        main_hash, local_model_path, local_ai_port, port, context_length, 
                         task, is_multimodal, projector_path
                     )
 
-                    if "gemma-3n" in folder_name.lower():
-                        template_path, best_practice_path = self._get_family_template_and_practice("gemma-3n")
-                        running_ai_command = self._build_ai_command(
-                            local_model_path, local_ai_port, host, context_length, template_path
-                        )
-                    elif "gemma-3" in folder_name.lower():
-                        context_length = context_length // 2
-                        template_path, best_practice_path = self._get_family_template_and_practice("gemma-3")
-                        running_ai_command = self._build_ai_command(
-                            local_model_path, local_ai_port, host, context_length, template_path
-                        )
-                    elif "qwen25" in folder_name.lower():
-                        template_path, best_practice_path = self._get_family_template_and_practice("qwen25")
-                        running_ai_command = self._build_ai_command(
-                            local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
-                        )
-                    elif "qwen3" in folder_name.lower():
-                        template_path, best_practice_path = self._get_family_template_and_practice("qwen3")
-                        running_ai_command = self._build_ai_command(
-                            local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
-                        )
-                    elif "llama" in folder_name.lower():
-                        template_path, best_practice_path = self._get_family_template_and_practice("llama")
-                        running_ai_command = self._build_ai_command(
-                            local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
-                        )
-                    else:
-                        running_ai_command = self._build_ai_command(
-                            local_model_path, local_ai_port, host, context_length
-                        )
+                    # Build command based on model family
+                    running_ai_command = self._build_model_command(folder_name, local_model_path, local_ai_port, host, context_length)
 
                     if service_metadata["multimodal"]:
                         running_ai_command.extend([
-                            "--mmproj", str(local_projector_path)
+                            "--mmproj", str(projector_path)
                         ])
 
+                # Add main model metadata
                 service_metadata["family"] = family
                 service_metadata["folder_name"] = folder_name
                 service_metadata["ram"] = ram
-                
-                logger.info(f"Starting process: {' '.join(running_ai_command)}")
                 service_metadata["running_ai_command"] = running_ai_command
-                # Create log files for stdout and stderr for AI process
+                
+                # Add multi-model information
+                service_metadata["models"] = {}
+                for hash_val, model_info in models_info.items():
+                    service_metadata["models"][hash_val] = {
+                        "local_model_path": model_info["local_model_path"],
+                        "local_projector_path": model_info["local_projector_path"],
+                        "metadata": model_info["metadata"],
+                        "on_demand": model_info["on_demand"],
+                        "active": hash_val == main_hash
+                    }
+                
+                logger.info(f"Starting main model process: {' '.join(running_ai_command)}")
+                
+                # Create log files for AI process
                 ai_log_stderr = self.logs_dir / "ai.log"
                 try:
                     with open(ai_log_stderr, 'w') as stderr_log:
@@ -324,9 +378,9 @@ class CryptoModelsManager:
                     cleanup_processes()
                     return False
                 
-                logger.info(f"[CRYPTOMODELS] CryptoModels service started on port {local_ai_port}")
+                logger.info(f"[CRYPTOMODELS] Main model service started on port {local_ai_port}")
 
-                # start the FastAPI app in the background           
+                # Start the FastAPI app
                 uvicorn_command = [
                     "uvicorn",
                     "crypto_models.apis:app",
@@ -334,8 +388,8 @@ class CryptoModelsManager:
                     "--port", str(port),
                     "--log-level", "info"
                 ]
-                logger.info(f"Starting process: {' '.join(uvicorn_command)}")
-                # Create log files for stdout and stderr
+                logger.info(f"Starting API process: {' '.join(uvicorn_command)}")
+                
                 api_log_stderr = self.logs_dir / "api.log"
                 try:
                     with open(api_log_stderr, 'w') as stderr_log:
@@ -355,7 +409,9 @@ class CryptoModelsManager:
                     cleanup_processes()
                     return False
 
-                logger.info(f"Service started on port {port} for model: {hash}")
+                logger.info(f"Multi-model service started on port {port}")
+                if on_demand_hashes:
+                    logger.info(f"On-demand models ready: {on_demand_hashes}")
 
                 # Update service metadata with process IDs
                 service_metadata.update({
@@ -363,16 +419,15 @@ class CryptoModelsManager:
                     "app_pid": apis_process.pid
                 })
 
-                self._dump_running_service(service_metadata)    
+                self._dump_running_service(service_metadata)
 
-                # update service metadata to the FastAPI app
+                # Update service metadata to the FastAPI app
                 try:
                     update_url = f"http://localhost:{port}/update"
                     response = requests.post(update_url, json=service_metadata, timeout=10)
-                    response.raise_for_status()  # Raise exception for HTTP error responses
+                    response.raise_for_status()
                 except requests.exceptions.RequestException as e:
                     logger.error(f"Failed to update service metadata: {str(e)}")
-                    # Stop the partially started service
                     cleanup_processes()
                     return False
                 
@@ -465,7 +520,7 @@ class CryptoModelsManager:
             # Clean up metadata file
             metadata_cleaned = False
             if ai_stopped and api_stopped:
-                metadata_cleaned = self._cleanup_service_metadata(force=False)
+                metadata_cleaned = self._cleanup_service_metadata(force=force)
             else:
                 logger.warning("Keeping service metadata file since not all processes were successfully stopped")
             
@@ -517,6 +572,18 @@ class CryptoModelsManager:
                 status = process.status()
                 if status in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
                     logger.info(f"Process {process_name} (PID: {pid}) already terminated (status: {status})")
+                    # In force mode, also kill any remaining child processes
+                    if force:
+                        try:
+                            children = process.children(recursive=True)
+                            for child in children:
+                                try:
+                                    child.kill()
+                                    logger.debug(f"Force killed child process {child.pid}")
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    pass
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
                     return True
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 return True
@@ -859,12 +926,24 @@ class CryptoModelsManager:
                     pid = service_info.get("pid")
                     app_pid = service_info.get("app_pid")
                     
-                    # Check if any processes are still running
+                    # Check if any processes are still running (excluding zombies)
                     running_processes = []
                     if pid and psutil.pid_exists(pid):
-                        running_processes.append(f"AI server (PID: {pid})")
+                        try:
+                            process = psutil.Process(pid)
+                            status = process.status()
+                            if status not in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
+                                running_processes.append(f"AI server (PID: {pid})")
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
                     if app_pid and psutil.pid_exists(app_pid):
-                        running_processes.append(f"API server (PID: {app_pid})")
+                        try:
+                            process = psutil.Process(app_pid)
+                            status = process.status()
+                            if status not in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
+                                running_processes.append(f"API server (PID: {app_pid})")
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
                     
                     if running_processes:
                         logger.warning(f"Not cleaning up metadata - processes still running: {', '.join(running_processes)}")
@@ -1261,3 +1340,184 @@ class CryptoModelsManager:
             "--host", host
         ]
         return command
+
+    def _build_model_command(self, folder_name: str, local_model_path: str, local_ai_port: int, host: str, context_length: int) -> list:
+        """Build the appropriate command for a model based on its family."""
+        if "gemma-3n" in folder_name.lower():
+            template_path, best_practice_path = self._get_family_template_and_practice("gemma-3n")
+            return self._build_ai_command(
+                local_model_path, local_ai_port, host, context_length, template_path
+            )
+        elif "gemma-3" in folder_name.lower():
+            context_length = context_length // 2
+            template_path, best_practice_path = self._get_family_template_and_practice("gemma-3")
+            return self._build_ai_command(
+                local_model_path, local_ai_port, host, context_length, template_path
+            )
+        elif "qwen25" in folder_name.lower():
+            template_path, best_practice_path = self._get_family_template_and_practice("qwen25")
+            return self._build_ai_command(
+                local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
+            )
+        elif "qwen3" in folder_name.lower():
+            template_path, best_practice_path = self._get_family_template_and_practice("qwen3")
+            return self._build_ai_command(
+                local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
+            )
+        elif "llama" in folder_name.lower():
+            template_path, best_practice_path = self._get_family_template_and_practice("llama")
+            return self._build_ai_command(
+                local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
+            )
+        else:
+            return self._build_ai_command(
+                local_model_path, local_ai_port, host, context_length
+            )
+
+    async def switch_model(self, target_hash: str, service_start_timeout: int = 120) -> bool:
+        """
+        Switch to a different model that was registered during multi-model start.
+        This will offload the currently active model and load the requested model.
+
+        Args:
+            target_hash (str): Hash of the model to switch to.
+            service_start_timeout (int): Timeout for service startup in seconds.
+
+        Returns:
+            bool: True if model switch was successful, False otherwise.
+        """
+        try:
+            if not os.path.exists(self.msgpack_file):
+                logger.error("No service info found, cannot switch model")
+                return False
+
+            # Load service details
+            with open(self.msgpack_file, "rb") as f:
+                service_info = msgpack.load(f)
+
+            # Check if target model is available
+            models = service_info.get("models", {})
+            if target_hash not in models:
+                logger.error(f"Model {target_hash} not found in available models")
+                return False
+
+            # Check if model is already active
+            if models[target_hash].get("active", False):
+                logger.info(f"Model {target_hash} is already active")
+                return True
+
+            target_model = models[target_hash]
+            logger.info(f"Switching to model: {target_hash}")
+
+            # Kill current AI server process
+            if not await self.kill_ai_server():
+                logger.error("Failed to stop current AI server")
+                return False
+
+            # Build command for target model
+            local_model_path = target_model["local_model_path"]
+            metadata = target_model["metadata"]
+            folder_name = metadata.get("folder_name", "")
+            task = metadata.get("task", "chat")
+            config_name = metadata.get("config_name", "flux-dev")
+            
+            # Get current service configuration
+            local_ai_port = service_info["port"]
+            host = service_info.get("host", "localhost")
+            context_length = service_info.get("context_length", 32768)
+
+            # Build appropriate command based on task
+            if task == "embed":
+                running_ai_command = self._build_embed_command(local_model_path, local_ai_port, host)
+            elif task == "image-generation":
+                if not shutil.which("mlx-flux"):
+                    raise CryptoAgentsServiceError("mlx-flux command not found in PATH")
+                running_ai_command = self._build_image_generation_command(local_model_path, local_ai_port, host, config_name)
+            else:
+                running_ai_command = self._build_model_command(folder_name, local_model_path, local_ai_port, host, context_length)
+                
+                # Add multimodal support if available
+                is_multimodal, projector_path = self._check_multimodal_support(local_model_path)
+                if is_multimodal:
+                    running_ai_command.extend([
+                        "--mmproj", str(projector_path)
+                    ])
+
+            logger.info(f"Starting new model with command: {running_ai_command}")
+
+            # Start new AI server process
+            ai_log_stderr = self.logs_dir / "ai.log"
+            try:
+                with open(ai_log_stderr, 'w') as stderr_log:
+                    ai_process = subprocess.Popen(
+                        running_ai_command,
+                        stderr=stderr_log,
+                        preexec_fn=os.setsid
+                    )
+                logger.info(f"AI logs written to {ai_log_stderr}")
+            except Exception as e:
+                logger.error(f"Error starting new model: {str(e)}", exc_info=True)
+                return False
+
+            # Wait for the new process to start
+            if not wait_for_health(local_ai_port, timeout=service_start_timeout):
+                logger.error(f"New model failed to start within {service_start_timeout} seconds")
+                return False
+
+            # Update service metadata
+            service_info["hash"] = target_hash
+            service_info["pid"] = ai_process.pid
+            service_info["running_ai_command"] = running_ai_command
+            service_info["local_text_path"] = local_model_path
+            service_info["family"] = metadata.get("family", None)
+            service_info["folder_name"] = folder_name
+            service_info["ram"] = metadata.get("ram", None)
+            service_info["task"] = task
+            service_info["multimodal"] = target_model.get("multimodal", False)
+            service_info["local_projector_path"] = target_model.get("local_projector_path")
+
+            # Update active model flags
+            for hash_val in models:
+                models[hash_val]["active"] = (hash_val == target_hash)
+
+            # Save updated service info
+            with open(self.msgpack_file, "wb") as f:
+                msgpack.dump(service_info, f)
+
+            logger.info(f"Successfully switched to model {target_hash} with PID {ai_process.pid}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error switching model: {str(e)}", exc_info=True)
+            return False
+
+    def get_available_models(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get information about all available models in the current service.
+
+        Returns:
+            Dict[str, Dict[str, Any]]: Dictionary mapping model hashes to their information.
+        """
+        try:
+            service_info = self.get_service_info()
+            return service_info.get("models", {})
+        except Exception as e:
+            logger.error(f"Error getting available models: {str(e)}")
+            return {}
+
+    def get_active_model(self) -> Optional[str]:
+        """
+        Get the hash of the currently active model.
+
+        Returns:
+            Optional[str]: Hash of the active model, or None if no model is active.
+        """
+        try:
+            models = self.get_available_models()
+            for hash_val, model_info in models.items():
+                if model_info.get("active", False):
+                    return hash_val
+            return None
+        except Exception as e:
+            logger.error(f"Error getting active model: {str(e)}")
+            return None
