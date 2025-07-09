@@ -157,79 +157,11 @@ class ServiceHandler:
             )
     
     @staticmethod
-    async def _ensure_model_active(model_requested: str) -> bool:
-        """
-        Ensure the requested model is active. If not, switch to it.
-        
-        Args:
-            model_requested (str): The model hash requested by the client
-            
-        Returns:
-            bool: True if the model is active or was successfully switched to
-        """
-        try:
-            # Get current active model
-            active_model = crypto_models_manager.get_active_model()
-            
-            if active_model == model_requested:
-                return True
-                
-            # Check if the requested model is available
-            available_models = crypto_models_manager.get_available_models()
-            if model_requested not in available_models:
-                logger.error(f"Requested model {model_requested} not found in available models")
-                return False
-                
-            # Switch to the requested model
-            logger.info(f"Switching from {active_model} to {model_requested}")
-            success = await crypto_models_manager.switch_model(model_requested)
-            
-            if success:
-                # Update app state with new service info
-                try:
-                    service_info = crypto_models_manager.get_service_info()
-                    app.state.service_info = service_info
-                    logger.info(f"Successfully switched to model {model_requested}")
-                    return True
-                except Exception as e:
-                    logger.error(f"Error updating service info after model switch: {str(e)}")
-                    return False
-            else:
-                logger.error(f"Failed to switch to model {model_requested}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error ensuring model active: {str(e)}", exc_info=True)
-            return False
-
-    @staticmethod
     async def generate_text_response(request: ChatCompletionRequest, service_info: Optional[Dict[str, Any]] = None):
         """Generate a response for chat completion requests, supporting both streaming and non-streaming."""
         # Use provided service_info or get it if not provided
         if service_info is None:
             service_info = get_service_info()
-        
-        # Check if model switching is needed
-        if hasattr(request, 'model') and request.model:
-            # Check if the model is already active to avoid unnecessary switching
-            models = service_info.get("models", {})
-            if request.model in models:
-                model_info = models[request.model]
-                if not model_info.get("active", False):
-                    # Model exists but not active, switch to it
-                    if not await ServiceHandler._ensure_model_active(request.model):
-                        raise HTTPException(
-                            status_code=400, 
-                            detail=f"Model {request.model} is not available or failed to switch"
-                        )
-                    # Refresh service info after switching
-                    service_info = get_service_info()
-            else:
-                # Model not found in models dictionary
-                raise HTTPException(
-                    status_code=400,
-                    detail="Requested model is not running"
-                )
         
         port = get_service_port()
         
@@ -265,26 +197,6 @@ class ServiceHandler:
         if service_info is None:
             service_info = get_service_info()
         
-        # Check if model switching is needed
-        if hasattr(request, 'model') and request.model:
-            # Check if the model is already active to avoid unnecessary switching
-            models = service_info.get("models", {})
-            if request.model in models:
-                model_info = models[request.model]
-                if not model_info.get("active", False):
-                    # Model exists but not active, switch to it
-                    if not await ServiceHandler._ensure_model_active(request.model):
-                        raise HTTPException(
-                            status_code=400, 
-                            detail=f"Model {request.model} is not available or failed to switch"
-                        )
-            else:
-                # Model not found in models dictionary
-                raise HTTPException(
-                    status_code=400,
-                    detail="Requested model is not running"
-                )
-        
         port = get_service_port()
         request_dict = convert_request_to_dict(request)
         response_data = await ServiceHandler._make_api_call(port, "/v1/embeddings", request_dict)
@@ -300,26 +212,6 @@ class ServiceHandler:
         # Use provided service_info or get it if not provided
         if service_info is None:
             service_info = get_service_info()
-        
-        # Check if model switching is needed
-        if hasattr(request, 'model') and request.model:
-            # Check if the model is already active to avoid unnecessary switching
-            models = service_info.get("models", {})
-            if request.model in models:
-                model_info = models[request.model]
-                if not model_info.get("active", False):
-                    # Model exists but not active, switch to it
-                    if not await ServiceHandler._ensure_model_active(request.model):
-                        raise HTTPException(
-                            status_code=400, 
-                            detail=f"Model {request.model} is not available or failed to switch"
-                        )
-            else:
-                # Model not found in models dictionary
-                raise HTTPException(
-                    status_code=400,
-                    detail="Requested model is not running"
-                )
         
         port = get_service_port()
         request_dict = convert_request_to_dict(request)
@@ -504,6 +396,78 @@ class RequestProcessor:
     }
     
     @staticmethod
+    async def _ensure_model_active_in_queue(model_requested: str, request_id: str) -> bool:
+        """
+        Ensure the requested model is active within the queue processing context.
+        This method is called within the processing lock to ensure atomic model switching.
+        
+        Args:
+            model_requested (str): The model hash requested by the client
+            request_id (str): The request ID for logging
+            
+        Returns:
+            bool: True if the model is active or was successfully switched to
+        """
+        try:
+            # Get current service info
+            service_info = get_service_info()
+            models = service_info.get("models", {})
+            
+            # Check if the requested model exists
+            if model_requested not in models:
+                logger.error(f"[{request_id}] Requested model {model_requested} not found in available models")
+                return False
+            
+            model_info = models[model_requested]
+            
+            # Check if model is already active
+            if model_info.get("active", False):
+                logger.debug(f"[{request_id}] Model {model_requested} is already active")
+                return True
+                
+            # Model exists but not active, switch to it
+            logger.info(f"[{request_id}] Switching to model {model_requested}")
+            switch_start_time = time.time()
+            
+            # Get current active model for logging
+            active_model = crypto_models_manager.get_active_model()
+            
+            # Perform the model switch
+            success = await crypto_models_manager.switch_model(model_requested)
+            
+            switch_duration = time.time() - switch_start_time
+            
+            if success:
+                logger.info(f"[{request_id}] Successfully switched from {active_model} to {model_requested} "
+                           f"(switch time: {switch_duration:.2f}s)")
+                
+                # Update app state with new service info
+                try:
+                    updated_service_info = crypto_models_manager.get_service_info()
+                    app.state.service_info = updated_service_info
+                    
+                    # Verify the switch was successful
+                    updated_models = updated_service_info.get("models", {})
+                    if model_requested in updated_models and updated_models[model_requested].get("active", False):
+                        logger.debug(f"[{request_id}] Model switch verification successful")
+                        return True
+                    else:
+                        logger.error(f"[{request_id}] Model switch verification failed - model not active after switch")
+                        return False
+                        
+                except Exception as e:
+                    logger.error(f"[{request_id}] Error updating service info after model switch: {str(e)}")
+                    return False
+            else:
+                logger.error(f"[{request_id}] Failed to switch to model {model_requested} "
+                           f"(attempted for {switch_duration:.2f}s)")
+                return False
+                
+        except Exception as e:
+            logger.error(f"[{request_id}] Error ensuring model active: {str(e)}", exc_info=True)
+            return False
+    
+    @staticmethod
     async def _ensure_server_running(request_id: str) -> bool:
         """
         Optimized server state checking and reloading with better error handling.
@@ -604,7 +568,22 @@ class RequestProcessor:
         if endpoint in RequestProcessor.MODEL_ENDPOINTS:
             model_cls, handler = RequestProcessor.MODEL_ENDPOINTS[endpoint]
             request_obj = model_cls(**request_data)
-            # Pass service_info to avoid redundant lookups
+            
+            # Ensure model is active before processing (for direct requests)
+            if hasattr(request_obj, 'model') and request_obj.model:
+                logger.debug(f"[{request_id}] Ensuring model {request_obj.model} is active for direct request")
+                
+                # Use the same centralized model switching logic as the queue
+                if not await RequestProcessor._ensure_model_active_in_queue(request_obj.model, request_id):
+                    error_msg = f"Model {request_obj.model} is not available or failed to switch"
+                    logger.error(f"[{request_id}] {error_msg}")
+                    raise HTTPException(status_code=400, detail=error_msg)
+                
+                # Refresh service info after potential model switch
+                service_info = get_service_info()
+                logger.debug(f"[{request_id}] Model {request_obj.model} confirmed active for direct request")
+            
+            # Process the request with the updated service info
             result = await handler(request_obj, service_info)
             
             process_time = time.time() - start_time
@@ -632,6 +611,7 @@ class RequestProcessor:
                 logger.info(f"[{request_id}] Processing request from queue for endpoint {endpoint} "
                            f"(wait time: {wait_time:.2f}s, queue size: {queue_size}, processed: {processed_count})")
                 
+                # Process the request within the lock to ensure sequential execution
                 async with RequestProcessor.processing_lock:
                     processing_start = time.time()
                     
@@ -639,7 +619,22 @@ class RequestProcessor:
                         model_cls, handler = RequestProcessor.MODEL_ENDPOINTS[endpoint]
                         try:
                             request_obj = model_cls(**request_data)
-                            # Pass service_info to avoid redundant lookups
+                            
+                            # Ensure model is active before processing (within the lock)
+                            if hasattr(request_obj, 'model') and request_obj.model:
+                                logger.debug(f"[{request_id}] Ensuring model {request_obj.model} is active")
+                                
+                                if not await RequestProcessor._ensure_model_active_in_queue(request_obj.model, request_id):
+                                    error_msg = f"Model {request_obj.model} is not available or failed to switch"
+                                    logger.error(f"[{request_id}] {error_msg}")
+                                    future.set_exception(HTTPException(status_code=400, detail=error_msg))
+                                    continue
+                                
+                                # Refresh service info after potential model switch
+                                service_info = get_service_info()
+                                logger.debug(f"[{request_id}] Model {request_obj.model} confirmed active, proceeding with request")
+                            
+                            # Process the request with the updated service info
                             result = await handler(request_obj, service_info)
                             future.set_result(result)
                             
