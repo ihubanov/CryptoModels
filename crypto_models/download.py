@@ -143,8 +143,8 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
                         file_size_bytes = int(file_size_mb * 1024 * 1024)
                         # Add to expected size
                         await progress_tracker.add_file_size(file_size_bytes)
-                        # Add to downloaded size (since cached files are effectively "downloaded")
-                        await progress_tracker.update_progress_batched(file_size_bytes)
+                        # Add to total downloaded (but not actually downloaded - this is cached)
+                        await progress_tracker.add_cached_file_size(file_size_bytes)
                         logger.info(f"Added cached file size to progress: {file_size_mb} MB")
                 
                 return file_path, None
@@ -276,7 +276,8 @@ class ProgressTracker:
     def __init__(self, total_files: int, filecoin_hash: str):
         self.total_files = total_files
         self.filecoin_hash = filecoin_hash
-        self.total_bytes_downloaded = 0
+        self.total_bytes_downloaded = 0  # Total bytes (cached + downloaded)
+        self.total_bytes_actually_downloaded = 0  # Only bytes actually downloaded from network
         self.total_bytes_expected = 0
         self.completed_files = 0
         self.start_time = time.time()
@@ -299,6 +300,12 @@ class ProgressTracker:
         async with self.lock:
             self.total_bytes_expected += file_size
 
+    async def add_cached_file_size(self, file_size: int):
+        """Add cached file size to total downloaded (but not actually downloaded)"""
+        async with self.lock:
+            self.total_bytes_downloaded += file_size
+            # Don't add to total_bytes_actually_downloaded since this wasn't downloaded
+
     async def update_progress_batched(self, bytes_downloaded: int):
         """Update progress using batched approach to reduce lock contention"""
         # Use a separate lock for pending bytes to minimize contention
@@ -313,6 +320,7 @@ class ProgressTracker:
                 # Quick update to main counter
                 async with self.lock:
                     self.total_bytes_downloaded += pending_to_process
+                    self.total_bytes_actually_downloaded += pending_to_process
 
     # Compatibility method for backward compatibility
     async def update_progress(self, bytes_downloaded: int):
@@ -333,6 +341,7 @@ class ProgressTracker:
 
                         async with self.lock:
                             self.total_bytes_downloaded += pending_to_process
+                            self.total_bytes_actually_downloaded += pending_to_process
 
                 # Log progress every 2 seconds
                 current_time = time.time()
@@ -340,7 +349,8 @@ class ProgressTracker:
                     async with self.lock:
                         self.last_log_time = current_time
                         elapsed_time = current_time - self.start_time
-                        speed_mbps = (self.total_bytes_downloaded / (
+                        # Use only actually downloaded bytes for speed calculation
+                        speed_mbps = (self.total_bytes_actually_downloaded / (
                                 1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
 
                         # Calculate percentage based on bytes downloaded vs total expected
@@ -367,7 +377,8 @@ class ProgressTracker:
         async with self.lock:
             self.completed_files += 1
             elapsed_time = time.time() - self.start_time
-            speed_mbps = (self.total_bytes_downloaded / (1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
+            # Use only actually downloaded bytes for speed calculation
+            speed_mbps = (self.total_bytes_actually_downloaded / (1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
 
             # Calculate percentage based on bytes downloaded vs total expected
             if self.total_bytes_expected > 0:
