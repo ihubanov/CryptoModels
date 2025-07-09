@@ -7,6 +7,8 @@ import psutil
 import time
 from pathlib import Path
 from crypto_models.utils import compute_file_hash, async_extract_zip, async_move, async_rmtree
+from loguru import logger
+import shutil
 
 # Constants
 GATEWAY_URLS = [
@@ -35,6 +37,9 @@ if len(GATEWAY_URLS) == 1:
 else:
     MAX_ATTEMPTS = len(GATEWAY_URLS)
 POSTFIX_MODEL_PATH = ".gguf"
+
+# Extraction buffer factor for disk space estimation
+EXTRACTION_BUFFER_FACTOR = 2.5  # 2.5x the total download size
 
 # Performance optimizations (dynamic based on system RAM and CPU)
 total_ram_gb = psutil.virtual_memory().total / (1024 ** 3)
@@ -66,6 +71,9 @@ if psutil is not None:
 MAX_CONCURRENT_DOWNLOADS = min(32, cpu_limit, ram_limit)
 CONNECTION_POOL_SIZE = 32  # Increased connection pool
 
+# Add file logger for download operations
+logger.add("download.log", rotation="10 MB", retention="10 days", encoding="utf-8")
+
 
 def check_downloaded_model(filecoin_hash: str, output_dir: Path = DEFAULT_OUTPUT_DIR) -> bool:
     """
@@ -86,12 +94,12 @@ def check_downloaded_model(filecoin_hash: str, output_dir: Path = DEFAULT_OUTPUT
         is_downloaded = local_path.exists()
 
         if is_downloaded:
-            print(f"Model already exists at: {local_path}")
+            logger.info(f"Model already exists at: {local_path}")
 
         return is_downloaded
 
     except requests.RequestException as e:
-        print(f"Failed to fetch model metadata: {e}")
+        logger.error(f"Failed to fetch model metadata: {e}")
         return False
 
 
@@ -125,13 +133,13 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
         try:
             computed_hash = compute_file_hash(file_path)
             if computed_hash == expected_hash:
-                print(f"File {cid} already exists with correct hash.")
+                logger.info(f"File {cid} already exists with correct hash.")
                 return file_path, None
             else:
-                print(f"File {cid} exists but hash mismatch. Retrying...")
+                logger.warning(f"File {cid} exists but hash mismatch. Retrying...")
                 file_path.unlink(missing_ok=True)
         except Exception as e:
-            print(f"Error checking existing file {cid}: {e}")
+            logger.error(f"Error checking existing file {cid}: {e}")
             file_path.unlink(missing_ok=True)
 
     # Clean up any existing temp file
@@ -146,7 +154,7 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
         gateway = gateways_order[attempts % len(gateways_order)]
         url = f"{gateway}{cid}"
         # Print which URL will be used for downloading
-        print(f"[download_single_file_async] Attempt {attempts+1}/{max_attempts}: Downloading from URL: {url} ---> {file_path}")
+        logger.info(f"[download_single_file_async] Attempt {attempts+1}/{max_attempts}: Downloading from URL: {url} ---> {file_path}")
         # Update the current URL and file name in the progress tracker
         if progress_tracker is not None:
             progress_tracker.current_url = url
@@ -210,14 +218,14 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
                         if file_path.exists():
                             file_path.unlink()
                         temp_path.rename(file_path)
-                        print(f"File {cid} downloaded and verified successfully.")
+                        logger.info(f"File {cid} downloaded and verified successfully.")
                         return file_path, None
                     else:
-                        print(f"Hash mismatch for {cid}. Expected {expected_hash}, got {computed_hash}.")
+                        logger.error(f"Hash mismatch for {cid}. Expected {expected_hash}, got {computed_hash}.")
                         # Clean up temp file on hash mismatch
                         temp_path.unlink(missing_ok=True)
                 else:
-                    print(f"Failed to download {cid}. Status: {response.status}")
+                    logger.warning(f"Failed to download {cid}. Status: {response.status}")
                     # For certain status codes, we might want to fail faster
                     if response.status in (404, 403, 401):
                         wait_time = SLEEP_TIME
@@ -225,25 +233,25 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
                         wait_time = min(SLEEP_TIME * (2 ** attempts), 300)
 
         except asyncio.TimeoutError:
-            print(f"Timeout downloading {cid}")
+            logger.warning(f"Timeout downloading {cid}")
             # Clean up temp file on timeout
             temp_path.unlink(missing_ok=True)
             wait_time = min(SLEEP_TIME * (2 ** attempts), 300)
         except aiohttp.ClientError as e:
-            print(f"Client error downloading {cid}: {e}")
+            logger.error(f"Client error downloading {cid}: {e}")
             temp_path.unlink(missing_ok=True)
             wait_time = min(SLEEP_TIME * (2 ** attempts), 300)
         except Exception as e:
-            print(f"Exception downloading {cid}: {e}")
+            logger.error(f"Exception downloading {cid}: {e}")
             temp_path.unlink(missing_ok=True)
             wait_time = min(SLEEP_TIME * (2 ** attempts), 300)
 
         attempts += 1
         if attempts < max_attempts:
-            print(f"Retrying in {wait_time}s (Attempt {attempts + 1}/{max_attempts})")
+            logger.info(f"Retrying in {wait_time}s (Attempt {attempts + 1}/{max_attempts})")
             await asyncio.sleep(wait_time)
         else:
-            print(f"Failed to download {cid} after {max_attempts} attempts.")
+            logger.error(f"Failed to download {cid} after {max_attempts} attempts.")
             # Clean up temp file on final failure
             temp_path.unlink(missing_ok=True)
             return None, f"Failed to download {cid} after {max_attempts} attempts."
@@ -330,7 +338,7 @@ class ProgressTracker:
                             # Fall back to file-based progress if no total size available
                             percentage = (self.completed_files / self.total_files) * 100
 
-                        print(
+                        logger.info(
                             f"[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL] "
                             f"--progress {percentage:.1f}% ({self.completed_files}/{self.total_files} files) "
                             f"--speed {speed_mbps:.2f} MB/s "
@@ -340,7 +348,7 @@ class ProgressTracker:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                print(f"Error in progress update task: {e}")
+                logger.error(f"Error in progress update task: {e}")
 
     async def complete_file(self):
         """Mark a file as completed"""
@@ -357,7 +365,7 @@ class ProgressTracker:
                 # Fall back to file-based progress if no total size available
                 percentage = (self.completed_files / self.total_files) * 100
 
-            print(
+            logger.info(
                 f"[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL] --progress {percentage:.1f}% ({self.completed_files}/{self.total_files} files) --speed {speed_mbps:.2f} MB/s")
 
     async def cleanup(self):
@@ -410,7 +418,7 @@ async def download_files_from_lighthouse_async(data: dict) -> list:
     connector = aiohttp.TCPConnector(limit=CONNECTION_POOL_SIZE, ssl=False)
     timeout = aiohttp.ClientTimeout(total=None, connect=120, sock_connect=120, sock_read=300)
 
-    print(f"Downloading {total_files} files with max {max_concurrent_downloads} concurrent downloads")
+    logger.info(f"Downloading {total_files} files with max {max_concurrent_downloads} concurrent downloads")
 
     async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
         # Create tasks
@@ -432,9 +440,9 @@ async def download_files_from_lighthouse_async(data: dict) -> list:
                     await progress_tracker.complete_file()
                 else:
                     failed_downloads.append(error)
-                    print(f"Download failed: {error}")
+                    logger.warning(f"Download failed: {error}")
             except Exception as e:
-                print(f"Unexpected error in download task: {e}")
+                logger.error(f"Unexpected error in download task: {e}")
                 failed_downloads.append(str(e))
 
         # Clean up progress tracker
@@ -442,16 +450,16 @@ async def download_files_from_lighthouse_async(data: dict) -> list:
 
         # Check if all downloads were successful
         if len(successful_downloads) == num_of_files:
-            print(f"All {num_of_files} files downloaded successfully.")
+            logger.info(f"All {num_of_files} files downloaded successfully.")
             return successful_downloads
         else:
-            print(f"Downloaded {len(successful_downloads)} out of {num_of_files} files.")
+            logger.warning(f"Downloaded {len(successful_downloads)} out of {num_of_files} files.")
             if failed_downloads:
-                print(f"Failed downloads ({len(failed_downloads)}):")
+                logger.warning(f"Failed downloads ({len(failed_downloads)}):")
                 for i, error in enumerate(failed_downloads[:5], 1):
-                    print(f"  {i}. {error}")
+                    logger.warning(f"  {i}. {error}")
                 if len(failed_downloads) > 5:
-                    print(f"  ... and {len(failed_downloads) - 5} more errors")
+                    logger.warning(f"  ... and {len(failed_downloads) - 5} more errors")
             return successful_downloads if successful_downloads else []
 
 
@@ -464,21 +472,21 @@ async def pick_fastest_gateway(filecoin_hash: str, gateways: list[str], timeout:
         gateways (list[str]): List of gateway URLs.
         timeout (int): Timeout in seconds for each speed test.
     Returns:
-        str: The fastest gateway URL.
+        str: The fastest gateway URL, or the first in the list if all fail.
     """
     import aiohttp
     import asyncio
 
     # If there is only one gateway, return it immediately (no need to check)
     if len(gateways) == 1:
-        print(f"[pick_fastest_gateway] ✅ Only one gateway provided, returning: {gateways[0]}")
+        logger.info(f"[pick_fastest_gateway] ✅ Only one gateway provided, returning: {gateways[0]}")
         return gateways[0]
 
-    print(f"[pick_fastest_gateway] 🚦 Checking speed for {len(gateways)} gateways with hash: {filecoin_hash}")
+    logger.info(f"[pick_fastest_gateway] 🚦 Checking speed for {len(gateways)} gateways with hash: {filecoin_hash}")
 
     async def check_gateway(gateway: str) -> tuple[str, float]:
         url = f"{gateway}{filecoin_hash}"
-        print(f"[pick_fastest_gateway] 🔍 Testing gateway: {url}")
+        logger.info(f"[pick_fastest_gateway] 🔍 Testing gateway: {url}")
         start = asyncio.get_event_loop().time()
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
@@ -487,27 +495,45 @@ async def pick_fastest_gateway(filecoin_hash: str, gateways: list[str], timeout:
                 async with session.get(url, headers=headers) as resp:
                     if resp.status in (200, 206):  # 206 = Partial Content
                         elapsed = asyncio.get_event_loop().time() - start
-                        print(f"[pick_fastest_gateway] ⏱️ Gateway {gateway} responded in {elapsed:.3f} seconds.")
+                        logger.info(f"[pick_fastest_gateway] ⏱️ Gateway {gateway} responded in {elapsed:.3f} seconds.")
                         return gateway, elapsed
                     else:
-                        print(f"[pick_fastest_gateway] ⚠️ Gateway {gateway} returned status {resp.status}.")
+                        logger.warning(f"[pick_fastest_gateway] ⚠️ Gateway {gateway} returned status {resp.status}.")
         except Exception as e:
-            print(f"[pick_fastest_gateway] ❌ Error with gateway {gateway}: {e}")
+            logger.error(f"[pick_fastest_gateway] ❌ Error with gateway {gateway}: {e}")
         # Return infinity if the gateway is not available or too slow
         return gateway, float('inf')
 
     # Run all gateway checks concurrently
     tasks = [check_gateway(gw) for gw in gateways]
     results = await asyncio.gather(*tasks)
-    # Select the gateway with the lowest response time
-    for gw, t in results:
-        if t != float('inf'):
-            print(f"[pick_fastest_gateway] ✅ Gateway {gw} time: {t:.3f} seconds.")
-        else:
-            print(f"[pick_fastest_gateway] ❌ Gateway {gw} is not available.")
-    fastest = min(results, key=lambda x: x[1])
-    print(f"[pick_fastest_gateway] 🚀 Fastest gateway selected: {fastest[0]} (time: {fastest[1]:.3f} seconds)\n")
-    return fastest[0]
+    # Filter for gateways that responded successfully
+    valid_results = [r for r in results if r[1] != float('inf')]
+    if valid_results:
+        fastest = min(valid_results, key=lambda x: x[1])
+        logger.info(f"[pick_fastest_gateway] 🚀 Fastest gateway selected: {fastest[0]} (time: {fastest[1]:.3f} seconds)\n")
+        return fastest[0]
+    else:
+        logger.warning(f"[pick_fastest_gateway] ⚠️ All gateways timed out or failed. Using the first gateway as fallback: {gateways[0]}")
+        return gateways[0]
+
+
+# Helper function to check disk space
+
+def check_disk_space(path: Path, required_bytes: int = 2 * 1024 * 1024 * 1024) -> None:
+    """
+    Check if there is enough free disk space at the given path.
+    Args:
+        path (Path): Directory to check.
+        required_bytes (int): Minimum free space required in bytes (default: 2GB).
+    Raises:
+        Exception: If not enough disk space, with required and available GB in message.
+    """
+    total, used, free = shutil.disk_usage(str(path))
+    if free < required_bytes:
+        required_gb = required_bytes / (1024 ** 3)
+        free_gb = free / (1024 ** 3)
+        raise Exception(f"Not enough disk space: required {required_gb:.2f} GB, available {free_gb:.2f} GB")
 
 
 async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Path = DEFAULT_OUTPUT_DIR) -> str | None:
@@ -515,11 +541,6 @@ async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Pat
     Asynchronously download a model from Filecoin using its IPFS hash.
     This function will select the fastest gateway from a list of gateways by testing their response times,
     and use the fastest one to download the model.
-    Args:
-        filecoin_hash (str): IPFS hash of the model metadata.
-        output_dir (Path): Directory to save the downloaded model.
-    Returns:
-        str | None: Path to the downloaded model if successful, None otherwise.
     """
     # Ensure output directory exists
     output_dir.mkdir(exist_ok=True, parents=True)
@@ -528,13 +549,13 @@ async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Pat
 
     # Check if model is already downloaded
     if check_downloaded_model(filecoin_hash, output_dir):
-        print(f"Using existing model at {local_path_str}")
+        logger.info(f"Using existing model at {local_path_str}")
         return local_path_str
 
     # Select the fastest gateway before downloading
-    print("Checking gateway speeds...")
+    logger.info("Checking gateway speeds...")
     best_gateway = await pick_fastest_gateway(filecoin_hash, GATEWAY_URLS)
-    print(f"Using fastest gateway: {best_gateway}")
+    logger.info(f"Using fastest gateway: {best_gateway}")
     input_link = f"{best_gateway}{filecoin_hash}"
 
     # Set up session parameters with optimized limits
@@ -550,14 +571,14 @@ async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Pat
             backoff = min(SLEEP_TIME * (2 ** (attempt - 1)), 300)
 
             try:
-                print(f"Downloading model metadata (attempt {attempt}/{MAX_ATTEMPTS})")
+                logger.info(f"Downloading model metadata (attempt {attempt}/{MAX_ATTEMPTS})")
 
                 async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
                     async with session.get(input_link) as response:
                         if response.status != 200:
-                            print(f"Failed to fetch metadata: HTTP {response.status}")
+                            logger.error(f"Failed to fetch metadata: HTTP {response.status}")
                             if attempt < MAX_ATTEMPTS:
-                                print(f"Retrying in {backoff} seconds")
+                                logger.warning(f"Retrying in {backoff} seconds")
                                 await asyncio.sleep(backoff)
                                 continue
                             else:
@@ -572,12 +593,20 @@ async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Pat
                         # Create folder if it doesn't exist
                         folder_path.mkdir(exist_ok=True, parents=True)
 
+                # --- Disk space check after metadata is fetched ---
+                if "files" in data:
+                    total_size_mb = sum(f.get("size_mb", 512) for f in data["files"])
+                    # Use buffer factor, convert MB to bytes
+                    required_space_bytes = int(total_size_mb * EXTRACTION_BUFFER_FACTOR * 1024 * 1024)
+                    check_disk_space(output_dir, required_bytes=required_space_bytes)
+                # --- End disk space check ---
+
                 # Download files
                 paths = await download_files_from_lighthouse_async(data)
                 if not paths:
-                    print("Failed to download model files")
+                    logger.error("Failed to download model files")
                     if attempt < MAX_ATTEMPTS:
-                        print(f"Retrying in {backoff} seconds")
+                        logger.warning(f"Retrying in {backoff} seconds")
                         await asyncio.sleep(backoff)
                         continue
                     else:
@@ -585,12 +614,15 @@ async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Pat
 
                 # Extract files
                 try:
-                    print("Extracting downloaded files...")
+                    logger.info("Extracting downloaded files...")
                     await async_extract_zip(paths)
                 except Exception as e:
-                    print(f"Failed to extract files: {e}")
+                    logger.error(f"Failed to extract files: {e}")
+                    # Do not retry if disk full
+                    if "Not enough disk space" in str(e):
+                        raise Exception(f"Failed to extract files due to insufficient disk space: {e}")
                     if attempt < MAX_ATTEMPTS:
-                        print(f"Retrying in {backoff} seconds")
+                        logger.warning(f"Retrying in {backoff} seconds")
                         await asyncio.sleep(backoff)
                         continue
                     else:
@@ -600,7 +632,7 @@ async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Pat
                 try:
                     source_text_path = folder_path / folder_name
                     source_text_path = source_text_path.absolute()
-                    print(f"Moving model to {local_path_str}")
+                    logger.info(f"Moving model to {local_path_str}")
 
                     if source_text_path.exists():
                         # Handle projector path for multimodal models
@@ -609,7 +641,7 @@ async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Pat
 
                         if source_projector_path.exists():
                             projector_dest = local_path_str + "-projector"
-                            print(f"Moving projector to {projector_dest}")
+                            logger.info(f"Moving projector to {projector_dest}")
                             await async_move(str(source_projector_path), projector_dest)
 
                         # Move model to final location
@@ -617,49 +649,51 @@ async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Pat
 
                         # Clean up folder after successful move
                         if folder_path.exists():
-                            print(f"Cleaning up temporary folder {folder_path}")
+                            logger.info(f"Cleaning up temporary folder {folder_path}")
                             await async_rmtree(str(folder_path))
 
-                        print(f"Model download complete: {local_path_str}")
+                        logger.info(f"Model download complete: {local_path_str}")
                         return local_path_str
                     else:
-                        print(f"Model not found at {source_text_path}")
+                        logger.error(f"Model not found at {source_text_path}")
                         if attempt < MAX_ATTEMPTS:
-                            print(f"Retrying in {backoff} seconds")
+                            logger.warning(f"Retrying in {backoff} seconds")
                             await asyncio.sleep(backoff)
                             continue
                         else:
                             raise Exception(f"Model not found at {source_text_path} after all attempts")
                 except Exception as e:
-                    print(f"Failed to move model: {e}")
+                    logger.error(f"Failed to move model: {e}")
                     if attempt < MAX_ATTEMPTS:
-                        print(f"Retrying in {backoff} seconds")
+                        logger.warning(f"Retrying in {backoff} seconds")
                         await asyncio.sleep(backoff)
                         continue
                     else:
                         raise Exception(f"Failed to move model after {MAX_ATTEMPTS} attempts: {e}")
 
             except aiohttp.ClientError as e:
-                print(f"HTTP error on attempt {attempt}: {e}")
+                logger.error(f"HTTP error on attempt {attempt}: {e}")
                 if attempt < MAX_ATTEMPTS:
-                    print(f"Retrying in {backoff} seconds")
+                    logger.warning(f"Retrying in {backoff} seconds")
                     await asyncio.sleep(backoff)
                     continue
                 else:
                     raise Exception(f"HTTP error after {MAX_ATTEMPTS} attempts: {e}")
             except Exception as e:
-                print(f"Download attempt {attempt} failed: {e}")
+                logger.error(f"Download attempt {attempt} failed: {e}")
+                if "Not enough disk space" in str(e):
+                    raise Exception(f"Failed to extract files due to insufficient disk space: {e}")
                 if attempt < MAX_ATTEMPTS:
-                    print(f"Retrying in {backoff} seconds")
+                    logger.warning(f"Retrying in {backoff} seconds")
                     await asyncio.sleep(backoff)
                     continue
                 else:
                     raise Exception(f"Download failed after {MAX_ATTEMPTS} attempts: {e}")
 
     except Exception as e:
-        print(f"Download failed: {e}")
+        logger.error(f"Download failed: {e}")
 
-    print("All download attempts failed")
+    logger.error("All download attempts failed")
     return None
 
 
@@ -675,6 +709,6 @@ if __name__ == "__main__":
         filecoin_hash = "bafkreiclwlxc56ppozipczuwkmgnlrxrerrvaubc5uhvfs3g2hp3lftrwm"
 
     # Run the async download function and print the result
-    print(f"Testing download_model_from_filecoin_async with hash: {filecoin_hash}")
+    logger.info(f"Testing download_model_from_filecoin_async with hash: {filecoin_hash}")
     result = asyncio.run(download_model_from_filecoin_async(filecoin_hash))
-    print("Download result:", result)
+    logger.info("Download result:", result)
