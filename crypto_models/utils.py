@@ -32,6 +32,27 @@ def compress_folder(model_folder: str, zip_chunk_size: int = 128, threads: int =
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise RuntimeError(f"Compression failed: {e}")
 
+
+def run_with_retries(cmd: str, max_retries: int = 3, delay: int = 2):
+    """
+    Run a shell command with retries. Raise error if all attempts fail.
+    """
+    for attempt in range(1, max_retries + 1):
+        try:
+            print(f"[extract_zip] Attempt {attempt}/{max_retries}: {cmd}")
+            subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True)
+            print(f"[extract_zip] Command succeeded: {cmd}")
+            return
+        except subprocess.CalledProcessError as e:
+            print(f"[extract_zip] Command failed (attempt {attempt}): {e}")
+            if attempt < max_retries:
+                print(f"[extract_zip] Retrying in {delay} seconds...")
+                time.sleep(delay)
+            else:
+                print(f"[extract_zip] All {max_retries} attempts failed for: {cmd}")
+                raise
+
+
 def extract_zip(paths: List[Path]):
     # Use the absolute path only once.
     target_abs = Path.cwd().absolute()
@@ -52,13 +73,32 @@ def extract_zip(paths: List[Path]):
     print(f"Extracting files: {paths_str}")
 
     cpus = os.cpu_count() or 1
-    extract_command = (
-        f"{cat_path} {paths_str} | "
-        f"{pigz_cmd} -p {cpus} -d | "
-        f"{tar_cmd} -xf - -C {target_dir}"
-    )
-    subprocess.run(extract_command, shell=True, check=True, capture_output=True, text=True)
-    print(f"{extract_command} completed successfully")
+
+    # Create temporary files for each step
+    temp_gz = Path(tempfile.mktemp(suffix=".gz"))
+    temp_tar = Path(tempfile.mktemp(suffix=".tar"))
+
+    try:
+        # Step 1: Concatenate all parts into a single gzipped file
+        cat_command = f"{cat_path} {paths_str} > '{temp_gz}'"
+        run_with_retries(cat_command)
+        print(f"[extract_zip] Step 1 completed: {temp_gz}")
+
+        # Step 2: Decompress the gzipped file to a tar file using pigz
+        pigz_command = f"{pigz_cmd} -p {cpus} -d -c '{temp_gz}' > '{temp_tar}'"
+        run_with_retries(pigz_command)
+        print(f"[extract_zip] Step 2 completed: {temp_tar}")
+
+        # Step 3: Extract the tar file to the target directory
+        tar_command = f"{tar_cmd} -xf '{temp_tar}' -C {target_dir}"
+        run_with_retries(tar_command)
+        print(f"[extract_zip] Step 3 completed: extracted to {target_dir}")
+    finally:
+        # Remove temporary files if they exist
+        if temp_gz.exists():
+            temp_gz.unlink()
+        if temp_tar.exists():
+            temp_tar.unlink()
 
 def compute_file_hash(file_path: Path, hash_algo: str = "sha256") -> str:
     """Compute the hash of a file."""
