@@ -87,11 +87,11 @@ def validate_model_field(request_data: Dict[str, Any]) -> None:
     
     try:
         service_info = get_service_info()
-        running_model_hashes = service_info.get("running_model_hashes", [])
+        models = service_info.get("models", {})
         
-        # Check if the requested model is in the running model hashes
-        if requested_model not in running_model_hashes:
-            logger.warning(f"Requested model '{requested_model}' not in running model hashes: {running_model_hashes}")
+        # Check if the requested model hash is in the models dictionary
+        if requested_model not in models:
+            logger.warning(f"Requested model '{requested_model}' not found in available models: {list(models.keys())}")
             raise HTTPException(
                 status_code=400,
                 detail="Requested model is not running"
