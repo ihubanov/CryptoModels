@@ -154,8 +154,65 @@ class ServiceHandler:
             )
     
     @staticmethod
+    async def _ensure_model_active(model_requested: str) -> bool:
+        """
+        Ensure the requested model is active. If not, switch to it.
+        
+        Args:
+            model_requested (str): The model hash requested by the client
+            
+        Returns:
+            bool: True if the model is active or was successfully switched to
+        """
+        try:
+            # Get current active model
+            active_model = crypto_models_manager.get_active_model()
+            
+            if active_model == model_requested:
+                return True
+                
+            # Check if the requested model is available
+            available_models = crypto_models_manager.get_available_models()
+            if model_requested not in available_models:
+                logger.error(f"Requested model {model_requested} not found in available models")
+                return False
+                
+            # Switch to the requested model
+            logger.info(f"Switching from {active_model} to {model_requested}")
+            success = await crypto_models_manager.switch_model(model_requested)
+            
+            if success:
+                # Update app state with new service info
+                try:
+                    service_info = crypto_models_manager.get_service_info()
+                    app.state.service_info = service_info
+                    logger.info(f"Successfully switched to model {model_requested}")
+                    return True
+                except Exception as e:
+                    logger.error(f"Error updating service info after model switch: {str(e)}")
+                    return False
+            else:
+                logger.error(f"Failed to switch to model {model_requested}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error ensuring model active: {str(e)}", exc_info=True)
+            return False
+
+    @staticmethod
     async def generate_text_response(request: ChatCompletionRequest):
         """Generate a response for chat completion requests, supporting both streaming and non-streaming."""
+        # Check if model switching is needed
+        if hasattr(request, 'model') and request.model:
+            # Extract hash from model name if it's a hash
+            model_hash = request.model
+            if not await ServiceHandler._ensure_model_active(model_hash):
+                from fastapi import HTTPException
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Model {model_hash} is not available or failed to switch"
+                )
+        
         port = get_service_port()
         
         if request.is_vision_request():
@@ -187,6 +244,16 @@ class ServiceHandler:
     @staticmethod
     async def generate_embeddings_response(request: EmbeddingRequest):
         """Generate a response for embedding requests."""
+        # Check if model switching is needed
+        if hasattr(request, 'model') and request.model:
+            model_hash = request.model
+            if not await ServiceHandler._ensure_model_active(model_hash):
+                from fastapi import HTTPException
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Model {model_hash} is not available or failed to switch"
+                )
+        
         port = get_service_port()
         request_dict = convert_request_to_dict(request)
         response_data = await ServiceHandler._make_api_call(port, "/v1/embeddings", request_dict)
@@ -199,6 +266,16 @@ class ServiceHandler:
     @staticmethod
     async def generate_image_response(request: ImageGenerationRequest):
         """Generate a response for image generation requests."""
+        # Check if model switching is needed
+        if hasattr(request, 'model') and request.model:
+            model_hash = request.model
+            if not await ServiceHandler._ensure_model_active(model_hash):
+                from fastapi import HTTPException
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Model {model_hash} is not available or failed to switch"
+                )
+        
         port = get_service_port()
         request_dict = convert_request_to_dict(request)
         response_data = await ServiceHandler._make_api_call(port, "/v1/images/generations", request_dict)
@@ -769,6 +846,71 @@ async def update(request: Dict[str, Any]):
     else:
         raise HTTPException(status_code=500, detail="Failed to update service info")
 
+@app.post("/switch_model")
+async def switch_model(request: Request):
+    """Switch to a different model that was registered during multi-model start."""
+    try:
+        body = await request.json()
+        target_hash = body.get("hash")
+        
+        if not target_hash:
+            raise HTTPException(status_code=400, detail="Model hash is required")
+        
+        logger.info(f"Switching to model: {target_hash}")
+        
+        # Use the manager to switch models
+        success = await crypto_models_manager.switch_model(target_hash)
+        
+        if success:
+            # Update the app state with new service info
+            try:
+                service_info = crypto_models_manager.get_service_info()
+                app.state.service_info = service_info
+                logger.info(f"Successfully switched to model {target_hash}")
+                return {"status": "success", "message": f"Switched to model {target_hash}"}
+            except Exception as e:
+                logger.error(f"Error updating service info after model switch: {str(e)}")
+                return {"status": "error", "message": "Model switched but failed to update service info"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to switch model")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error switching model: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/models/available")
+async def get_available_models():
+    """Get information about all available models in the current service."""
+    try:
+        models = crypto_models_manager.get_available_models()
+        active_model = crypto_models_manager.get_active_model()
+        
+        return {
+            "models": models,
+            "active_model": active_model,
+            "total_models": len(models)
+        }
+    except Exception as e:
+        logger.error(f"Error getting available models: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/models/active")
+async def get_active_model():
+    """Get the hash of the currently active model."""
+    try:
+        active_model = crypto_models_manager.get_active_model()
+        if active_model:
+            return {"active_model": active_model}
+        else:
+            raise HTTPException(status_code=404, detail="No active model found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting active model: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Model-based endpoints that use the request queue
 @app.post("/chat/completions")
 async def chat_completions(request: ChatCompletionRequest):
@@ -822,7 +964,7 @@ async def v1_image_generations(request: ImageGenerationRequest):
 async def list_models():
     """
     Provides a list of available models, compatible with OpenAI's /v1/models endpoint.
-    Currently lists the single loaded model if available.
+    Returns all models in multi-model service including main and on-demand models.
     """
     try:
         service_info = get_service_info()
@@ -834,35 +976,80 @@ async def list_models():
         logger.error(f"/v1/models: Unexpected HTTPException while fetching service_info: {e.detail}")
         raise # Re-raise other or unexpected HTTPExceptions
 
-    model_hash = service_info.get("hash")
-    folder_name_from_info = service_info.get("folder_name") # From Task 1
+    model_cards = []
+    
+    # Check if this is a multi-model service
+    models = service_info.get("models", {})
+    
+    if models:
+        # Multi-model service - return all available models
+        logger.info(f"/v1/models: Multi-model service detected with {len(models)} models")
+        
+        for model_hash, model_info in models.items():
+            metadata = model_info.get("metadata", {})
+            folder_name = metadata.get("folder_name", "")
+            is_active = model_info.get("active", False)
+            is_on_demand = model_info.get("on_demand", False)
+            
+            # Prefer folder_name for user-facing ID, fallback to hash
+            model_id = folder_name if folder_name else model_hash
+            
+            # Parse RAM value from metadata
+            raw_ram_value = metadata.get("ram")
+            parsed_ram_value = None
+            if isinstance(raw_ram_value, (int, float)):
+                parsed_ram_value = float(raw_ram_value)
+            elif isinstance(raw_ram_value, str):
+                try:
+                    parsed_ram_value = float(raw_ram_value.lower().replace("gb", "").strip())
+                except ValueError:
+                    logger.warning(f"/v1/models: Could not parse RAM value '{raw_ram_value}' to float for model {model_id}")
+            
+            # Create model card with additional multi-model information
+            model_card = ModelCard(
+                id=model_hash,  # Use hash as ID for API compatibility
+                root=model_id,  # Use folder name as root for display
+                ram=parsed_ram_value,
+                folder_name=folder_name
+            )
+            
+            model_cards.append(model_card)
+            
+            status = "🟢 Active" if is_active else ("🔴 On-demand" if is_on_demand else "⚪ Unknown")
+            logger.debug(f"/v1/models: Added model {model_id} ({model_hash[:16]}...) - {status}")
+    
+    else:
+        # Legacy single-model service - return the single model
+        model_hash = service_info.get("hash")
+        folder_name_from_info = service_info.get("folder_name")
+        
+        if not model_hash:
+            logger.warning("/v1/models: No model hash found in service_info, though service_info itself was present. Returning empty list.")
+            return ModelList(data=[])
+        
+        # Prefer folder_name for user-facing ID, fallback to hash
+        model_id = folder_name_from_info if folder_name_from_info else model_hash
+        
+        # Parse RAM value
+        raw_ram_value = service_info.get("ram")
+        parsed_ram_value = None
+        if isinstance(raw_ram_value, (int, float)):
+            parsed_ram_value = float(raw_ram_value)
+        elif isinstance(raw_ram_value, str):
+            try:
+                parsed_ram_value = float(raw_ram_value.lower().replace("gb", "").strip())
+            except ValueError:
+                logger.warning(f"/v1/models: Could not parse RAM value '{raw_ram_value}' to float.")
+        
+        model_card = ModelCard(
+            id=model_hash,  # Use hash as ID for API compatibility
+            root=model_id,  # Use folder name as root for display
+            ram=parsed_ram_value,
+            folder_name=folder_name_from_info
+        )
+        
+        model_cards.append(model_card)
+        logger.info(f"/v1/models: Single-model service - returning model {model_id}")
 
-    if not model_hash:
-        logger.warning("/v1/models: No model hash found in service_info, though service_info itself was present. Returning empty list.")
-        return ModelList(data=[])
-
-    # Prefer folder_name for user-facing ID, fallback to hash
-    model_id = folder_name_from_info if folder_name_from_info else model_hash
-
-    # Construct the ModelCard, similar to how other response objects are built
-    # Ensure 'ram' from service_info is correctly parsed
-    raw_ram_value = service_info.get("ram")
-    parsed_ram_value = None
-    if isinstance(raw_ram_value, (int, float)):
-        parsed_ram_value = float(raw_ram_value)
-    elif isinstance(raw_ram_value, str):
-        try:
-            # Attempt to parse if it's a string like "8GB", "8gb", or "8"
-            parsed_ram_value = float(raw_ram_value.lower().replace("gb", "").strip())
-        except ValueError:
-            logger.warning(f"/v1/models: Could not parse RAM value '{raw_ram_value}' to float.")
-
-    model_card = ModelCard(
-        id=model_id,
-        root=model_id, # Consistent with OpenAI for base models
-        ram=parsed_ram_value,    # Use 'ram' field, populated with parsed value
-        folder_name=folder_name_from_info  # From Task 1
-    )
-
-    logger.info(f"/v1/models: Returning information for model ID: {model_id}")
-    return ModelList(data=[model_card])
+    logger.info(f"/v1/models: Returning {len(model_cards)} models")
+    return ModelList(data=model_cards)
