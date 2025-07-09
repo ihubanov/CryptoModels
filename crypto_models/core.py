@@ -520,7 +520,7 @@ class CryptoModelsManager:
             # Clean up metadata file
             metadata_cleaned = False
             if ai_stopped and api_stopped:
-                metadata_cleaned = self._cleanup_service_metadata(force=False)
+                metadata_cleaned = self._cleanup_service_metadata(force=force)
             else:
                 logger.warning("Keeping service metadata file since not all processes were successfully stopped")
             
@@ -572,6 +572,18 @@ class CryptoModelsManager:
                 status = process.status()
                 if status in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
                     logger.info(f"Process {process_name} (PID: {pid}) already terminated (status: {status})")
+                    # In force mode, also kill any remaining child processes
+                    if force:
+                        try:
+                            children = process.children(recursive=True)
+                            for child in children:
+                                try:
+                                    child.kill()
+                                    logger.debug(f"Force killed child process {child.pid}")
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    pass
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
                     return True
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 return True
@@ -914,12 +926,24 @@ class CryptoModelsManager:
                     pid = service_info.get("pid")
                     app_pid = service_info.get("app_pid")
                     
-                    # Check if any processes are still running
+                    # Check if any processes are still running (excluding zombies)
                     running_processes = []
                     if pid and psutil.pid_exists(pid):
-                        running_processes.append(f"AI server (PID: {pid})")
+                        try:
+                            process = psutil.Process(pid)
+                            status = process.status()
+                            if status not in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
+                                running_processes.append(f"AI server (PID: {pid})")
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
                     if app_pid and psutil.pid_exists(app_pid):
-                        running_processes.append(f"API server (PID: {app_pid})")
+                        try:
+                            process = psutil.Process(app_pid)
+                            status = process.status()
+                            if status not in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
+                                running_processes.append(f"API server (PID: {app_pid})")
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
                     
                     if running_processes:
                         logger.warning(f"Not cleaning up metadata - processes still running: {', '.join(running_processes)}")
