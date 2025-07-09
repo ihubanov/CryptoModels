@@ -79,7 +79,7 @@ class ChatCompletionRequestBase(BaseModel):
     """
     Base model for chat completion requests.
     """
-    model: str = Field(config.model.DEFAULT_CHAT_MODEL, description="Model to use for completion")
+    model: str = Field(..., description="Model to use for completion")
     messages: List[Message] = Field(..., description="List of messages in the conversation")
     tools: Optional[List[Dict[str, Any]]] = Field(None, description="Available tools for the model")
     tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(None, description="Tool choice configuration")
