@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from crypto_models.utils import compute_file_hash, async_extract_zip, async_move, async_rmtree
 from loguru import logger
+import shutil
 
 # Constants
 GATEWAY_URLS = [
@@ -36,6 +37,9 @@ if len(GATEWAY_URLS) == 1:
 else:
     MAX_ATTEMPTS = len(GATEWAY_URLS)
 POSTFIX_MODEL_PATH = ".gguf"
+
+# Extraction buffer factor for disk space estimation
+EXTRACTION_BUFFER_FACTOR = 1.5  # 1.5x the total download size
 
 # Performance optimizations (dynamic based on system RAM and CPU)
 total_ram_gb = psutil.virtual_memory().total / (1024 ** 3)
@@ -514,6 +518,24 @@ async def pick_fastest_gateway(filecoin_hash: str, gateways: list[str], timeout:
         return gateways[0]
 
 
+# Helper function to check disk space
+
+def check_disk_space(path: Path, required_bytes: int = 2 * 1024 * 1024 * 1024) -> None:
+    """
+    Check if there is enough free disk space at the given path.
+    Args:
+        path (Path): Directory to check.
+        required_bytes (int): Minimum free space required in bytes (default: 2GB).
+    Raises:
+        Exception: If not enough disk space, with required and available GB in message.
+    """
+    total, used, free = shutil.disk_usage(str(path))
+    if free < required_bytes:
+        required_gb = required_bytes / (1024 ** 3)
+        free_gb = free / (1024 ** 3)
+        raise Exception(f"Not enough disk space: required {required_gb:.2f} GB, available {free_gb:.2f} GB")
+
+
 async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Path = DEFAULT_OUTPUT_DIR) -> str | None:
     """
     Asynchronously download a model from Filecoin using its IPFS hash.
@@ -570,6 +592,14 @@ async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Pat
 
                         # Create folder if it doesn't exist
                         folder_path.mkdir(exist_ok=True, parents=True)
+
+                # --- Disk space check after metadata is fetched ---
+                if "files" in data:
+                    total_size_mb = sum(f.get("size_mb", 512) for f in data["files"])
+                    # Use buffer factor, convert MB to bytes
+                    required_space_bytes = int(total_size_mb * EXTRACTION_BUFFER_FACTOR * 1024 * 1024)
+                    check_disk_space(output_dir, required_bytes=required_space_bytes)
+                # --- End disk space check ---
 
                 # Download files
                 paths = await download_files_from_lighthouse_async(data)
