@@ -175,13 +175,12 @@ class ServiceHandler:
         request_dict = convert_request_to_dict(request)
         
         if request.stream:
-            # For streaming requests, generate a stream ID and register it before returning
+            # For streaming requests, generate a stream ID 
             stream_id = generate_request_id()
-            await RequestProcessor.register_stream(stream_id)
             
             logger.debug(f"Creating streaming response for model {request.model} with stream ID {stream_id}")
             
-            # The stream will be unregistered inside the generator
+            # Registration happens inside the generator to avoid race conditions
             return StreamingResponse(
                 ServiceHandler._stream_generator(port, request_dict, stream_id),
                 media_type="text/event-stream"
@@ -259,6 +258,8 @@ class ServiceHandler:
     async def _stream_generator(port: int, data: Dict[str, Any], stream_id: str):
         """Generator for streaming responses from the service."""
         try:
+            # Register stream at the start of actual streaming to avoid race conditions
+            await RequestProcessor.register_stream(stream_id)
             logger.debug(f"Starting stream {stream_id}")
             
             buffer = ""
@@ -412,6 +413,7 @@ class RequestProcessor:
     # Track active streams to prevent model switching during streaming
     active_streams = set()
     active_streams_lock = asyncio.Lock()
+    stream_timestamps = {}  # Track when streams were registered
     
     # Define which endpoints need to be processed sequentially
     MODEL_ENDPOINTS = {
@@ -427,6 +429,7 @@ class RequestProcessor:
         """Register an active stream to prevent model switching."""
         async with RequestProcessor.active_streams_lock:
             RequestProcessor.active_streams.add(stream_id)
+            RequestProcessor.stream_timestamps[stream_id] = time.time()
             logger.debug(f"Registered active stream {stream_id}, total active: {len(RequestProcessor.active_streams)}")
     
     @staticmethod
@@ -434,6 +437,7 @@ class RequestProcessor:
         """Unregister a completed stream."""
         async with RequestProcessor.active_streams_lock:
             RequestProcessor.active_streams.discard(stream_id)
+            RequestProcessor.stream_timestamps.pop(stream_id, None)
             logger.debug(f"Unregistered stream {stream_id}, total active: {len(RequestProcessor.active_streams)}")
     
     @staticmethod
@@ -443,7 +447,16 @@ class RequestProcessor:
             return len(RequestProcessor.active_streams) > 0
     
     @staticmethod
-    async def wait_for_streams_to_complete(timeout: float = 30.0):
+    async def terminate_active_streams():
+        """Forcefully terminate all active streams."""
+        async with RequestProcessor.active_streams_lock:
+            terminated_count = len(RequestProcessor.active_streams)
+            RequestProcessor.active_streams.clear()
+            RequestProcessor.stream_timestamps.clear()
+            logger.warning(f"Force terminated {terminated_count} active streams")
+    
+    @staticmethod
+    async def wait_for_streams_to_complete(timeout: float = 30.0, force_terminate: bool = False):
         """Wait for all active streams to complete before proceeding."""
         start_time = time.time()
         initial_count = len(RequestProcessor.active_streams)
@@ -460,13 +473,24 @@ class RequestProcessor:
             
             if elapsed > timeout:
                 remaining_streams = len(RequestProcessor.active_streams)
-                logger.warning(f"Timeout waiting for streams to complete after {elapsed:.1f}s, "
-                              f"{remaining_streams} still active. Force proceeding.")
-                # Log the active stream IDs for debugging
-                async with RequestProcessor.active_streams_lock:
-                    active_stream_ids = list(RequestProcessor.active_streams)
-                    logger.warning(f"Active stream IDs: {active_stream_ids}")
-                break
+                if force_terminate:
+                    logger.warning(f"Timeout waiting for streams to complete after {elapsed:.1f}s, "
+                                  f"force terminating {remaining_streams} active streams")
+                    # Log the active stream IDs for debugging
+                    async with RequestProcessor.active_streams_lock:
+                        active_stream_ids = list(RequestProcessor.active_streams)
+                        logger.warning(f"Force terminating stream IDs: {active_stream_ids}")
+                    
+                    await RequestProcessor.terminate_active_streams()
+                    break
+                else:
+                    logger.error(f"Timeout waiting for streams to complete after {elapsed:.1f}s, "
+                                f"{remaining_streams} still active. Refusing to proceed without force_terminate=True")
+                    # Log the active stream IDs for debugging
+                    async with RequestProcessor.active_streams_lock:
+                        active_stream_ids = list(RequestProcessor.active_streams)
+                        logger.error(f"Active stream IDs: {active_stream_ids}")
+                    return False
             
             # Log progress every 5 seconds
             if current_time - last_log_time >= 5.0:
@@ -480,14 +504,70 @@ class RequestProcessor:
         final_count = len(RequestProcessor.active_streams)
         if initial_count > 0:
             logger.info(f"Stream wait completed. Initial: {initial_count}, Final: {final_count}")
+        
+        return True
     
     @staticmethod
     async def cleanup_stale_streams():
         """Clean up any stale streams that might be stuck in the active list."""
+        current_time = time.time()
+        stale_streams = []
+        
         async with RequestProcessor.active_streams_lock:
-            if RequestProcessor.active_streams:
-                logger.warning(f"Cleaning up {len(RequestProcessor.active_streams)} potentially stale streams")
-                RequestProcessor.active_streams.clear()
+            for stream_id in list(RequestProcessor.active_streams):
+                if stream_id in RequestProcessor.stream_timestamps:
+                    if current_time - RequestProcessor.stream_timestamps[stream_id] > 600:  # 10 minutes
+                        stale_streams.append(stream_id)
+                else:
+                    # Stream without timestamp is considered stale
+                    stale_streams.append(stream_id)
+            
+            for stream_id in stale_streams:
+                RequestProcessor.active_streams.discard(stream_id)
+                RequestProcessor.stream_timestamps.pop(stream_id, None)
+                logger.warning(f"Cleaned up stale stream {stream_id}")
+            
+            if stale_streams:
+                logger.warning(f"Cleaned up {len(stale_streams)} stale streams")
+            elif RequestProcessor.active_streams:
+                logger.info(f"No stale streams found, {len(RequestProcessor.active_streams)} active streams are healthy")
+    
+    @staticmethod
+    async def _verify_model_switch(model_requested: str, request_id: str, max_retries: int = 3) -> bool:
+        """Verify model switch with retry logic."""
+        for attempt in range(max_retries):
+            try:
+                await asyncio.sleep(0.5)  # Brief delay for service info update
+                
+                updated_service_info = crypto_models_manager.get_service_info()
+                updated_models = updated_service_info.get("models", {})
+                
+                if model_requested in updated_models and updated_models[model_requested].get("active", False):
+                    logger.debug(f"[{request_id}] Model switch verification successful (attempt {attempt + 1})")
+                    return True
+                    
+            except Exception as e:
+                logger.warning(f"[{request_id}] Verification attempt {attempt + 1} failed: {e}")
+        
+        logger.error(f"[{request_id}] Model switch verification failed after {max_retries} attempts")
+        return False
+    
+    @staticmethod
+    async def _add_to_queue_with_backpressure(item, timeout: float = 30.0):
+        """Add item to queue with timeout and backpressure handling."""
+        try:
+            await asyncio.wait_for(
+                RequestProcessor.queue.put(item),
+                timeout=timeout
+            )
+            return True
+        except asyncio.TimeoutError:
+            current_size = RequestProcessor.queue.qsize()
+            logger.error(f"Queue full (size: {current_size}), request timed out after {timeout}s")
+            raise HTTPException(
+                status_code=503, 
+                detail=f"Service overloaded. Queue size: {current_size}/{MAX_QUEUE_SIZE}"
+            )
     
     @staticmethod
     async def _ensure_model_active_in_queue(model_requested: str, request_id: str) -> bool:
@@ -526,7 +606,9 @@ class RequestProcessor:
             if await RequestProcessor.has_active_streams():
                 stream_count = len(RequestProcessor.active_streams)
                 logger.info(f"[{request_id}] Waiting for {stream_count} active streams to complete before model switch")
-                await RequestProcessor.wait_for_streams_to_complete()
+                if not await RequestProcessor.wait_for_streams_to_complete(timeout=30.0, force_terminate=True):
+                    logger.error(f"[{request_id}] Failed to wait for streams to complete")
+                    return False
                 logger.info(f"[{request_id}] All streams completed, proceeding with model switch")
             
             # Perform the model switch
@@ -545,22 +627,20 @@ class RequestProcessor:
                 logger.info(f"[{request_id}] Successfully switched from {active_model} to {model_requested} "
                            f"(switch time: {switch_duration:.2f}s)")
                 
-                # Update app state with new service info
+                # Update app state with new service info and verify the switch
                 try:
-                    updated_service_info = crypto_models_manager.get_service_info()
-                    app.state.service_info = updated_service_info
-                    
-                    # Verify the switch was successful
-                    updated_models = updated_service_info.get("models", {})
-                    if model_requested in updated_models and updated_models[model_requested].get("active", False):
-                        logger.debug(f"[{request_id}] Model switch verification successful")
+                    # Use the new verification method with retry logic
+                    if await RequestProcessor._verify_model_switch(model_requested, request_id):
+                        # Update app state with new service info after successful verification
+                        updated_service_info = crypto_models_manager.get_service_info()
+                        app.state.service_info = updated_service_info
                         return True
                     else:
                         logger.error(f"[{request_id}] Model switch verification failed - model not active after switch")
                         return False
                         
                 except Exception as e:
-                    logger.error(f"[{request_id}] Error updating service info after model switch: {str(e)}")
+                    logger.error(f"[{request_id}] Error verifying model switch: {str(e)}")
                     return False
             else:
                 logger.error(f"[{request_id}] Failed to switch to model {model_requested} "
@@ -646,7 +726,8 @@ class RequestProcessor:
         start_wait_time = time.time()
         future = asyncio.Future()
         # Pass service_info to avoid redundant lookups
-        await RequestProcessor.queue.put((endpoint, request_data, future, request_id, start_wait_time, service_info))
+        queue_item = (endpoint, request_data, future, request_id, start_wait_time, service_info)
+        await RequestProcessor._add_to_queue_with_backpressure(queue_item)
         
         logger.info(f"[{request_id}] Waiting for result from endpoint {endpoint}")
         result = await future
@@ -700,9 +781,11 @@ class RequestProcessor:
     
     @staticmethod
     async def worker():
-        """Worker function to process requests from the queue sequentially."""
+        """Enhanced worker function with better error recovery."""
         logger.info("Request processor worker started")
         processed_count = 0
+        consecutive_errors = 0
+        max_consecutive_errors = 5
         
         while True:
             try:
@@ -766,6 +849,9 @@ class RequestProcessor:
                 
                 RequestProcessor.queue.task_done()
                 
+                # Reset consecutive errors on successful processing
+                consecutive_errors = 0
+                
                 # Log periodic status about queue health
                 if processed_count % 10 == 0:
                     active_stream_count = len(RequestProcessor.active_streams)
@@ -775,7 +861,27 @@ class RequestProcessor:
                 logger.info("Worker task cancelled, exiting")
                 break
             except Exception as e:
-                logger.error(f"Worker error: {str(e)}")
+                consecutive_errors += 1
+                logger.error(f"Worker error (consecutive: {consecutive_errors}/{max_consecutive_errors}): {str(e)}")
+                
+                # If we have too many consecutive errors, pause before continuing
+                if consecutive_errors >= max_consecutive_errors:
+                    logger.critical(f"Too many consecutive worker errors, pausing for recovery")
+                    await asyncio.sleep(5)  # Brief pause before continuing
+                    consecutive_errors = 0  # Reset counter after recovery pause
+                    
+                    # Clean up any potential issues
+                    try:
+                        await RequestProcessor.cleanup_stale_streams()
+                    except Exception as cleanup_error:
+                        logger.error(f"Error during worker recovery cleanup: {cleanup_error}")
+                
+                # Mark the task as done to prevent queue from getting stuck
+                try:
+                    RequestProcessor.queue.task_done()
+                except ValueError:
+                    # task_done() called more times than items in queue
+                    pass
 
 # Background Tasks
 async def unload_checker():
@@ -854,6 +960,25 @@ async def unload_checker():
             # Wait a bit longer before retrying on critical errors
             await asyncio.sleep(UNLOAD_CHECK_INTERVAL * 2)
 
+async def stream_cleanup_task():
+    """Periodic cleanup of stale streams."""
+    logger.info("Stream cleanup task started")
+    
+    while True:
+        try:
+            await asyncio.sleep(60)  # Check every minute
+            
+            # Clean up stale streams
+            await RequestProcessor.cleanup_stale_streams()
+            
+        except asyncio.CancelledError:
+            logger.info("Stream cleanup task cancelled")
+            break
+        except Exception as e:
+            logger.error(f"Error in stream cleanup task: {str(e)}", exc_info=True)
+            # Wait a bit longer before retrying on critical errors
+            await asyncio.sleep(120)
+
 # Performance monitoring middleware
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
@@ -889,6 +1014,7 @@ async def startup_event():
     # Start background tasks
     app.state.worker_task = asyncio.create_task(RequestProcessor.worker())
     app.state.unload_checker_task = asyncio.create_task(unload_checker())
+    app.state.stream_cleanup_task = asyncio.create_task(stream_cleanup_task())
     
     logger.info("Service started successfully")
 
@@ -904,7 +1030,7 @@ async def shutdown_event():
     tasks_to_cancel = []
     task_names = []
     
-    for task_attr in ["worker_task", "unload_checker_task"]:
+    for task_attr in ["worker_task", "unload_checker_task", "stream_cleanup_task"]:
         if hasattr(app.state, task_attr):
             task = getattr(app.state, task_attr)
             if not task.done():
