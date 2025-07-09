@@ -207,7 +207,6 @@ class ServiceHandler:
             # Extract hash from model name if it's a hash
             model_hash = request.model
             if not await ServiceHandler._ensure_model_active(model_hash):
-                from fastapi import HTTPException
                 raise HTTPException(
                     status_code=400, 
                     detail=f"Model {model_hash} is not available or failed to switch"
@@ -248,7 +247,6 @@ class ServiceHandler:
         if hasattr(request, 'model') and request.model:
             model_hash = request.model
             if not await ServiceHandler._ensure_model_active(model_hash):
-                from fastapi import HTTPException
                 raise HTTPException(
                     status_code=400, 
                     detail=f"Model {model_hash} is not available or failed to switch"
@@ -270,7 +268,6 @@ class ServiceHandler:
         if hasattr(request, 'model') and request.model:
             model_hash = request.model
             if not await ServiceHandler._ensure_model_active(model_hash):
-                from fastapi import HTTPException
                 raise HTTPException(
                     status_code=400, 
                     detail=f"Model {model_hash} is not available or failed to switch"
@@ -845,71 +842,6 @@ async def update(request: Dict[str, Any]):
         return {"status": "ok", "message": "Service info updated successfully"}
     else:
         raise HTTPException(status_code=500, detail="Failed to update service info")
-
-@app.post("/switch_model")
-async def switch_model(request: Request):
-    """Switch to a different model that was registered during multi-model start."""
-    try:
-        body = await request.json()
-        target_hash = body.get("hash")
-        
-        if not target_hash:
-            raise HTTPException(status_code=400, detail="Model hash is required")
-        
-        logger.info(f"Switching to model: {target_hash}")
-        
-        # Use the manager to switch models
-        success = await crypto_models_manager.switch_model(target_hash)
-        
-        if success:
-            # Update the app state with new service info
-            try:
-                service_info = crypto_models_manager.get_service_info()
-                app.state.service_info = service_info
-                logger.info(f"Successfully switched to model {target_hash}")
-                return {"status": "success", "message": f"Switched to model {target_hash}"}
-            except Exception as e:
-                logger.error(f"Error updating service info after model switch: {str(e)}")
-                return {"status": "error", "message": "Model switched but failed to update service info"}
-        else:
-            raise HTTPException(status_code=500, detail="Failed to switch model")
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error switching model: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/models/available")
-async def get_available_models():
-    """Get information about all available models in the current service."""
-    try:
-        models = crypto_models_manager.get_available_models()
-        active_model = crypto_models_manager.get_active_model()
-        
-        return {
-            "models": models,
-            "active_model": active_model,
-            "total_models": len(models)
-        }
-    except Exception as e:
-        logger.error(f"Error getting available models: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/models/active")
-async def get_active_model():
-    """Get the hash of the currently active model."""
-    try:
-        active_model = crypto_models_manager.get_active_model()
-        if active_model:
-            return {"active_model": active_model}
-        else:
-            raise HTTPException(status_code=404, detail="No active model found")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting active model: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
 
 # Model-based endpoints that use the request queue
 @app.post("/chat/completions")
