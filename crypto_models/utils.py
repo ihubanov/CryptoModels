@@ -13,6 +13,9 @@ import time
 from loguru import logger
 from pathlib import Path
 
+# Add file logger for extract_zip and related operations
+logger.add("utils.log", rotation="10 MB", retention="10 days", encoding="utf-8")
+
 def compress_folder(model_folder: str, zip_chunk_size: int = 128, threads: int = 1) -> str:
     """
     Compress a folder into split parts using tar, pigz, and split.
@@ -26,7 +29,7 @@ def compress_folder(model_folder: str, zip_chunk_size: int = 128, threads: int =
     )
     try:
         subprocess.run(tar_command, shell=True, check=True)
-        print(f"{tar_command} completed successfully")
+        logger.info(f"{tar_command} completed successfully")
         return temp_dir
     except subprocess.CalledProcessError as e:
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -39,17 +42,17 @@ def run_with_retries(cmd: str, max_retries: int = 3, delay: int = 2):
     """
     for attempt in range(1, max_retries + 1):
         try:
-            print(f"[extract_zip] Attempt {attempt}/{max_retries}: {cmd}")
+            logger.info(f"[extract_zip] Attempt {attempt}/{max_retries}: {cmd}")
             subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True)
-            print(f"[extract_zip] Command succeeded: {cmd}")
+            logger.info(f"[extract_zip] Command succeeded: {cmd}")
             return
         except subprocess.CalledProcessError as e:
-            print(f"[extract_zip] Command failed (attempt {attempt}): {e}")
+            logger.error(f"[extract_zip] Command failed (attempt {attempt}): {e}")
             if attempt < max_retries:
-                print(f"[extract_zip] Retrying in {delay} seconds...")
+                logger.warning(f"[extract_zip] Retrying in {delay} seconds...")
                 time.sleep(delay)
             else:
-                print(f"[extract_zip] All {max_retries} attempts failed for: {cmd}")
+                logger.error(f"[extract_zip] All {max_retries} attempts failed for: {cmd}")
                 raise
 
 
@@ -57,20 +60,21 @@ def extract_zip(paths: List[Path]):
     # Use the absolute path only once.
     target_abs = Path.cwd().absolute()
     target_dir = f"'{target_abs}'"
-    print(f"📦 Extracting files to: {target_dir}")
+    logger.info(f"📦 Extracting files to: {target_dir}")
 
     # Get absolute paths for required commands.
     cat_path = os.environ.get("CAT_COMMAND")
     pigz_cmd = os.environ.get("PIGZ_COMMAND")
     tar_cmd = os.environ.get("TAR_COMMAND")
     if not (cat_path and pigz_cmd and tar_cmd):
+        logger.error("Required commands (cat, TAR_COMMAND, PIGZ_COMMAND) not found.")
         raise RuntimeError("Required commands (cat, TAR_COMMAND, PIGZ_COMMAND) not found.")
 
     # Sort paths by their string representation.
     sorted_paths = sorted(paths, key=lambda p: str(p))
     # Quote each path after converting to its absolute path.
     paths_str = " ".join(f"'{p.absolute()}'" for p in sorted_paths)
-    print(f"🗂️ Extracting files: {paths_str}")
+    logger.info(f"🗂️ Extracting files: {paths_str}")
 
     cpus = os.cpu_count() or 1
 
@@ -82,17 +86,17 @@ def extract_zip(paths: List[Path]):
         # Step 1: Concatenate all parts into a single gzipped file
         cat_command = f"{cat_path} {paths_str} > '{temp_gz}'"
         run_with_retries(cat_command)
-        print(f"✅ [extract_zip] Step 1 completed: {temp_gz}")
+        logger.info(f"✅ [extract_zip] Step 1 completed: {temp_gz}")
 
         # Step 2: Decompress the gzipped file to a tar file using pigz
         pigz_command = f"{pigz_cmd} -p {cpus} -d -c '{temp_gz}' > '{temp_tar}'"
         run_with_retries(pigz_command)
-        print(f"✅ [extract_zip] Step 2 completed: {temp_tar}")
+        logger.info(f"✅ [extract_zip] Step 2 completed: {temp_tar}")
 
         # Step 3: Extract the tar file to the target directory
         tar_command = f"{tar_cmd} -xf '{temp_tar}' -C {target_dir}"
         run_with_retries(tar_command)
-        print(f"🎉 [extract_zip] Step 3 completed: extracted to {target_dir}")
+        logger.info(f"🎉 [extract_zip] Step 3 completed: extracted to {target_dir}")
     finally:
         # Remove temporary files if they exist
         if temp_gz.exists():
@@ -116,25 +120,25 @@ async def async_move(src: str, dst: str) -> None:
     delay = 2
     for attempt in range(1, max_retries + 1):
         if not Path(src).exists():
-            print(f"😕 [async_move] Source does not exist: {src} (attempt {attempt})")
+            logger.warning(f"😕 [async_move] Source does not exist: {src} (attempt {attempt})")
             if attempt < max_retries:
-                print(f"⏳ [async_move] Waiting {delay} seconds for source to appear...")
+                logger.info(f"⏳ [async_move] Waiting {delay} seconds for source to appear...")
                 await asyncio.sleep(delay)
                 continue
             else:
-                print(f"❌ [async_move] Source does not exist after {max_retries} attempts: {src}")
+                logger.error(f"❌ [async_move] Source does not exist after {max_retries} attempts: {src}")
                 raise FileNotFoundError(f"Source does not exist after {max_retries} attempts: {src}")
         try:
             await loop.run_in_executor(None, shutil.move, src, dst)
-            print(f"🚚 [async_move] Move succeeded: {src} -> {dst}")
+            logger.info(f"🚚 [async_move] Move succeeded: {src} -> {dst}")
             return
         except Exception as e:
-            print(f"⚠️ [async_move] Move failed (attempt {attempt}): {e}")
+            logger.warning(f"⚠️ [async_move] Move failed (attempt {attempt}): {e}")
             if attempt < max_retries:
-                print(f"🔁 [async_move] Retrying in {delay} seconds...")
+                logger.info(f"🔁 [async_move] Retrying in {delay} seconds...")
                 await asyncio.sleep(delay)
             else:
-                print(f"💥 [async_move] All {max_retries} attempts failed for: {src} -> {dst}")
+                logger.error(f"💥 [async_move] All {max_retries} attempts failed for: {src} -> {dst}")
                 raise
 
 async def async_rmtree(path: str) -> None:
