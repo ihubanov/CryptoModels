@@ -342,9 +342,8 @@ class ProgressTracker:
                             f"[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL] "
                             f"--progress {percentage:.1f}% ({self.completed_files}/{self.total_files} files) "
                             f"--speed {speed_mbps:.2f} MB/s "
-                            f"--url {self.current_url} "
-                            f"--file {self.current_file_name}")
-
+                        )
+                        
             except asyncio.CancelledError:
                 break
             except Exception as e:
