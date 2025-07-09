@@ -39,7 +39,7 @@ else:
 POSTFIX_MODEL_PATH = ".gguf"
 
 # Extraction buffer factor for disk space estimation
-EXTRACTION_BUFFER_FACTOR = 1.5  # 1.5x the total download size
+EXTRACTION_BUFFER_FACTOR = 2.5  # 2.5x the total download size
 
 # Performance optimizations (dynamic based on system RAM and CPU)
 total_ram_gb = psutil.virtual_memory().total / (1024 ** 3)
