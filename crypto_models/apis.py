@@ -80,8 +80,8 @@ def convert_request_to_dict(request) -> Dict[str, Any]:
     """Convert request object to dictionary, supporting both Pydantic v1 and v2."""
     return request.model_dump() if hasattr(request, "model_dump") else request.dict()
 
-def validate_model_field(request_data: Dict[str, Any]) -> None:
-    """Validate that the model field is present and matches one of the running model hashes."""
+def validate_model_field(request_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Validate that the model field is present and matches one of the available model hashes."""
 
     requested_model = request_data["model"]
     
@@ -98,6 +98,9 @@ def validate_model_field(request_data: Dict[str, Any]) -> None:
             )
         
         logger.debug(f"Model validation passed for '{requested_model}'")
+        
+        # Return the service info to avoid redundant calls
+        return service_info
             
     except HTTPException as e:
         # If we can't get service info (503), it means no model is running
@@ -200,22 +203,37 @@ class ServiceHandler:
             return False
 
     @staticmethod
-    async def generate_text_response(request: ChatCompletionRequest):
+    async def generate_text_response(request: ChatCompletionRequest, service_info: Optional[Dict[str, Any]] = None):
         """Generate a response for chat completion requests, supporting both streaming and non-streaming."""
+        # Use provided service_info or get it if not provided
+        if service_info is None:
+            service_info = get_service_info()
+        
         # Check if model switching is needed
         if hasattr(request, 'model') and request.model:
-            # Extract hash from model name if it's a hash
-            model_hash = request.model
-            if not await ServiceHandler._ensure_model_active(model_hash):
+            # Check if the model is already active to avoid unnecessary switching
+            models = service_info.get("models", {})
+            if request.model in models:
+                model_info = models[request.model]
+                if not model_info.get("active", False):
+                    # Model exists but not active, switch to it
+                    if not await ServiceHandler._ensure_model_active(request.model):
+                        raise HTTPException(
+                            status_code=400, 
+                            detail=f"Model {request.model} is not available or failed to switch"
+                        )
+                    # Refresh service info after switching
+                    service_info = get_service_info()
+            else:
+                # Model not found in models dictionary
                 raise HTTPException(
-                    status_code=400, 
-                    detail=f"Model {model_hash} is not available or failed to switch"
+                    status_code=400,
+                    detail="Requested model is not running"
                 )
         
         port = get_service_port()
         
         if request.is_vision_request():
-            service_info = get_service_info()
             if not service_info.get("multimodal", False):
                 content = "Unfortunately, I'm not equipped to interpret images at this time. Please provide a text description if possible."
                 return ServiceHandler._create_vision_error_response(request, content)
@@ -241,15 +259,30 @@ class ServiceHandler:
         )
     
     @staticmethod
-    async def generate_embeddings_response(request: EmbeddingRequest):
+    async def generate_embeddings_response(request: EmbeddingRequest, service_info: Optional[Dict[str, Any]] = None):
         """Generate a response for embedding requests."""
+        # Use provided service_info or get it if not provided
+        if service_info is None:
+            service_info = get_service_info()
+        
         # Check if model switching is needed
         if hasattr(request, 'model') and request.model:
-            model_hash = request.model
-            if not await ServiceHandler._ensure_model_active(model_hash):
+            # Check if the model is already active to avoid unnecessary switching
+            models = service_info.get("models", {})
+            if request.model in models:
+                model_info = models[request.model]
+                if not model_info.get("active", False):
+                    # Model exists but not active, switch to it
+                    if not await ServiceHandler._ensure_model_active(request.model):
+                        raise HTTPException(
+                            status_code=400, 
+                            detail=f"Model {request.model} is not available or failed to switch"
+                        )
+            else:
+                # Model not found in models dictionary
                 raise HTTPException(
-                    status_code=400, 
-                    detail=f"Model {model_hash} is not available or failed to switch"
+                    status_code=400,
+                    detail="Requested model is not running"
                 )
         
         port = get_service_port()
@@ -262,15 +295,30 @@ class ServiceHandler:
         )
     
     @staticmethod
-    async def generate_image_response(request: ImageGenerationRequest):
+    async def generate_image_response(request: ImageGenerationRequest, service_info: Optional[Dict[str, Any]] = None):
         """Generate a response for image generation requests."""
+        # Use provided service_info or get it if not provided
+        if service_info is None:
+            service_info = get_service_info()
+        
         # Check if model switching is needed
         if hasattr(request, 'model') and request.model:
-            model_hash = request.model
-            if not await ServiceHandler._ensure_model_active(model_hash):
+            # Check if the model is already active to avoid unnecessary switching
+            models = service_info.get("models", {})
+            if request.model in models:
+                model_info = models[request.model]
+                if not model_info.get("active", False):
+                    # Model exists but not active, switch to it
+                    if not await ServiceHandler._ensure_model_active(request.model):
+                        raise HTTPException(
+                            status_code=400, 
+                            detail=f"Model {request.model} is not available or failed to switch"
+                        )
+            else:
+                # Model not found in models dictionary
                 raise HTTPException(
-                    status_code=400, 
-                    detail=f"Model {model_hash} is not available or failed to switch"
+                    status_code=400,
+                    detail="Requested model is not running"
                 )
         
         port = get_service_port()
@@ -516,8 +564,8 @@ class RequestProcessor:
         request_id = generate_request_id()
         queue_size = RequestProcessor.queue.qsize()
         
-        # Validate that model field is present
-        validate_model_field(request_data)
+        # Validate that model field is present and get service info
+        service_info = validate_model_field(request_data)
         
         logger.info(f"[{request_id}] Adding request to queue for endpoint {endpoint} (queue size: {queue_size})")
         
@@ -529,7 +577,8 @@ class RequestProcessor:
         
         start_wait_time = time.time()
         future = asyncio.Future()
-        await RequestProcessor.queue.put((endpoint, request_data, future, request_id, start_wait_time))
+        # Pass service_info to avoid redundant lookups
+        await RequestProcessor.queue.put((endpoint, request_data, future, request_id, start_wait_time, service_info))
         
         logger.info(f"[{request_id}] Waiting for result from endpoint {endpoint}")
         result = await future
@@ -545,8 +594,8 @@ class RequestProcessor:
         request_id = generate_request_id()
         logger.info(f"[{request_id}] Processing direct request for endpoint {endpoint}")
         
-        # Validate that model field is present
-        validate_model_field(request_data)
+        # Validate that model field is present and get service info
+        service_info = validate_model_field(request_data)
         
         app.state.last_request_time = time.time()
         await RequestProcessor._ensure_server_running(request_id)
@@ -555,7 +604,8 @@ class RequestProcessor:
         if endpoint in RequestProcessor.MODEL_ENDPOINTS:
             model_cls, handler = RequestProcessor.MODEL_ENDPOINTS[endpoint]
             request_obj = model_cls(**request_data)
-            result = await handler(request_obj)
+            # Pass service_info to avoid redundant lookups
+            result = await handler(request_obj, service_info)
             
             process_time = time.time() - start_time
             logger.info(f"[{request_id}] Direct request completed for endpoint {endpoint} (time: {process_time:.2f}s)")
@@ -573,7 +623,7 @@ class RequestProcessor:
         
         while True:
             try:
-                endpoint, request_data, future, request_id, start_wait_time = await RequestProcessor.queue.get()
+                endpoint, request_data, future, request_id, start_wait_time, service_info = await RequestProcessor.queue.get()
                 
                 wait_time = time.time() - start_wait_time
                 queue_size = RequestProcessor.queue.qsize()
@@ -589,7 +639,8 @@ class RequestProcessor:
                         model_cls, handler = RequestProcessor.MODEL_ENDPOINTS[endpoint]
                         try:
                             request_obj = model_cls(**request_data)
-                            result = await handler(request_obj)
+                            # Pass service_info to avoid redundant lookups
+                            result = await handler(request_obj, service_info)
                             future.set_result(result)
                             
                             processing_time = time.time() - processing_start
@@ -813,7 +864,7 @@ async def shutdown_event():
                 pending_requests = []
                 while not RequestProcessor.queue.empty():
                     try:
-                        _, _, future, request_id, _ = RequestProcessor.queue.get_nowait()
+                        _, _, future, request_id, _, _ = RequestProcessor.queue.get_nowait()
                         if not future.done():
                             future.cancel()
                             pending_requests.append(request_id)
@@ -847,53 +898,160 @@ async def update(request: Dict[str, Any]):
 @app.post("/chat/completions")
 async def chat_completions(request: ChatCompletionRequest):
     """Endpoint for chat completion requests."""
-    try:
-        service_info = get_service_info()
-        if service_info.get("task") == "embed":
-            raise HTTPException(status_code=400, detail="Chat completion requests are not supported for embedding models")
-    except HTTPException:
-        pass  # Service info not available, continue with request
     request_dict = convert_request_to_dict(request)
+    task = request_dict.get("task")
+    if task == "embed":
+        raise HTTPException(status_code=400, detail="Embedding requests are only supported for embedding models")
     return await RequestProcessor.process_request("/chat/completions", request_dict)
+
+@app.post("/v1/chat/completions")
+async def v1_chat_completions(request: ChatCompletionRequest):
+    """Endpoint for chat completion requests (v1 API)."""
+    request_dict = convert_request_to_dict(request)
+    task = request_dict.get("task")
+    if task == "embed":
+        raise HTTPException(status_code=400, detail="Embedding requests are only supported for embedding models")
+    return await RequestProcessor.process_request("/v1/chat/completions", request_dict)
+
 
 @app.post("/embeddings")
 async def embeddings(request: EmbeddingRequest):
     """Endpoint for embedding requests."""
     request_dict = convert_request_to_dict(request)
+    task = request_dict.get("task")
+    if task == "embed":
+        raise HTTPException(status_code=400, detail="Embedding requests are only supported for embedding models")
     return await RequestProcessor.process_request("/embeddings", request_dict)
-
-@app.post("/v1/chat/completions")
-async def v1_chat_completions(request: ChatCompletionRequest):
-    """Endpoint for chat completion requests (v1 API)."""
-    try:
-        service_info = get_service_info()
-        if service_info.get("task") == "embed":
-            raise HTTPException(status_code=400, detail="Chat completion requests are not supported for embedding models")
-    except HTTPException:
-        pass  # Service info not available, continue with request
-    request_dict = convert_request_to_dict(request)
-    return await RequestProcessor.process_request("/v1/chat/completions", request_dict)
 
 @app.post("/v1/embeddings")
 async def v1_embeddings(request: EmbeddingRequest):
     """Endpoint for embedding requests (v1 API)."""
     request_dict = convert_request_to_dict(request)
+    task = request_dict.get("task")
+    if task == "embed":
+        raise HTTPException(status_code=400, detail="Embedding requests are only supported for embedding models")
     return await RequestProcessor.process_request("/v1/embeddings", request_dict)
+
+
+@app.post("/images/generations")
+async def image_generations(request: ImageGenerationRequest):
+    """Endpoint for image generation requests."""
+    request_dict = convert_request_to_dict(request)
+    task = request_dict.get("task")
+    if task != "image-generation":
+        raise HTTPException(status_code=400, detail="Image generation requests are only supported for image-generation models")
+    
 
 @app.post("/v1/images/generations")
 async def v1_image_generations(request: ImageGenerationRequest):
     """Endpoint for image generation requests (v1 API)."""
-    try:
-        service_info = get_service_info()
-        if service_info.get("task") != "image-generation":
-            raise HTTPException(status_code=400, detail="Image generation requests are only supported for image-generation models")
-    except HTTPException:
-        pass  # Service info not available, continue with request
     request_dict = convert_request_to_dict(request)
+    task = request_dict.get("task")
+    if task != "image-generation":
+        raise HTTPException(status_code=400, detail="Image generation requests are only supported for image-generation models")
     return await RequestProcessor.process_request("/v1/images/generations", request_dict)
 
-@app.get("/v1/models", response_model=ModelList)
+@app.get("/models")
 async def list_models():
+    """
+    Provides a list of available models, compatible with OpenAI's /v1/models endpoint.
+    Returns all models in multi-model service including main and on-demand models.
+    """
+    try:
+        service_info = get_service_info()
+    except HTTPException as e:
+        # This pattern of handling 503 for missing service_info is consistent
+        if e.status_code == 503:
+            logger.info("/v1/models: Service information not available. No model loaded or /update not called.")
+            return ModelList(data=[])
+        logger.error(f"/v1/models: Unexpected HTTPException while fetching service_info: {e.detail}")
+        raise # Re-raise other or unexpected HTTPExceptions
+
+    model_cards = []
+    
+    # Check if this is a multi-model service
+    models = service_info.get("models", {})
+    
+    if models:
+        # Multi-model service - return all available models
+        logger.info(f"/v1/models: Multi-model service detected with {len(models)} models")
+        
+        for model_hash, model_info in models.items():
+            metadata = model_info.get("metadata", {})
+            folder_name = metadata.get("folder_name", "")
+            is_active = model_info.get("active", False)
+            is_on_demand = model_info.get("on_demand", False)
+            task = metadata.get("task", "chat")  # Default to chat if not specified
+            
+            # Prefer folder_name for user-facing ID, fallback to hash
+            model_id = folder_name if folder_name else model_hash
+            
+            # Parse RAM value from metadata
+            raw_ram_value = metadata.get("ram")
+            parsed_ram_value = None
+            if isinstance(raw_ram_value, (int, float)):
+                parsed_ram_value = float(raw_ram_value)
+            elif isinstance(raw_ram_value, str):
+                try:
+                    parsed_ram_value = float(raw_ram_value.lower().replace("gb", "").strip())
+                except ValueError:
+                    logger.warning(f"/v1/models: Could not parse RAM value '{raw_ram_value}' to float for model {model_id}")
+            
+            # Create model card with additional multi-model information
+            model_card = ModelCard(
+                id=model_hash,  # Use hash as ID for API compatibility
+                root=model_id,  # Use folder name as root for display
+                ram=parsed_ram_value,
+                folder_name=folder_name,
+                task=task
+            )
+            
+            model_cards.append(model_card)
+            
+            status = "🟢 Active" if is_active else ("🔴 On-demand" if is_on_demand else "⚪ Unknown")
+            logger.debug(f"/v1/models: Added model {model_id} ({model_hash[:16]}...) - {status}")
+    
+    else:
+        # Legacy single-model service - return the single model
+        model_hash = service_info.get("hash")
+        folder_name_from_info = service_info.get("folder_name")
+        task = service_info.get("task", "chat")  # Default to chat if not specified
+        
+        if not model_hash:
+            logger.warning("/v1/models: No model hash found in service_info, though service_info itself was present. Returning empty list.")
+            return ModelList(data=[])
+        
+        # Prefer folder_name for user-facing ID, fallback to hash
+        model_id = folder_name_from_info if folder_name_from_info else model_hash
+        
+        # Parse RAM value
+        raw_ram_value = service_info.get("ram")
+        parsed_ram_value = None
+        if isinstance(raw_ram_value, (int, float)):
+            parsed_ram_value = float(raw_ram_value)
+        elif isinstance(raw_ram_value, str):
+            try:
+                parsed_ram_value = float(raw_ram_value.lower().replace("gb", "").strip())
+            except ValueError:
+                logger.warning(f"/v1/models: Could not parse RAM value '{raw_ram_value}' to float.")
+        
+        model_card = ModelCard(
+            id=model_hash,  # Use hash as ID for API compatibility
+            root=model_id,  # Use folder name as root for display
+            ram=parsed_ram_value,
+            folder_name=folder_name_from_info,
+            task=task
+        )
+        
+        model_cards.append(model_card)
+        logger.info(f"/v1/models: Single-model service - returning model {model_id}")
+
+    logger.info(f"/v1/models: Returning {len(model_cards)} models")
+    return ModelList(data=model_cards)
+
+
+@app.get("/v1/models", response_model=ModelList)
+async def v1_list_models():
     """
     Provides a list of available models, compatible with OpenAI's /v1/models endpoint.
     Returns all models in multi-model service including main and on-demand models.
