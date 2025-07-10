@@ -11,6 +11,7 @@ PRESERVED_MODELS = {
     "gemma-3-12b": "bafkreic2bkjuu3fvdoxnvusdt4in6fa6lubzhtjtmcp2zvokvfjpyndakq",
     "gemma-3-27b": "bafkreihi2cbsgja5dwa5nsuixicx2x3gbcnh7gsocxbmjxegtewoq2syve",
     "gemma-3n-e4b": "bafkreihz3mz422vpoy7sccwj5tujkerxbjxdlmsqqf3ridxbe3m6ipnq5i",
+    "devstral-small": "bafkreicr66zguzdldiqal4jdyrcd6y26lfaiy4glkah7n3hdve2ailptue",
     "flux-dev": "bafkreiaha3sjfmv4affmi5kbu6bnayenf2avwafp3cthhar3latmfi632u",
     "flux-schnell": "bafkreibks5pmc777snbo7dwk26sympe2o24tpqfedjq6gmgghwwu7iio34"
 }
