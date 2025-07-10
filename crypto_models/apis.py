@@ -87,20 +87,17 @@ def validate_model_field(request_data: Dict[str, Any]) -> Optional[Dict[str, Any
     
     try:
         service_info = get_service_info()
-        models = service_info.get("models", {})
+        models = list(service_info.get("models", {}).keys())
         
         # Check if the requested model hash is in the models dictionary
         if requested_model not in models:
-            logger.warning(f"Requested model '{requested_model}' not found in available models: {list(models.keys())}")
-            raise HTTPException(
-                status_code=400,
-                detail="Requested model is not running"
-            )
+            logger.warning(f"Requested model '{requested_model}' not found in available models: {models}. Using model {models[0]} instead.")
+            return service_info, models[0] 
         
         logger.debug(f"Model validation passed for '{requested_model}'")
         
         # Return the service info to avoid redundant calls
-        return service_info
+        return service_info, requested_model
             
     except HTTPException as e:
         # If we can't get service info (503), it means no model is running
@@ -418,10 +415,11 @@ class RequestProcessor:
     # Define which endpoints need to be processed sequentially
     MODEL_ENDPOINTS = {
         "/v1/chat/completions": (ChatCompletionRequest, ServiceHandler.generate_text_response),
-        "/v1/embeddings": (EmbeddingRequest, ServiceHandler.generate_embeddings_response),
-        "/v1/images/generations": (ImageGenerationRequest, ServiceHandler.generate_image_response),
         "/chat/completions": (ChatCompletionRequest, ServiceHandler.generate_text_response),
+        "/v1/embeddings": (EmbeddingRequest, ServiceHandler.generate_embeddings_response),
         "/embeddings": (EmbeddingRequest, ServiceHandler.generate_embeddings_response),
+        "/v1/images/generations": (ImageGenerationRequest, ServiceHandler.generate_image_response),
+        "/images/generations": (ImageGenerationRequest, ServiceHandler.generate_image_response),
     }
     
     @staticmethod
@@ -712,13 +710,9 @@ class RequestProcessor:
         request_id = generate_request_id()
         queue_size = RequestProcessor.queue.qsize()
         
-        if request_data.get("model") is None:
-            # request_data `model` should be the active model
-            active_model = crypto_models_manager.get_active_model()
-            request_data["model"] = active_model
-        
         # Validate that model field is present and get service info
-        service_info = validate_model_field(request_data)
+        service_info, validated_model = validate_model_field(request_data)
+        request_data["model"] = validated_model
         
         logger.info(f"[{request_id}] Adding request to queue for endpoint {endpoint} (queue size: {queue_size})")
         
@@ -748,13 +742,9 @@ class RequestProcessor:
         request_id = generate_request_id()
         logger.info(f"[{request_id}] Processing direct request for endpoint {endpoint}")
         
-        if request_data.get("model") is None:
-            # request_data `model` should be the active model
-            active_model = crypto_models_manager.get_active_model()
-            request_data["model"] = active_model
-        
-        # # Validate that model field is present and get service info
-        service_info = validate_model_field(request_data)
+        # Validate that model field is present and get service info
+        service_info, validated_model = validate_model_field(request_data)
+        request_data["model"] = validated_model
         
         app.state.last_request_time = time.time()
         await RequestProcessor._ensure_server_running(request_id)
@@ -1148,14 +1138,12 @@ async def update(request: Dict[str, Any]):
 async def chat_completions(request: ChatCompletionRequest):
     """Endpoint for chat completion requests."""
     request_dict = convert_request_to_dict(request)
-    task = request_dict.get("task")
     return await RequestProcessor.process_request("/chat/completions", request_dict)
 
 @app.post("/v1/chat/completions")
 async def v1_chat_completions(request: ChatCompletionRequest):
     """Endpoint for chat completion requests (v1 API)."""
     request_dict = convert_request_to_dict(request)
-    task = request_dict.get("task")
     return await RequestProcessor.process_request("/v1/chat/completions", request_dict)
 
 
@@ -1163,14 +1151,12 @@ async def v1_chat_completions(request: ChatCompletionRequest):
 async def embeddings(request: EmbeddingRequest):
     """Endpoint for embedding requests."""
     request_dict = convert_request_to_dict(request)
-    task = request_dict.get("task")
     return await RequestProcessor.process_request("/embeddings", request_dict)
 
 @app.post("/v1/embeddings")
 async def v1_embeddings(request: EmbeddingRequest):
     """Endpoint for embedding requests (v1 API)."""
     request_dict = convert_request_to_dict(request)
-    task = request_dict.get("task")
     return await RequestProcessor.process_request("/v1/embeddings", request_dict)
 
 
@@ -1178,7 +1164,6 @@ async def v1_embeddings(request: EmbeddingRequest):
 async def image_generations(request: ImageGenerationRequest):
     """Endpoint for image generation requests."""
     request_dict = convert_request_to_dict(request)
-    task = request_dict.get("task")
     return await RequestProcessor.process_request("/images/generations", request_dict)
     
 
@@ -1186,7 +1171,6 @@ async def image_generations(request: ImageGenerationRequest):
 async def v1_image_generations(request: ImageGenerationRequest):
     """Endpoint for image generation requests (v1 API)."""
     request_dict = convert_request_to_dict(request)
-    task = request_dict.get("task")
     return await RequestProcessor.process_request("/v1/images/generations", request_dict)
 
 @app.get("/models")
