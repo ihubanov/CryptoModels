@@ -149,13 +149,19 @@ log_message "Virtual environment activated."
 
 # Step 7: Install mflux dependencies
 log_message "Installing mlx-flux"
-pip install git+https://github.com/0x9334/mlx-flux.git
-log_message "mlx-flux installed successfully."
+if pip install git+https://github.com/0x9334/mlx-flux.git; then
+    log_message "mlx-flux installed successfully."
+else
+    log_error "Failed to install mlx-flux. Continuing with installation..."
+fi
 PYTHON_VERSION_MAJOR_MINOR=$("$PYTHON_CMD" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
 if [ "$PYTHON_VERSION_MAJOR_MINOR" = "3.13" ]; then
     log_message "Detected Python 3.13. Installing compatible SentencePiece wheel..."
-    pip install -q https://github.com/anthonywu/sentencepiece/releases/download/0.2.1-py13dev/sentencepiece-0.2.1-cp313-cp313-macosx_11_0_arm64.whl || handle_error $? "Failed to install SentencePiece for Python 3.13"
-    log_message "SentencePiece for Python 3.13 installed successfully."
+    if pip install -q https://github.com/anthonywu/sentencepiece/releases/download/0.2.1-py13dev/sentencepiece-0.2.1-cp313-cp313-macosx_11_0_arm64.whl; then
+        log_message "SentencePiece for Python 3.13 installed successfully."
+    else
+        log_error "Failed to install SentencePiece for Python 3.13. Continuing with installation..."
+    fi
 fi
 
 # Step 8: Install cryptomodels toolkit
