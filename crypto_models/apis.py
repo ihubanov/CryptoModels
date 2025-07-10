@@ -415,10 +415,11 @@ class RequestProcessor:
     # Define which endpoints need to be processed sequentially
     MODEL_ENDPOINTS = {
         "/v1/chat/completions": (ChatCompletionRequest, ServiceHandler.generate_text_response),
-        "/v1/embeddings": (EmbeddingRequest, ServiceHandler.generate_embeddings_response),
-        "/v1/images/generations": (ImageGenerationRequest, ServiceHandler.generate_image_response),
         "/chat/completions": (ChatCompletionRequest, ServiceHandler.generate_text_response),
+        "/v1/embeddings": (EmbeddingRequest, ServiceHandler.generate_embeddings_response),
         "/embeddings": (EmbeddingRequest, ServiceHandler.generate_embeddings_response),
+        "/v1/images/generations": (ImageGenerationRequest, ServiceHandler.generate_image_response),
+        "/images/generations": (ImageGenerationRequest, ServiceHandler.generate_image_response),
     }
     
     @staticmethod
