@@ -165,6 +165,13 @@ We've prepared several models for you to test with. Each model is listed with it
 |-------|------|-----|---------|
 | gemma-3n-e4b | 7.35 GB | 10.08 GB | `eai model run gemma-3n-e4b` |
 
+#### 🔤 Devstral-Small
+[Learn more about Devstral-Small](https://mistral.ai/news/devstral)
+
+| Model | Size | RAM | Command |
+|-------|------|-----|---------|
+| devstral-small | 25.1 GB | 31.71 GB | `eai model run devstral-small` |
+
 #### 🎨 Flux Series
 [Learn more about Flux](https://bfl.ai/models/flux-kontext)
 
