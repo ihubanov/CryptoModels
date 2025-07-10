@@ -35,7 +35,7 @@ SLEEP_TIME = 60
 if len(GATEWAY_URLS) == 1:
     MAX_ATTEMPTS = 3
 else:
-    MAX_ATTEMPTS = len(GATEWAY_URLS)
+    MAX_ATTEMPTS = len(GATEWAY_URLS) * 3
 POSTFIX_MODEL_PATH = ".gguf"
 
 # Extraction buffer factor for disk space estimation
