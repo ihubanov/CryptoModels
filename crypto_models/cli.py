@@ -1,6 +1,7 @@
 import sys
 import asyncio
 import argparse
+import random
 from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
@@ -12,10 +13,31 @@ from crypto_models import __version__
 from crypto_models.config import config
 from crypto_models.core import CryptoModelsManager
 from crypto_models.upload import upload_folder_to_lighthouse
-from crypto_models.download import download_model_from_filecoin_async, check_downloaded_model
+from crypto_models.download import download_model_from_filecoin_async, check_downloaded_model, DEFAULT_OUTPUT_DIR, POSTFIX_MODEL_PATH
 from crypto_models.preseved_models import PRESERVED_MODELS
 
 manager = CryptoModelsManager()
+
+def get_all_downloaded_models(output_dir: Path = DEFAULT_OUTPUT_DIR) -> list:
+    """
+    Get all downloaded model hashes from the llms-storage directory.
+    
+    Returns:
+        list: List of model hashes that have been downloaded
+    """
+    downloaded_models = []
+    
+    if not output_dir.exists():
+        return downloaded_models
+    
+    # Look for all .gguf files in the directory
+    for model_file in output_dir.glob(f"*{POSTFIX_MODEL_PATH}"):
+        # Extract hash from filename (remove .gguf extension)
+        model_hash = model_file.stem
+        if model_hash:  # Make sure it's not empty
+            downloaded_models.append(model_hash)
+    
+    return downloaded_models
 
 def print_banner():
     """Display a beautiful banner for the CLI"""
@@ -146,6 +168,39 @@ def parse_args():
         metavar="HOST"
     )
     run_command.add_argument(
+        "--context-length", 
+        type=int, 
+        default=config.model.DEFAULT_CONTEXT_LENGTH,
+        help=f"📏 Context length for the model (default: {config.model.DEFAULT_CONTEXT_LENGTH})",
+        metavar="LENGTH"
+    )
+    
+    # Model serve command
+    serve_command = model_subparsers.add_parser(
+        "serve", 
+        help="🎯 Serve all downloaded models with optional main model selection",
+        description="Run all models in llms-storage with a main model (randomly selected if not specified)"
+    )
+    serve_command.add_argument(
+        "--main-hash", 
+        help="🔗 Hash of the main model to serve (if not specified, uses random model)",
+        metavar="HASH"
+    )
+    serve_command.add_argument(
+        "--port", 
+        type=int, 
+        default=config.network.DEFAULT_PORT,
+        help=f"🌐 Port number for the server (default: {config.network.DEFAULT_PORT})",
+        metavar="PORT"
+    )
+    serve_command.add_argument(
+        "--host", 
+        type=str, 
+        default=config.network.DEFAULT_HOST,
+        help=f"🏠 Host address for the server (default: {config.network.DEFAULT_HOST})",
+        metavar="HOST"
+    )
+    serve_command.add_argument(
         "--context-length", 
         type=int, 
         default=config.model.DEFAULT_CONTEXT_LENGTH,
@@ -358,6 +413,60 @@ def handle_run(args):
     else:
         print_success(f"Model server started successfully on {args.host}:{args.port}")
 
+def handle_serve(args):
+    """Handle model serve command - run all downloaded models with specified main model"""
+    print_info("Discovering downloaded models in llms-storage...")
+    
+    # Get all downloaded models
+    downloaded_models = get_all_downloaded_models()
+    
+    if not downloaded_models:
+        print_error("No downloaded models found in llms-storage directory")
+        print_info("Use 'eai model download --hash <hash>' to download models first")
+        sys.exit(1)
+    
+    print_success(f"Found {len(downloaded_models)} downloaded model(s)")
+    
+    # Handle main hash selection
+    main_hash = args.main_hash
+    if main_hash is None:
+        # Randomly select a model as main
+        main_hash = random.choice(downloaded_models)
+        print_info(f"No main hash specified, randomly selected: {main_hash}")
+    else:
+        # Validate that main hash exists among downloaded models
+        if main_hash not in downloaded_models:
+            print_error(f"Main model hash '{main_hash}' not found in downloaded models")
+            print_warning("Available downloaded models:")
+            for i, model_hash in enumerate(downloaded_models, 1):
+                print(f"  {i}. {model_hash}")
+            sys.exit(1)
+        print_success(f"Using specified main model hash: {main_hash}")
+    
+    # Prepare the hash string for multi-model startup
+    # Put main hash first, then all others (excluding main hash to avoid duplication)
+    other_hashes = [h for h in downloaded_models if h != main_hash]
+    all_hashes = [main_hash] + other_hashes
+    model_hashes_str = ','.join(all_hashes)
+    
+    if len(all_hashes) > 1:
+        print_info(f"Multi-model setup:")
+        print_info(f"  Main model (loaded immediately): {main_hash}")
+        print_info(f"  On-demand models ({len(other_hashes)}): {', '.join(other_hashes[:3])}" + 
+                  ("..." if len(other_hashes) > 3 else ""))
+    else:
+        print_info(f"Single model: {main_hash}")
+    
+    print_info(f"Starting model server...")
+    print_info(f"Host: {args.host}, Port: {args.port}, Context: {args.context_length}")
+    
+    if not manager.start(model_hashes_str, args.port, args.host, args.context_length):
+        print_error("Failed to start model server")
+        sys.exit(1)
+    else:
+        print_success(f"Model server started successfully on {args.host}:{args.port}")
+        print_info(f"Serving {len(all_hashes)} model(s) with main model: {main_hash}")
+
 def handle_stop(args):
     """Handle model stop with beautiful output"""
     if args.force:
@@ -442,6 +551,8 @@ def main():
     if known_args.command == "model":
         if known_args.model_command == "run":
             handle_run(known_args)
+        elif known_args.model_command == "serve":
+            handle_serve(known_args)
         elif known_args.model_command == "stop":
             handle_stop(known_args)
         elif known_args.model_command == "download":
@@ -454,7 +565,7 @@ def main():
             handle_check(known_args)
         else:
             print_error(f"Unknown model command: {known_args.model_command}")
-            print_info("Available model commands: run, stop, download, status, preserve, check")
+            print_info("Available model commands: run, serve, stop, download, status, preserve, check")
             sys.exit(2)
     else:
         print_error(f"Unknown command: {known_args.command}")

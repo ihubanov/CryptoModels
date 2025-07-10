@@ -18,6 +18,28 @@ class PerformanceConfig:
     # Dynamic unload feature settings
     IDLE_TIMEOUT: int = int(os.getenv("CRYPTO_IDLE_TIMEOUT", "1800"))  # 30 minutes
     UNLOAD_CHECK_INTERVAL: int = int(os.getenv("CRYPTO_UNLOAD_CHECK_INTERVAL", "30"))  # 30 seconds
+    UNLOAD_LOG_INTERVAL: int = int(os.getenv("CRYPTO_UNLOAD_LOG_INTERVAL", "300"))  # 5 minutes
+    UNLOAD_MAX_CONSECUTIVE_ERRORS: int = int(os.getenv("CRYPTO_UNLOAD_MAX_CONSECUTIVE_ERRORS", "5"))
+    UNLOAD_ERROR_SLEEP_MULTIPLIER: int = int(os.getenv("CRYPTO_UNLOAD_ERROR_SLEEP_MULTIPLIER", "2"))
+    
+    # Stream cleanup settings
+    STREAM_CLEANUP_INTERVAL: int = int(os.getenv("CRYPTO_STREAM_CLEANUP_INTERVAL", "60"))  # 1 minute
+    STREAM_CLEANUP_ERROR_SLEEP: int = int(os.getenv("CRYPTO_STREAM_CLEANUP_ERROR_SLEEP", "120"))  # 2 minutes
+    STREAM_STALE_TIMEOUT: int = int(os.getenv("CRYPTO_STREAM_STALE_TIMEOUT", "600"))  # 10 minutes
+    
+    # Model switch and verification settings
+    MODEL_SWITCH_VERIFICATION_DELAY: float = float(os.getenv("CRYPTO_MODEL_SWITCH_VERIFICATION_DELAY", "0.5"))  # 0.5 seconds
+    MODEL_SWITCH_MAX_RETRIES: int = int(os.getenv("CRYPTO_MODEL_SWITCH_MAX_RETRIES", "3"))
+    MODEL_SWITCH_STREAM_TIMEOUT: float = float(os.getenv("CRYPTO_MODEL_SWITCH_STREAM_TIMEOUT", "30.0"))  # 30 seconds
+    
+    # Queue management settings
+    QUEUE_BACKPRESSURE_TIMEOUT: float = float(os.getenv("CRYPTO_QUEUE_BACKPRESSURE_TIMEOUT", "30.0"))  # 30 seconds
+    PROCESS_CHECK_INTERVAL: float = float(os.getenv("CRYPTO_PROCESS_CHECK_INTERVAL", "0.1"))  # 0.1 seconds
+    
+    # Shutdown timeouts
+    SHUTDOWN_TASK_TIMEOUT: float = float(os.getenv("CRYPTO_SHUTDOWN_TASK_TIMEOUT", "10.0"))  # 10 seconds
+    SHUTDOWN_SERVER_TIMEOUT: float = float(os.getenv("CRYPTO_SHUTDOWN_SERVER_TIMEOUT", "15.0"))  # 15 seconds
+    SHUTDOWN_CLIENT_TIMEOUT: float = float(os.getenv("CRYPTO_SHUTDOWN_CLIENT_TIMEOUT", "5.0"))  # 5 seconds
     
     # Service timeouts
     SERVICE_START_TIMEOUT: int = int(os.getenv("CRYPTO_SERVICE_START_TIMEOUT", "1800"))  # 30 minutes

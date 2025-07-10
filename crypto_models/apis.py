@@ -50,6 +50,20 @@ crypto_models_manager = CryptoModelsManager()
 # Performance constants from config
 IDLE_TIMEOUT = config.performance.IDLE_TIMEOUT
 UNLOAD_CHECK_INTERVAL = config.performance.UNLOAD_CHECK_INTERVAL
+UNLOAD_LOG_INTERVAL = config.performance.UNLOAD_LOG_INTERVAL
+UNLOAD_MAX_CONSECUTIVE_ERRORS = config.performance.UNLOAD_MAX_CONSECUTIVE_ERRORS
+UNLOAD_ERROR_SLEEP_MULTIPLIER = config.performance.UNLOAD_ERROR_SLEEP_MULTIPLIER
+STREAM_CLEANUP_INTERVAL = config.performance.STREAM_CLEANUP_INTERVAL
+STREAM_CLEANUP_ERROR_SLEEP = config.performance.STREAM_CLEANUP_ERROR_SLEEP
+STREAM_STALE_TIMEOUT = config.performance.STREAM_STALE_TIMEOUT
+MODEL_SWITCH_VERIFICATION_DELAY = config.performance.MODEL_SWITCH_VERIFICATION_DELAY
+MODEL_SWITCH_MAX_RETRIES = config.performance.MODEL_SWITCH_MAX_RETRIES
+MODEL_SWITCH_STREAM_TIMEOUT = config.performance.MODEL_SWITCH_STREAM_TIMEOUT
+QUEUE_BACKPRESSURE_TIMEOUT = config.performance.QUEUE_BACKPRESSURE_TIMEOUT
+PROCESS_CHECK_INTERVAL = config.performance.PROCESS_CHECK_INTERVAL
+SHUTDOWN_TASK_TIMEOUT = config.performance.SHUTDOWN_TASK_TIMEOUT
+SHUTDOWN_SERVER_TIMEOUT = config.performance.SHUTDOWN_SERVER_TIMEOUT
+SHUTDOWN_CLIENT_TIMEOUT = config.performance.SHUTDOWN_CLIENT_TIMEOUT
 SERVICE_START_TIMEOUT = config.performance.SERVICE_START_TIMEOUT
 POOL_CONNECTIONS = config.performance.POOL_CONNECTIONS
 POOL_KEEPALIVE = config.performance.POOL_KEEPALIVE
@@ -454,7 +468,7 @@ class RequestProcessor:
             logger.warning(f"Force terminated {terminated_count} active streams")
     
     @staticmethod
-    async def wait_for_streams_to_complete(timeout: float = 30.0, force_terminate: bool = False):
+    async def wait_for_streams_to_complete(timeout: float = MODEL_SWITCH_STREAM_TIMEOUT, force_terminate: bool = False):
         """Wait for all active streams to complete before proceeding."""
         start_time = time.time()
         initial_count = len(RequestProcessor.active_streams)
@@ -514,7 +528,7 @@ class RequestProcessor:
         async with RequestProcessor.active_streams_lock:
             for stream_id in list(RequestProcessor.active_streams):
                 if stream_id in RequestProcessor.stream_timestamps:
-                    if current_time - RequestProcessor.stream_timestamps[stream_id] > 600:  # 10 minutes
+                    if current_time - RequestProcessor.stream_timestamps[stream_id] > STREAM_STALE_TIMEOUT:
                         stale_streams.append(stream_id)
                 else:
                     # Stream without timestamp is considered stale
@@ -531,11 +545,11 @@ class RequestProcessor:
                 logger.info(f"No stale streams found, {len(RequestProcessor.active_streams)} active streams are healthy")
     
     @staticmethod
-    async def _verify_model_switch(model_requested: str, request_id: str, max_retries: int = 3) -> bool:
+    async def _verify_model_switch(model_requested: str, request_id: str, max_retries: int = MODEL_SWITCH_MAX_RETRIES) -> bool:
         """Verify model switch with retry logic."""
         for attempt in range(max_retries):
             try:
-                await asyncio.sleep(0.5)  # Brief delay for service info update
+                await asyncio.sleep(MODEL_SWITCH_VERIFICATION_DELAY)
                 
                 updated_service_info = crypto_models_manager.get_service_info()
                 updated_models = updated_service_info.get("models", {})
@@ -551,7 +565,7 @@ class RequestProcessor:
         return False
     
     @staticmethod
-    async def _add_to_queue_with_backpressure(item, timeout: float = 30.0):
+    async def _add_to_queue_with_backpressure(item, timeout: float = QUEUE_BACKPRESSURE_TIMEOUT):
         """Add item to queue with timeout and backpressure handling."""
         try:
             await asyncio.wait_for(
@@ -604,7 +618,7 @@ class RequestProcessor:
             if await RequestProcessor.has_active_streams():
                 stream_count = len(RequestProcessor.active_streams)
                 logger.info(f"[{request_id}] Waiting for {stream_count} active streams to complete before model switch")
-                if not await RequestProcessor.wait_for_streams_to_complete(timeout=30.0, force_terminate=True):
+                if not await RequestProcessor.wait_for_streams_to_complete(timeout=MODEL_SWITCH_STREAM_TIMEOUT, force_terminate=True):
                     logger.error(f"[{request_id}] Failed to wait for streams to complete")
                     return False
                 logger.info(f"[{request_id}] All streams completed, proceeding with model switch")
@@ -681,7 +695,7 @@ class RequestProcessor:
                 # Additional check for processes that might be hung
                 try:
                     # Quick responsiveness check - verify process is actually doing something
-                    cpu_percent = process.cpu_percent(interval=0.1)  # Non-blocking check
+                    cpu_percent = process.cpu_percent(interval=PROCESS_CHECK_INTERVAL)
                     memory_info = process.memory_info()
                     
                     logger.debug(f"[{request_id}] CryptoModels server PID {pid} is healthy "
@@ -891,7 +905,8 @@ async def unload_checker():
     """
     logger.info("Unload checker task started")
     consecutive_errors = 0
-    max_consecutive_errors = 5
+    max_consecutive_errors = UNLOAD_MAX_CONSECUTIVE_ERRORS
+    last_log_time = 0  # Track when we last logged idle status
     
     while True:
         try:
@@ -915,24 +930,35 @@ async def unload_checker():
                 current_time = time.time()
                 idle_time = current_time - app.state.last_request_time
                 
-                # Log idle status periodically (every 5 minutes)
-                if int(idle_time) % 300 == 0:
+                # Log idle status periodically - Fixed timing logic
+                if current_time - last_log_time >= UNLOAD_LOG_INTERVAL:
                     logger.info(f"CryptoModels server idle time: {idle_time:.1f}s (threshold: {IDLE_TIMEOUT}s)")
+                    last_log_time = current_time
                 
                 # Check if server should be unloaded
                 if idle_time > IDLE_TIMEOUT:
                     pid = service_info.get("pid")
                     logger.info(f"CryptoModels server (PID: {pid}) has been idle for {idle_time:.2f}s, initiating unload...")
                     
+                    # Check for active streams before unloading
+                    if await RequestProcessor.has_active_streams():
+                        active_stream_count = len(RequestProcessor.active_streams)
+                        logger.info(f"Skipping unload due to {active_stream_count} active streams")
+                        # Reset last request time to prevent immediate retries
+                        app.state.last_request_time = current_time
+                        continue
+                    
                     # Use the optimized kill method from CryptoModelsManager
                     unload_success = await crypto_models_manager.kill_ai_server()
                     
                     if unload_success:
                         logger.info("CryptoModels server unloaded successfully due to inactivity")
-                        # Update last request time to prevent immediate re-unload attempts
-                        app.state.last_request_time = current_time
+                        # Don't update last_request_time here to avoid race conditions
+                        # The next request will naturally update it when it arrives
                     else:
                         logger.warning("Failed to unload CryptoModels server")
+                        # Update last request time to prevent immediate retries
+                        app.state.last_request_time = current_time
                 
                 # Reset error counter on successful check
                 consecutive_errors = 0
@@ -949,7 +975,7 @@ async def unload_checker():
                 # If we have too many consecutive errors, wait longer before next attempt
                 if consecutive_errors >= max_consecutive_errors:
                     logger.error(f"Too many consecutive errors in unload checker, extending sleep interval")
-                    await asyncio.sleep(UNLOAD_CHECK_INTERVAL * 2)  # Double the sleep time
+                    await asyncio.sleep(UNLOAD_CHECK_INTERVAL * UNLOAD_ERROR_SLEEP_MULTIPLIER)
                     consecutive_errors = 0  # Reset counter after extended wait
             
         except asyncio.CancelledError:
@@ -958,7 +984,7 @@ async def unload_checker():
         except Exception as e:
             logger.error(f"Critical error in unload checker task: {str(e)}", exc_info=True)
             # Wait a bit longer before retrying on critical errors
-            await asyncio.sleep(UNLOAD_CHECK_INTERVAL * 2)
+            await asyncio.sleep(UNLOAD_CHECK_INTERVAL * UNLOAD_ERROR_SLEEP_MULTIPLIER)
 
 async def stream_cleanup_task():
     """Periodic cleanup of stale streams."""
@@ -966,7 +992,7 @@ async def stream_cleanup_task():
     
     while True:
         try:
-            await asyncio.sleep(60)  # Check every minute
+            await asyncio.sleep(STREAM_CLEANUP_INTERVAL)
             
             # Clean up stale streams
             await RequestProcessor.cleanup_stale_streams()
@@ -977,7 +1003,7 @@ async def stream_cleanup_task():
         except Exception as e:
             logger.error(f"Error in stream cleanup task: {str(e)}", exc_info=True)
             # Wait a bit longer before retrying on critical errors
-            await asyncio.sleep(120)
+            await asyncio.sleep(STREAM_CLEANUP_ERROR_SLEEP)
 
 # Performance monitoring middleware
 @app.middleware("http")
@@ -1044,7 +1070,7 @@ async def shutdown_event():
             # Wait for tasks to complete cancellation with timeout
             await asyncio.wait_for(
                 asyncio.gather(*tasks_to_cancel, return_exceptions=True),
-                timeout=10.0  # 10 second timeout for task cancellation
+                timeout=SHUTDOWN_TASK_TIMEOUT
             )
             logger.info("Background tasks cancelled successfully")
         except asyncio.TimeoutError:
@@ -1062,7 +1088,7 @@ async def shutdown_event():
             # Use the optimized kill method with timeout
             kill_success = await asyncio.wait_for(
                 crypto_models_manager.kill_ai_server(),
-                timeout=15.0  # 15 second timeout for AI server termination
+                timeout=SHUTDOWN_SERVER_TIMEOUT
             )
             
             if kill_success:
@@ -1083,7 +1109,7 @@ async def shutdown_event():
     if hasattr(app.state, "client"):
         try:
             logger.info("Closing HTTP client connections...")
-            await asyncio.wait_for(app.state.client.aclose(), timeout=5.0)
+            await asyncio.wait_for(app.state.client.aclose(), timeout=SHUTDOWN_CLIENT_TIMEOUT)
             logger.info("HTTP client closed successfully")
         except asyncio.TimeoutError:
             logger.warning("HTTP client close timed out")

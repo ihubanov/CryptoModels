@@ -13,6 +13,7 @@ This guide will help you deploy your AI models using decentralized infrastructur
 - [CLI Overview](#-cli-overview)
 - [Running Models](#-running-models)
 - [Using the API](#-using-the-api)
+- [Multi-Model Support](#-multi-model-support)
 - [Advanced Usage](#advanced-usage)
 - [Additional Information](#-additional-information)
 - [Migration Guide](#-migration-guide)
@@ -98,6 +99,7 @@ CryptoModels uses a structured command hierarchy for better organization. All mo
 # Model operations
 eai model run --hash <hash>           # Run a model server
 eai model run <model-name>            # Run a preserved model (e.g., qwen3-1.7b)
+eai model serve [--main-hash <hash>]  # Serve all downloaded models (with optional main model)
 eai model stop                        # Stop the running model server  
 eai model status                      # Check which model is running
 eai model download --hash <hash>      # Download a model from IPFS
@@ -115,6 +117,12 @@ eai model run qwen3-1.7b --port 8080
 
 # Run any model by hash
 eai model run --hash bafkreiacd5mwy4a5wkdmvxsk42nsupes5uf4q3dm52k36mvbhgdrez422y --port 8080
+
+# Serve all downloaded models (random main model)
+eai model serve --port 8080
+
+# Serve all downloaded models with specific main model
+eai model serve --main-hash bafkreiacd5mwy4a5wkdmvxsk42nsupes5uf4q3dm52k36mvbhgdrez422y --port 8080
 
 # Check status
 eai model status
@@ -261,6 +269,376 @@ curl -X POST http://localhost:8080/v1/images/generations \
     "size": "1024x1024"
 }'
 ```
+
+## 🔄 Multi-Model Support
+
+CryptoModels supports running multiple models simultaneously with intelligent request-based switching. This allows you to serve several models from a single server instance with optimized resource usage.
+
+### How Multi-Model Works
+
+#### **Setup Types:**
+
+1. **Single Model**: Traditional approach - one model loaded and active
+2. **Multi-Model**: Multiple models available, with automatic switching based on requests
+
+#### **Model States:**
+- **Main Model**: The primary model that's immediately loaded and active when the server starts
+- **On-Demand Models**: Additional models that are loaded automatically when first requested
+
+### **Request-Based Model Switching**
+
+When a client makes a request specifying a model (via the `model` field in the API), the system:
+
+1. **Checks Current Model**: If the requested model is already active → processes immediately
+2. **Smart Switching**: If a different model is requested → automatically switches to that model
+3. **Stream Protection**: Waits for active streams to complete before switching models
+4. **Automatic Loading**: On-demand models are loaded seamlessly when first requested
+
+#### **Switching Logic Flow:**
+```
+Incoming Request
+    ↓
+Check Model Field
+    ↓
+Model Field Present?
+    ├─ NO → Use Main Model (immediate)
+    └─ YES → Is Requested Model Valid?
+        ├─ NO → Use Main Model (fallback)
+        └─ YES → Is Requested Model Active?
+            ├─ YES → Process Request Immediately
+            └─ NO → Check for Active Streams
+                ├─ Streams Active → Wait for Completion
+                └─ No Streams → Switch Model → Process Request
+```
+
+### **Running Multi-Model Setups**
+
+#### **Method 1: Specify Multiple Models by Task**
+```bash
+# Mix different task types for comprehensive AI service
+eai model run qwen3-8b,qwen3-embedding-4b,flux-dev
+# Main: qwen3-8b (chat), On-demand: qwen3-embedding-4b (embed), flux-dev (image-generation)
+
+# Chat-focused setup with multiple chat models
+eai model run qwen3-1.7b,qwen3-8b,gemma-3-4b
+# Main: qwen3-1.7b (chat), On-demand: qwen3-8b (chat), gemma-3-4b (chat with vision)
+
+# Embedding-focused setup
+eai model run qwen3-embedding-4b,qwen3-embedding-0.6b
+# Main: qwen3-embedding-4b (embed), On-demand: qwen3-embedding-0.6b (embed)
+
+# Run with custom hashes for any task type
+eai model run --hash hash1,hash2,hash3
+# Main: hash1, On-demand: hash2, hash3
+```
+
+#### **Method 2: Serve All Downloaded Models by Task**
+```bash
+# Auto-discover and serve all downloaded models (any mix of tasks)
+eai model serve
+# Randomly selects main model from available models of any task type
+
+# Serve all with specific main model
+eai model serve --main-hash <specific_hash>
+# Uses specified hash as main (could be chat, embed, or image-generation)
+```
+
+#### **Task-Specific Server Examples**
+```bash
+# Multi-task AI server (recommended for versatility)
+eai model run qwen3-8b,qwen3-embedding-4b,flux-dev
+# Provides: chat completion, text embeddings, and image generation
+
+# Vision-enabled chat server
+eai model run gemma-3-4b,qwen3-8b
+# Provides: vision chat (main) and text-only chat (on-demand)
+
+# Embedding service with fallback
+eai model run qwen3-embedding-4b,qwen3-embedding-0.6b
+# Provides: high-quality embeddings (main) and fast embeddings (on-demand)
+
+# Image generation studio
+eai model run flux-dev,flux-schnell
+# Provides: high-quality images (main) and fast images (on-demand)
+```
+
+### **API Usage with Multi-Model**
+
+Once running, specify which model to use in your API requests:
+
+#### **Discovering Available Models**
+
+First, check what models are available using the `/v1/models` endpoint:
+
+```bash
+curl http://localhost:8080/v1/models
+```
+
+**Example Response:**
+```json
+{
+  "data": [
+    {
+      "id": "bafkreid5z4lddvv4qbgdlz2nqo6eumxwetwmkpesrumisx72k3ahq73zpy",
+      "root": "qwen3-8b", 
+      "ram": 12.0,
+      "folder_name": "qwen3-8b",
+      "task": "chat"
+    },
+    {
+      "id": "bafkreiaevddz5ssjnbkmdrl6dzw5sugwirzi7wput7z2ttcwnvj2wiiw5q",
+      "root": "qwen3-embedding-4b",
+      "ram": 5.13, 
+      "folder_name": "qwen3-embedding-4b",
+      "task": "embed"
+    },
+    {
+      "id": "bafkreiaha3sjfmv4affmi5kbu6bnayenf2avwafp3cthhar3latmfi632u",
+      "root": "flux-dev",
+      "ram": 20.0,
+      "folder_name": "flux-dev", 
+      "task": "image-generation"
+    },
+    {
+      "id": "bafkreicr66zguzdldiqal4jdyrcd6y26lfaiy4glkah7n3hdve2ailptue",
+      "root": "devstral-small",
+      "ram": 31.71,
+      "folder_name": "devstral-small",
+      "task": "chat"
+    }
+  ]
+}
+```
+
+#### **Using the Model Field in Requests**
+
+Use the `id` (hash) from `/v1/models` as the `model` field in your requests:
+
+##### **Chat Models (task: "chat")**
+
+```bash
+# Request using main chat model (immediate response)
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "bafkreib6pws5dx5ur6exbhulmf35twfcizdkxvup4cklzprlvaervfz5zy",
+    "messages": [{"role": "user", "content": "Hello!"}]
+}'
+
+# Switch to a different chat model (may have brief delay on first use)
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "bafkreid5z4lddvv4qbgdlz2nqo6eumxwetwmkpesrumisx72k3ahq73zpy",
+    "messages": [{"role": "user", "content": "Complex reasoning task"}]
+}'
+```
+
+##### **Embedding Models (task: "embed")**
+
+```bash
+# Use embedding model for text similarity
+curl -X POST http://localhost:8080/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "bafkreiacd5mwy4a5wkdmvxsk42nsupes5uf4q3dm52k36mvbhgdrez422y",
+    "input": ["Hello, world!", "How are you?"]
+}'
+
+# Switch to a larger embedding model
+curl -X POST http://localhost:8080/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "bafkreia7nzedkxlr6tebfxvo552zq7cba6sncloxwyivfl3tpj7hl5dz5u",
+    "input": ["Complex document text for better embeddings"]
+}'
+```
+
+##### **Image Generation Models (task: "image-generation")**
+
+```bash
+# Generate images using Flux model
+curl -X POST http://localhost:8080/v1/images/generations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "bafkreiaha3sjfmv4affmi5kbu6bnayenf2avwafp3cthhar3latmfi632u",
+    "prompt": "A serene landscape with mountains and a lake at sunset",
+    "n": 1,
+    "steps": 25,
+    "size": "1024x1024"
+}'
+
+# Switch to different image generation model
+curl -X POST http://localhost:8080/v1/images/generations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "bafkreibks5pmc777snbo7dwk26sympe2o24tpqfedjq6gmgghwwu7iio34",
+    "prompt": "A futuristic city skyline at night",
+    "n": 1,
+    "size": "1024x1024"
+}'
+```
+
+##### **Vision Models (task: "chat" with image support)**
+
+```bash
+# Use vision-capable chat model
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "bafkreiaevddz5ssjnbkmdrl6dzw5sugwirzi7wput7z2ttcwnvj2wiiw5q",
+    "messages": [{
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "What do you see in this image?"},
+        {"type": "image_url", "image_url": {"url": "https://example.com/image.jpg"}}
+      ]
+    }]
+}'
+```
+
+#### **Model Switching Behavior**
+
+**Important**: The server uses the following logic for model selection:
+
+1. **Explicit Model Request**: When you specify `"model": "<model_hash>"` → switches to that model
+2. **No Model Field**: When you omit the `"model"` field → uses the main model  
+3. **Invalid Model**: When you specify a non-existent model → falls back to main model
+
+```bash
+# ✅ Correct: Switch to specific model using hash
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "bafkreib6pws5dx5ur6exbhulmf35twfcizdkxvup4cklzprlvaervfz5zy",
+    "messages": [{"role": "user", "content": "Use specific model hash"}]
+}'
+
+# ⚠️ Fallback: No model specified → uses main model
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [{"role": "user", "content": "Uses main model"}]
+}'
+
+# ⚠️ Fallback: Invalid model hash → uses main model
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "invalid-hash-12345",
+    "messages": [{"role": "user", "content": "Falls back to main model"}]
+}'
+```
+
+**Key Points:**
+- **Model Hash Required**: To switch models, always use valid hash identifiers (the `id` field) from `/v1/models`
+- **Folder Names Don't Work**: Using folder names like `"qwen3-8b"` in the model field will cause fallback to main model
+- **Graceful Fallback**: Invalid or missing model specifications default to the main model
+- **No Errors**: The server won't throw errors for invalid models, it silently uses the main model
+- **Performance**: Main model requests are always fastest (no switching delay)
+
+#### **Model Identifier Options**
+
+You can use the following as the `model` field:
+- **Hash (Required for Switching)**: `"bafkreib6pws5dx5ur6exbhulmf35twfcizdkxvup4cklzprlvaervfz5zy"` (from `id` field in `/v1/models`)
+- **Generic Fallback**: `"local-model"` (uses currently active model - not recommended)
+
+**Important**: Only model hashes work for switching between models. Folder names or other identifiers will cause the server to fall back to the main model.
+
+#### **Task-Based Model Selection**
+
+When running multi-model setups, you can serve different models for different tasks:
+
+```bash
+# Example: Serve chat, embedding, and image generation models together
+eai model run qwen3-8b,qwen3-embedding-4b,flux-dev
+
+# Then use different endpoints with appropriate model hashes:
+# - Chat: /v1/chat/completions with hash of qwen3-8b
+# - Embeddings: /v1/embeddings with hash of qwen3-embedding-4b  
+# - Images: /v1/images/generations with hash of flux-dev
+```
+
+#### **Recommended Workflow for Model Requests**
+
+```bash
+# 1. Start your multi-model server
+eai model run qwen3-8b,qwen3-embedding-4b,flux-dev
+
+# 2. Discover available models and their hash IDs
+curl http://localhost:8080/v1/models
+
+# 3. Make requests with explicit model hash specification (use "id" field from step 2)
+curl -X POST http://localhost:8080/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "bafkreia7nzedkxlr6tebfxvo552zq7cba6sncloxwyivfl3tpj7hl5dz5u",
+    "input": ["Text to embed"]
+}'
+```
+
+**Warning**: If you omit the `"model"` field or use an invalid model hash, the server will silently fall back to the main model (first model in the startup list), which may not be appropriate for your task type.
+
+### **Performance Considerations**
+
+#### **✅ Optimizations:**
+- **Smart Caching**: Models stay loaded once activated
+- **Stream Protection**: No interruptions during active conversations
+- **Resource Sharing**: Efficient memory usage across models
+- **Fast Switching**: Sub-second model switching when no streams are active
+
+#### **📊 Behavior:**
+- **First Request**: On-demand models have a brief loading delay (2-10 seconds)
+- **Subsequent Requests**: Instant response from cached models
+- **Memory Usage**: Only active models consume GPU/RAM resources
+- **Concurrent Streams**: Multiple simultaneous conversations supported
+- **Fallback Performance**: Missing/invalid model requests use main model (no switching delay)
+- **Silent Fallback**: No error messages for invalid models, seamless fallback to main model
+
+#### **⚡ Best Practices:**
+- **Start with Main Model**: Choose your most frequently used model as main
+- **Group by Task**: Use similar-sized models for consistent performance
+- **Monitor Resources**: Ensure sufficient RAM for your model combination
+- **Validate Model Names**: Always check `/v1/models` before making requests to ensure model exists
+- **Explicit Model Specification**: Always include the `"model"` field to avoid unexpected fallback
+- **Client-Side Validation**: Implement model validation in your application to prevent silent fallbacks
+- **Task-Specific Optimization**:
+  - **Chat Models**: Prioritize context length and response quality
+  - **Embedding Models**: Consider batch processing capabilities
+  - **Image Generation**: Ensure adequate GPU memory for high-resolution outputs
+  - **Vision Models**: Account for image processing overhead
+- **Mixed-Task Servers**: When serving multiple task types, start with the most resource-intensive model as main
+- **Model Switching**: Keep similar task types together for faster switching
+
+### **Model Management**
+
+#### **CLI Status Monitoring:**
+```bash
+# Check current server status and active model
+eai model status
+
+# Shows current active model and total loaded models
+```
+
+#### **API Model Discovery:**
+```bash
+# List all available models with detailed information
+curl http://localhost:8080/v1/models
+
+# Returns model IDs, names, RAM requirements, task types, and status
+```
+
+**Key Information Returned:**
+- **`id`**: Model hash (unique identifier)
+- **`root`**: Folder name (user-friendly name)
+- **`ram`**: Memory requirement in GB
+- **`folder_name`**: Original folder name
+- **`task`**: Model type and compatible endpoints:
+  - **`"chat"`**: Use with `/v1/chat/completions` (includes vision models)
+  - **`"embed"`**: Use with `/v1/embeddings`
+  - **`"image-generation"`**: Use with `/v1/images/generations`
+
+Use the `id` (hash) value as the `model` field in your API requests to specify which model to use. Note that using `root` (folder name) values will cause fallback to the main model. Match the model's `task` type with the appropriate API endpoint for optimal results.
 
 ## Advanced Usage
 
