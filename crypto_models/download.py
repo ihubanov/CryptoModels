@@ -31,11 +31,11 @@ GATEWAY_URLS = [
 ]
 DEFAULT_OUTPUT_DIR = Path.cwd() / "llms-storage"
 SLEEP_TIME = 60
-# Set MAX_ATTEMPTS: if only one gateway, try at least 3 times; otherwise, try once per gateway
+# Set MAX_ATTEMPTS: if only one gateway, try at least 6 times; otherwise, try 3 times per gateway
 if len(GATEWAY_URLS) == 1:
-    MAX_ATTEMPTS = 3
+    MAX_ATTEMPTS = 6
 else:
-    MAX_ATTEMPTS = len(GATEWAY_URLS)
+    MAX_ATTEMPTS = len(GATEWAY_URLS) * 3
 POSTFIX_MODEL_PATH = ".gguf"
 
 # Extraction buffer factor for disk space estimation
