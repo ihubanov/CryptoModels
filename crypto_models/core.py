@@ -1554,6 +1554,7 @@ class CryptoModelsManager:
                 local_model_path, local_ai_port, host, context_length, template_path
             )
         elif "devstral-small" in folder_name.lower():
+            context_length = context_length // 2
             template_path, best_practice_path = self._get_family_template_and_practice("devstral-small")
             return self._build_ai_command(
                 local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
