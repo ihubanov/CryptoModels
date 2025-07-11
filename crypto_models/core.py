@@ -51,6 +51,27 @@ class CryptoModelsManager:
         self.logs_dir = Path(config.file_paths.LOGS_DIR)
         self.logs_dir.mkdir(exist_ok=True)
         
+        # Clean up any stale temporary lock files on initialization
+        self._cleanup_temp_lock_files()
+        
+    def _cleanup_temp_lock_files(self) -> None:
+        """Clean up any temporary lock files left behind by previous runs."""
+        try:
+            # Look for .tmp files in the same directory as the lock file
+            lock_dir = self.start_lock_file.parent
+            temp_pattern = f"{self.start_lock_file.name}.tmp"
+            
+            for temp_file in lock_dir.glob(f"*.tmp"):
+                # Only remove temp files that match our naming pattern
+                if temp_file.name.startswith(self.start_lock_file.stem):
+                    try:
+                        temp_file.unlink()
+                        logger.debug(f"Cleaned up stale temporary lock file: {temp_file}")
+                    except OSError as e:
+                        logger.warning(f"Failed to clean up temporary lock file {temp_file}: {e}")
+        except Exception as e:
+            logger.warning(f"Error during temp lock file cleanup: {e}")
+            
     def _get_free_port(self) -> int:
         """Get a free port number."""
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -1083,40 +1104,64 @@ class CryptoModelsManager:
             "local_projector_path": projector_path
         }
 
+    def _validate_lock_data(self, lock_data: dict) -> tuple[bool, str]:
+        """
+        Validate lock file data structure and return (is_valid, error_message).
+        
+        Args:
+            lock_data: Dictionary containing lock file data
+            
+        Returns:
+            tuple: (is_valid: bool, error_message: str)
+        """
+        required_fields = ["pid", "timestamp", "hash", "host", "port"]
+        
+        for field in required_fields:
+            if field not in lock_data:
+                return False, f"Missing required field: {field}"
+            
+        # Validate field types
+        if not isinstance(lock_data["pid"], int) or lock_data["pid"] <= 0:
+            return False, "Invalid PID: must be positive integer"
+            
+        if not isinstance(lock_data["timestamp"], (int, float)) or lock_data["timestamp"] <= 0:
+            return False, "Invalid timestamp: must be positive number"
+            
+        if not isinstance(lock_data["hash"], str) or not lock_data["hash"].strip():
+            return False, "Invalid hash: must be non-empty string"
+            
+        if not isinstance(lock_data["host"], str) or not lock_data["host"].strip():
+            return False, "Invalid host: must be non-empty string"
+            
+        if not isinstance(lock_data["port"], int) or not (1 <= lock_data["port"] <= 65535):
+            return False, "Invalid port: must be integer between 1-65535"
+            
+        # Check version compatibility (if present)
+        version = lock_data.get("version", "1.0")
+        if not isinstance(version, str):
+            return False, "Invalid version: must be string"
+            
+        # For now, we support version 1.0 (current) and future versions
+        try:
+            major, minor = map(int, version.split(".")[:2])
+            if major > 1:
+                return False, f"Unsupported lock file version: {version}"
+        except (ValueError, IndexError):
+            return False, f"Invalid version format: {version}"
+            
+        return True, ""
+    
     def _acquire_start_lock(self, hash: str, host: str, port: int) -> bool:
         """
-        Acquire the start lock efficiently with minimal I/O operations.
+        Acquire the start lock efficiently with atomic operations and minimal race conditions.
         Returns True if lock acquired, False otherwise.
         """
         current_pid = os.getpid()
         current_time = time.time()
         
-        # Check and handle existing lock
-        if self.start_lock_file.exists():
-            try:
-                with open(self.start_lock_file, "r") as f:
-                    lock_data = json.load(f)
-                
-                lock_pid = lock_data.get("pid")
-                lock_timestamp = lock_data.get("timestamp", 0)
-                
-                # Check if lock is stale (over 30 minutes) or process is dead
-                if current_time - lock_timestamp > self.LOCK_TIMEOUT or not psutil.pid_exists(lock_pid):
-                    logger.warning(f"Removing stale lock file (PID: {lock_pid})")
-                    self.start_lock_file.unlink()
-                elif lock_pid != current_pid:
-                    logger.error(f"Another process (PID: {lock_pid}) is already starting service")
-                    return False
-                    
-            except (json.JSONDecodeError, KeyError, OSError) as e:
-                logger.warning(f"Corrupted lock file, removing: {e}")
-                try:
-                    self.start_lock_file.unlink()
-                except OSError:
-                    pass
-        
-        # Create new lock
+        # Create lock data
         lock_data = {
+            "version": "1.0",
             "pid": current_pid,
             "hash": hash,
             "timestamp": current_time,
@@ -1124,38 +1169,192 @@ class CryptoModelsManager:
             "port": port
         }
         
-        try:
-            with open(self.start_lock_file, "w") as f:
-                json.dump(lock_data, f)
-            logger.info(f"Acquired start lock for PID {current_pid}")
-            return True
-        except OSError as e:
-            logger.error(f"Failed to create lock file: {e}")
-            return False
+        # Attempt to acquire lock with atomic operations
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                # Check and handle existing lock
+                if self.start_lock_file.exists():
+                    try:
+                        with open(self.start_lock_file, "r") as f:
+                            existing_lock_data = json.load(f)
+                        
+                        # Validate existing lock data
+                        is_valid, error_msg = self._validate_lock_data(existing_lock_data)
+                        if not is_valid:
+                            logger.warning(f"Removing corrupted lock file (attempt {attempt + 1}/{max_attempts}): {error_msg}")
+                            try:
+                                self.start_lock_file.unlink()
+                            except OSError:
+                                pass  # May have been removed by another process
+                        elif existing_lock_data.get("pid") == current_pid:
+                            # Same process already has the lock
+                            logger.info(f"Lock already acquired by current process (PID: {current_pid})")
+                            return True
+                        elif existing_lock_data.get("pid") and not psutil.pid_exists(existing_lock_data["pid"]):
+                            logger.warning(f"Removing lock file for dead process (PID: {existing_lock_data['pid']})")
+                            try:
+                                self.start_lock_file.unlink()
+                            except OSError:
+                                pass  # May have been removed by another process
+                        else:
+                            # Check if it's actually the same process (edge case)
+                            if existing_lock_data.get("pid") and psutil.pid_exists(existing_lock_data["pid"]):
+                                logger.error(f"Another process (PID: {existing_lock_data['pid']}) is already starting service")
+                                return False
+                            else:
+                                # Process doesn't exist, remove stale lock
+                                logger.warning(f"Removing lock file for non-existent process (PID: {existing_lock_data['pid']})")
+                                try:
+                                    self.start_lock_file.unlink()
+                                except OSError:
+                                    pass
+                                    
+                    except (json.JSONDecodeError, KeyError, OSError) as e:
+                        logger.warning(f"Corrupted lock file (attempt {attempt + 1}/{max_attempts}), removing: {e}")
+                        try:
+                            self.start_lock_file.unlink()
+                        except OSError:
+                            pass
+                
+                # Atomic lock creation using temporary file + rename
+                temp_lock_file = self.start_lock_file.with_suffix('.tmp')
+                try:
+                    # Write to temporary file first
+                    with open(temp_lock_file, "w") as f:
+                        json.dump(lock_data, f)
+                        f.flush()
+                        os.fsync(f.fileno())  # Ensure data is written to disk
+                    
+                    # Atomic rename (on most filesystems)
+                    temp_lock_file.rename(self.start_lock_file)
+                    logger.info(f"Acquired start lock for PID {current_pid}")
+                    return True
+                    
+                except OSError as e:
+                    # Clean up temp file on error
+                    try:
+                        temp_lock_file.unlink()
+                    except OSError:
+                        pass
+                    
+                    if attempt < max_attempts - 1:
+                        logger.warning(f"Failed to create lock file (attempt {attempt + 1}/{max_attempts}): {e}")
+                        time.sleep(0.1 * (attempt + 1))  # Brief exponential backoff
+                        continue
+                    else:
+                        logger.error(f"Failed to create lock file after {max_attempts} attempts: {e}")
+                        return False
+                        
+            except Exception as e:
+                logger.error(f"Unexpected error during lock acquisition (attempt {attempt + 1}/{max_attempts}): {e}")
+                if attempt < max_attempts - 1:
+                    time.sleep(0.1 * (attempt + 1))
+                    continue
+                else:
+                    return False
+        
+        return False
     
     def _release_start_lock(self) -> None:
-        """Release the start lock if we own it."""
+        """Release the start lock if we own it, with improved error handling."""
         if not self.start_lock_file.exists():
+            logger.debug("Lock file does not exist, nothing to release")
             return
             
         current_pid = os.getpid()
-        try:
-            with open(self.start_lock_file, "r") as f:
-                lock_data = json.load(f)
-            
-            if lock_data.get("pid") == current_pid:
-                self.start_lock_file.unlink()
-                logger.info(f"Released start lock for PID {current_pid}")
-            else:
-                logger.warning(f"Lock file PID mismatch, not removing")
-                
-        except (json.JSONDecodeError, KeyError, OSError) as e:
-            logger.warning(f"Error releasing lock: {e}")
+        max_attempts = 3
+        
+        for attempt in range(max_attempts):
             try:
-                self.start_lock_file.unlink()
-                logger.info("Removed potentially corrupted lock file")
-            except OSError:
-                pass
+                # Read and verify lock ownership
+                with open(self.start_lock_file, "r") as f:
+                    lock_data = json.load(f)
+                
+                # Validate lock data
+                is_valid, error_msg = self._validate_lock_data(lock_data)
+                if not is_valid:
+                    logger.warning(f"Corrupted lock file during release (attempt {attempt + 1}/{max_attempts}): {error_msg}")
+                    try:
+                        self.start_lock_file.unlink()
+                        logger.info("Removed corrupted lock file during release")
+                        return
+                    except OSError as e2:
+                        if attempt < max_attempts - 1:
+                            logger.warning(f"Failed to remove corrupted lock file: {e2}")
+                            time.sleep(0.1 * (attempt + 1))
+                            continue
+                        else:
+                            logger.error(f"Failed to remove corrupted lock file after {max_attempts} attempts: {e2}")
+                            return
+                
+                existing_pid = lock_data.get("pid")
+                if not existing_pid:
+                    logger.warning("Lock file has no PID, removing corrupted file")
+                    try:
+                        self.start_lock_file.unlink()
+                        logger.info("Removed corrupted lock file")
+                    except OSError as e:
+                        logger.warning(f"Failed to remove corrupted lock file: {e}")
+                    return
+                
+                if existing_pid == current_pid:
+                    # We own the lock, remove it
+                    try:
+                        self.start_lock_file.unlink()
+                        logger.info(f"Released start lock for PID {current_pid}")
+                    except OSError as e:
+                        if attempt < max_attempts - 1:
+                            logger.warning(f"Failed to remove lock file (attempt {attempt + 1}/{max_attempts}): {e}")
+                            time.sleep(0.1 * (attempt + 1))
+                            continue
+                        else:
+                            logger.error(f"Failed to remove lock file after {max_attempts} attempts: {e}")
+                    return
+                else:
+                    # Check if the other process still exists
+                    if psutil.pid_exists(existing_pid):
+                        logger.warning(f"Lock file owned by different process (PID: {existing_pid}), not removing")
+                    else:
+                        logger.warning(f"Lock file owned by dead process (PID: {existing_pid}), removing stale lock")
+                        try:
+                            self.start_lock_file.unlink()
+                            logger.info(f"Removed stale lock file for dead process (PID: {existing_pid})")
+                        except OSError as e:
+                            logger.warning(f"Failed to remove stale lock file: {e}")
+                    return
+                    
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning(f"Corrupted lock file during release (attempt {attempt + 1}/{max_attempts}): {e}")
+                try:
+                    self.start_lock_file.unlink()
+                    logger.info("Removed corrupted lock file during release")
+                    return
+                except OSError as e2:
+                    if attempt < max_attempts - 1:
+                        logger.warning(f"Failed to remove corrupted lock file: {e2}")
+                        time.sleep(0.1 * (attempt + 1))
+                        continue
+                    else:
+                        logger.error(f"Failed to remove corrupted lock file after {max_attempts} attempts: {e2}")
+                        return
+                        
+            except OSError as e:
+                if attempt < max_attempts - 1:
+                    logger.warning(f"Error accessing lock file during release (attempt {attempt + 1}/{max_attempts}): {e}")
+                    time.sleep(0.1 * (attempt + 1))
+                    continue
+                else:
+                    logger.error(f"Error accessing lock file during release after {max_attempts} attempts: {e}")
+                    return
+            
+            except Exception as e:
+                logger.error(f"Unexpected error during lock release (attempt {attempt + 1}/{max_attempts}): {e}")
+                if attempt < max_attempts - 1:
+                    time.sleep(0.1 * (attempt + 1))
+                    continue
+                else:
+                    return
 
     def _check_port_availability(self, host: str, port: int, timeout: int = 2) -> bool:
         """
