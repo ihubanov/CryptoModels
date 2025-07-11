@@ -475,7 +475,6 @@ def handle_stop(args):
         print_info("Stopping model server...")
     if not manager.stop(force=args.force):
         print_error("Failed to stop model server or no server running")
-        sys.exit(1)
     else:
         print_success("Model server stopped successfully")
 
