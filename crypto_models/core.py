@@ -77,72 +77,6 @@ class CryptoModelsManager:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(("", 0))
             return s.getsockname()[1]
-    
-    def restart(self):
-        """
-        Restart the currently running CryptoModels service with multi-model support.
-
-        Returns:
-            bool: True if the service restarted successfully, False otherwise.
-        """
-        if not self.msgpack_file.exists():
-            logger.warning("No running CryptoModels service to restart.")
-            return False
-        
-        try:
-            # Load service details from the msgpack file
-            with open(self.msgpack_file, "rb") as f:
-                service_info = msgpack.load(f)
-            
-            port = service_info.get("app_port")
-            context_length = service_info.get("context_length")
-            models = service_info.get("models", {})
-
-            # Check if this is a multi-model service
-            if models:
-                # Extract hashes in the order they were originally provided
-                # The active model should be first, followed by on-demand models
-                active_hash = None
-                on_demand_hashes = []
-                
-                for hash_val, model_info in models.items():
-                    if model_info.get("active", False):
-                        active_hash = hash_val
-                    elif model_info.get("on_demand", False):
-                        on_demand_hashes.append(hash_val)
-                
-                # Reconstruct the original hash order
-                if active_hash:
-                    hashes = [active_hash] + on_demand_hashes
-                else:
-                    # Fallback: use all model hashes
-                    hashes = list(models.keys())
-                
-                logger.info(f"Restarting multi-model CryptoModels service with {len(hashes)} models on port {port}...")
-                logger.info(f"Main model: {hashes[0]}")
-                if len(hashes) > 1:
-                    logger.info(f"On-demand models: {hashes[1:]}")
-                
-                # Stop the current service with force for restart
-                self.stop(force=True)
-
-                # Start the service with the same parameters (convert list back to string)
-                hashes_str = ','.join(hashes)
-                return self.start(hashes_str, port, context_length=context_length)
-            else:
-                # Legacy single-model service
-                hash_val = service_info.get("hash")
-                logger.info(f"Restarting single-model CryptoModels service '{hash_val}' on port {port}...")
-                
-                # Stop the current service with force for restart
-                self.stop(force=True)
-
-                # Start the service with the same parameters
-                return self.start(hash_val, port, context_length=context_length)
-                
-        except Exception as e:
-            logger.error(f"Error restarting CryptoModels service: {str(e)}", exc_info=True)
-            return False
 
     def _get_family_template_and_practice(self, model_family: str):
         """Helper to get template and best practice paths based on folder name."""
@@ -538,12 +472,58 @@ class CryptoModelsManager:
             ports_info = [(app_port, "API"), (local_ai_port, "AI")]
             ports_freed = self._check_ports_freed(ports_info, max_retries=3)
             
-            # Clean up metadata file
+            # Clean up metadata file - ONLY rely on direct process verification, not return values
             metadata_cleaned = False
-            if ai_stopped and api_stopped:
+            
+            # Direct verification: check if processes are actually dead
+            ai_actually_dead = True
+            api_actually_dead = True
+            
+            # Check AI process
+            if pid:
+                if psutil.pid_exists(pid):
+                    try:
+                        process = psutil.Process(pid)
+                        status = process.status()
+                        if status not in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
+                            ai_actually_dead = False
+                            logger.warning(f"AI process (PID: {pid}) still running with status: {status}")
+                        else:
+                            logger.info(f"AI process (PID: {pid}) confirmed dead with status: {status}")
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        # Process is gone or inaccessible, consider it dead
+                        ai_actually_dead = True
+                        logger.info(f"AI process (PID: {pid}) confirmed dead (no longer exists)")
+                else:
+                    logger.info(f"AI process (PID: {pid}) confirmed dead (PID doesn't exist)")
+            
+            # Check API process
+            if app_pid:
+                if psutil.pid_exists(app_pid):
+                    try:
+                        process = psutil.Process(app_pid)
+                        status = process.status()
+                        if status not in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
+                            api_actually_dead = False
+                            logger.warning(f"API process (PID: {app_pid}) still running with status: {status}")
+                        else:
+                            logger.info(f"API process (PID: {app_pid}) confirmed dead with status: {status}")
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        # Process is gone or inaccessible, consider it dead
+                        api_actually_dead = True
+                        logger.info(f"API process (PID: {app_pid}) confirmed dead (no longer exists)")
+                else:
+                    logger.info(f"API process (PID: {app_pid}) confirmed dead (PID doesn't exist)")
+            
+            # Only remove msgpack file if both processes are confirmed dead
+            if ai_actually_dead and api_actually_dead:
                 metadata_cleaned = self._cleanup_service_metadata(force=force)
+                logger.info("All processes confirmed dead, removing service metadata file")
             else:
-                logger.warning("Keeping service metadata file since not all processes were successfully stopped")
+                logger.warning("Keeping service metadata file - not all processes confirmed dead")
+                logger.warning(f"AI dead: {ai_actually_dead}, API dead: {api_actually_dead}")
+                # Log the termination attempt results for debugging
+                logger.info(f"Termination attempt results - AI stopped: {ai_stopped}, API stopped: {api_stopped}")
             
             # Determine overall success
             success = ai_stopped and api_stopped and metadata_cleaned
