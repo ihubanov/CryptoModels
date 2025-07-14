@@ -180,6 +180,13 @@ We've prepared several models for you to test with. Each model is listed with it
 |-------|------|-----|---------|
 | devstral-small | 25.1 GB | 31.71 GB | `eai model run devstral-small` |
 
+#### 🔤 LFM2 Series
+[Learn more about LFM2](https://www.liquid.ai/)
+
+| Model | Size | RAM | Command |
+|-------|------|-----|---------|
+| lfm2-1.2b | 1.25 GB | 1.72 GB | `eai model run lfm2-1.2b` |
+
 #### 🎨 Flux Series
 [Learn more about Flux](https://bfl.ai/models/flux-kontext)
 
