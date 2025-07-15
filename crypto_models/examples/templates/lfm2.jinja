@@ -1,6 +1,18 @@
 {{- bos_token -}}
+{%- if tools -%}
+	{{- "<|tool_list_start|>" + tools | tojson + "<|tool_list_end|>" + "\n" -}}
+{%- endif -%}
 {%- for message in messages -%}
-	{{- "<|im_start|>" + message["role"] + "\n" + message["content"] + "<|im_end|>" + "\n" -}}
+	{%- if message["role"] == "tool" -%}
+		{{- "<|tool_response_start|>" + message["content"] + "<|tool_response_end|>" + "\n" -}}
+	{%- else -%}
+		{{- "<|im_start|>" + message["role"] + "\n" -}}
+		{{- message["content"] -}}
+		{%- if message["role"] == "assistant" and message.get("tool_calls") -%}
+			{{- "\n<|tool_call_start|>" + message["tool_calls"] + "<|tool_call_end|>" -}}
+		{%- endif -%}
+		{{- "<|im_end|>" + "\n" -}}
+	{%- endif -%}
 {%- endfor -%}
 {%- if add_generation_prompt -%}
 	{{- "<|im_start|>assistant\n" -}}
