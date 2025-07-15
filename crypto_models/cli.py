@@ -289,6 +289,11 @@ def parse_args():
         metavar="CONFIG"
     )
     preserve_command.add_argument(
+        "--lora",
+        action="store_true",
+        help="🔍 Indicate if this is a lora model (default: False)",
+    )
+    preserve_command.add_argument(
         "--folder-path", 
         type=str, 
         required=True,
