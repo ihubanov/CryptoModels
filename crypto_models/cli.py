@@ -514,6 +514,7 @@ def handle_preserve(args):
         "config_name": args.config_name,
         "hf_repo": args.hf_repo,
         "hf_file": args.hf_file,
+        "lora": args.lora,
     }
     
     try:
