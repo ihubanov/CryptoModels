@@ -1551,20 +1551,19 @@ class CryptoModelsManager:
             "--host", host
         ]
         
-        # Add LoRA parameters if provided
-        if lora_paths and lora_scales:
-            if len(lora_paths) != len(lora_scales):
-                logger.warning(f"LoRA paths count ({len(lora_paths)}) doesn't match scales count ({len(lora_scales)})")
-            else:
-                # Convert paths and scales to comma-separated strings
-                lora_paths_str = ','.join(lora_paths)
-                lora_scales_str = ','.join(str(scale) for scale in lora_scales)
-                
-                command.extend([
-                    "--lora-paths", lora_paths_str,
-                    "--lora-scales", lora_scales_str
-                ])
-                logger.info(f"Added LoRA parameters: paths={lora_paths_str}, scales={lora_scales_str}")
+        # Validate LoRA parameters
+        if lora_paths and lora_scales and len(lora_paths) != len(lora_scales):
+            raise ValueError(f"LoRA paths count ({len(lora_paths)}) must match scales count ({len(lora_scales)})")
+        
+        # Add LoRA paths if provided
+        if lora_paths:
+            lora_path_str = ",".join(lora_paths)
+            command.extend(["--lora-paths", lora_path_str])
+        
+        # Add LoRA scales if provided
+        if lora_scales:
+            lora_scale_str = ",".join(str(scale) for scale in lora_scales)
+            command.extend(["--lora-scales", lora_scale_str])
         
         return command
 
