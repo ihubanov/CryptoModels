@@ -18,7 +18,7 @@ log_error() {
 
 # Version comparison function
 compare_versions() {
-    local installed="$1"
+    local installed="v$1"
     local remote="$2"
     
     # Validate version strings (basic semver check)
@@ -156,6 +156,7 @@ install_package_by_tag() {
                 needs_update=true
                 mismatch_reason="Version mismatch: installed=$installed_version, desired=$tag"
             fi
+
         fi
         
         if [ "$needs_update" = true ]; then
@@ -174,7 +175,7 @@ install_package_by_tag() {
     fi
     
     # Install from specific tag
-    local install_cmd="pip install git+${github_url}@${tag}"
+    local install_cmd="pip install git+${github_url}@v${tag}"
     log_message "Installing with command: $install_cmd"
     
     if eval "$install_cmd"; then
@@ -284,8 +285,8 @@ show_package_status() {
 #   MLX_FLUX_TAG="main"          # Install from main branch
 #   MLX_FLUX_TAG="feature-xyz"   # Install from specific branch
 
-MLX_FLUX_TAG="v1.0.0"           # Leave empty for latest, or set specific tag
-CRYPTOMODELS_TAG="v1.1.15"   # Leave empty for latest, or set specific tag
+MLX_FLUX_TAG="1.0.2"           # Leave empty for latest, or set specific tag
+CRYPTOMODELS_TAG="1.1.15"   # Leave empty for latest, or set specific tag
 
 # Uncomment the lines below to see available tags before installation
 # list_available_tags "https://github.com/0x9334/mlx-flux.git" "mlx-flux"
@@ -457,4 +458,5 @@ fi
 log_message "Setting up cryptomodels toolkit..."
 update_package "cryptomodels" "https://github.com/eternalai-org/CryptoModels.git" "https://raw.githubusercontent.com/eternalai-org/CryptoModels/main/crypto_models/__init__.py" "__version__ = \"[0-9.]*\"" "pip install -q git+https://github.com/eternalai-org/CryptoModels.git" "$CRYPTOMODELS_TAG"
 
+log_message "Setup completed successfully."
 log_message "Setup completed successfully."
