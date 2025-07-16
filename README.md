@@ -196,6 +196,9 @@ Generate high-quality images from text prompts using Flux models.
 |-------|------|-----|---------|
 | flux-dev | 32 GB | 20 GB | `eai model run flux-dev` |
 | flux-schnell | 32 GB | 20 GB | `eai model run flux-schnell` |
+| flux-dev-nsfw | 32 GB | 20.1 GB | `eai model run flux-dev-nsfw` |
+
+**Note**: The `flux-dev-nsfw` model includes LoRA safetensor support for enhanced image generation capabilities.
 
 **Example usage:**
 ```bash
