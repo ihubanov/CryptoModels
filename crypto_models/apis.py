@@ -898,93 +898,94 @@ class RequestProcessor:
                     pass
 
 # Background Tasks
-async def unload_checker():
-    """
-    Optimized unload checker that periodically checks if the CryptoModels server has been idle 
-    for too long and unloads it if needed.
-    """
-    logger.info("Unload checker task started")
-    consecutive_errors = 0
-    max_consecutive_errors = UNLOAD_MAX_CONSECUTIVE_ERRORS
-    last_log_time = 0  # Track when we last logged idle status
-    
-    while True:
-        try:
-            await asyncio.sleep(UNLOAD_CHECK_INTERVAL)
-            
-            try:
-                service_info = get_service_info()
-                
-                # Check if we have both PID and last request time
-                if "pid" not in service_info:
-                    logger.debug("No PID found in service info, skipping unload check")
-                    consecutive_errors = 0  # Reset error counter
-                    continue
-                
-                if not hasattr(app.state, "last_request_time"):
-                    logger.debug("No last request time available, skipping unload check")
-                    consecutive_errors = 0
-                    continue
-                
-                # Calculate idle time
-                current_time = time.time()
-                idle_time = current_time - app.state.last_request_time
-                
-                # Log idle status periodically - Fixed timing logic
-                if current_time - last_log_time >= UNLOAD_LOG_INTERVAL:
-                    logger.info(f"CryptoModels server idle time: {idle_time:.1f}s (threshold: {IDLE_TIMEOUT}s)")
-                    last_log_time = current_time
-                
-                # Check if server should be unloaded
-                if idle_time > IDLE_TIMEOUT:
-                    pid = service_info.get("pid")
-                    logger.info(f"CryptoModels server (PID: {pid}) has been idle for {idle_time:.2f}s, initiating unload...")
-                    
-                    # Check for active streams before unloading
-                    if await RequestProcessor.has_active_streams():
-                        active_stream_count = len(RequestProcessor.active_streams)
-                        logger.info(f"Skipping unload due to {active_stream_count} active streams")
-                        # Reset last request time to prevent immediate retries
-                        app.state.last_request_time = current_time
-                        continue
-                    
-                    # Use the optimized kill method from CryptoModelsManager
-                    unload_success = await crypto_models_manager.kill_ai_server()
-                    
-                    if unload_success:
-                        logger.info("CryptoModels server unloaded successfully due to inactivity")
-                        # Don't update last_request_time here to avoid race conditions
-                        # The next request will naturally update it when it arrives
-                    else:
-                        logger.warning("Failed to unload CryptoModels server")
-                        # Update last request time to prevent immediate retries
-                        app.state.last_request_time = current_time
-                
-                # Reset error counter on successful check
-                consecutive_errors = 0
-                
-            except HTTPException as e:
-                # Service info not available - this is expected when no service is running
-                consecutive_errors = 0  # Don't count this as an error
-                logger.debug(f"Service info not available (expected when no service running): {e}")
-                
-            except Exception as e:
-                consecutive_errors += 1
-                logger.error(f"Error in unload checker (attempt {consecutive_errors}/{max_consecutive_errors}): {str(e)}")
-                
-                # If we have too many consecutive errors, wait longer before next attempt
-                if consecutive_errors >= max_consecutive_errors:
-                    logger.error(f"Too many consecutive errors in unload checker, extending sleep interval")
-                    await asyncio.sleep(UNLOAD_CHECK_INTERVAL * UNLOAD_ERROR_SLEEP_MULTIPLIER)
-                    consecutive_errors = 0  # Reset counter after extended wait
-            
-        except asyncio.CancelledError:
-            logger.info("Unload checker task cancelled")
-            break
-        except Exception as e:
-            logger.error(f"Critical error in unload checker task: {str(e)}", exc_info=True)
-            # Wait a bit longer before retrying on critical errors
-            await asyncio.sleep(UNLOAD_CHECK_INTERVAL * UNLOAD_ERROR_SLEEP_MULTIPLIER)
+# TEMPORARILY DISABLED: Dynamic unload functionality
+# async def unload_checker():
+#     """
+#     Optimized unload checker that periodically checks if the CryptoModels server has been idle 
+#     for too long and unloads it if needed.
+#     """
+#     logger.info("Unload checker task started")
+#     consecutive_errors = 0
+#     max_consecutive_errors = UNLOAD_MAX_CONSECUTIVE_ERRORS
+#     last_log_time = 0  # Track when we last logged idle status
+#     
+#     while True:
+#         try:
+#             await asyncio.sleep(UNLOAD_CHECK_INTERVAL)
+#             
+#             try:
+#                 service_info = get_service_info()
+#                 
+#                 # Check if we have both PID and last request time
+#                 if "pid" not in service_info:
+#                     logger.debug("No PID found in service info, skipping unload check")
+#                     consecutive_errors = 0  # Reset error counter
+#                     continue
+#                 
+#                 if not hasattr(app.state, "last_request_time"):
+#                     logger.debug("No last request time available, skipping unload check")
+#                     consecutive_errors = 0
+#                     continue
+#                 
+#                 # Calculate idle time
+#                 current_time = time.time()
+#                 idle_time = current_time - app.state.last_request_time
+#                 
+#                 # Log idle status periodically - Fixed timing logic
+#                 if current_time - last_log_time >= UNLOAD_LOG_INTERVAL:
+#                     logger.info(f"CryptoModels server idle time: {idle_time:.1f}s (threshold: {IDLE_TIMEOUT}s)")
+#                     last_log_time = current_time
+#                 
+#                 # Check if server should be unloaded
+#                 if idle_time > IDLE_TIMEOUT:
+#                     pid = service_info.get("pid")
+#                     logger.info(f"CryptoModels server (PID: {pid}) has been idle for {idle_time:.2f}s, initiating unload...")
+#                     
+#                     # Check for active streams before unloading
+#                     if await RequestProcessor.has_active_streams():
+#                         active_stream_count = len(RequestProcessor.active_streams)
+#                         logger.info(f"Skipping unload due to {active_stream_count} active streams")
+#                         # Reset last request time to prevent immediate retries
+#                         app.state.last_request_time = current_time
+#                         continue
+#                     
+#                     # Use the optimized kill method from CryptoModelsManager
+#                     unload_success = await crypto_models_manager.kill_ai_server()
+#                     
+#                     if unload_success:
+#                         logger.info("CryptoModels server unloaded successfully due to inactivity")
+#                         # Don't update last_request_time here to avoid race conditions
+#                         # The next request will naturally update it when it arrives
+#                     else:
+#                         logger.warning("Failed to unload CryptoModels server")
+#                         # Update last request time to prevent immediate retries
+#                         app.state.last_request_time = current_time
+#                 
+#                 # Reset error counter on successful check
+#                 consecutive_errors = 0
+#                 
+#             except HTTPException as e:
+#                 # Service info not available - this is expected when no service is running
+#                 consecutive_errors = 0  # Don't count this as an error
+#                 logger.debug(f"Service info not available (expected when no service running): {e}")
+#                 
+#             except Exception as e:
+#                 consecutive_errors += 1
+#                 logger.error(f"Error in unload checker (attempt {consecutive_errors}/{max_consecutive_errors}): {str(e)}")
+#                 
+#                 # If we have too many consecutive errors, wait longer before next attempt
+#                 if consecutive_errors >= max_consecutive_errors:
+#                     logger.error(f"Too many consecutive errors in unload checker, extending sleep interval")
+#                     await asyncio.sleep(UNLOAD_CHECK_INTERVAL * UNLOAD_ERROR_SLEEP_MULTIPLIER)
+#                     consecutive_errors = 0  # Reset counter after extended wait
+#             
+#         except asyncio.CancelledError:
+#             logger.info("Unload checker task cancelled")
+#             break
+#         except Exception as e:
+#             logger.error(f"Critical error in unload checker task: {str(e)}", exc_info=True)
+#             # Wait a bit longer before retrying on critical errors
+#             await asyncio.sleep(UNLOAD_CHECK_INTERVAL * UNLOAD_ERROR_SLEEP_MULTIPLIER)
 
 async def stream_cleanup_task():
     """Periodic cleanup of stale streams."""
@@ -1039,7 +1040,8 @@ async def startup_event():
     
     # Start background tasks
     app.state.worker_task = asyncio.create_task(RequestProcessor.worker())
-    app.state.unload_checker_task = asyncio.create_task(unload_checker())
+    # TEMPORARILY DISABLED: Dynamic unload functionality
+    # app.state.unload_checker_task = asyncio.create_task(unload_checker())
     app.state.stream_cleanup_task = asyncio.create_task(stream_cleanup_task())
     
     logger.info("Service started successfully")
@@ -1056,7 +1058,7 @@ async def shutdown_event():
     tasks_to_cancel = []
     task_names = []
     
-    for task_attr in ["worker_task", "unload_checker_task", "stream_cleanup_task"]:
+    for task_attr in ["worker_task", "stream_cleanup_task"]:  # TEMPORARILY DISABLED: "unload_checker_task"
         if hasattr(app.state, task_attr):
             task = getattr(app.state, task_attr)
             if not task.done():
