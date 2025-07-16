@@ -1734,9 +1734,16 @@ class CryptoModelsManager:
                             logger.warning("Falling back to regular model mode")
                             is_lora = False
                 
+                print(effective_model_path)
+                print(local_ai_port)
+                print(host)
+                print(config_name)
+                print(lora_paths)
+                print(lora_scales)
                 running_ai_command = self._build_image_generation_command(
                     effective_model_path, local_ai_port, host, config_name, lora_paths, lora_scales
                 )
+                print(running_ai_command)
             else:
                 running_ai_command = self._build_model_command(folder_name, local_model_path, local_ai_port, host, context_length)
                 
