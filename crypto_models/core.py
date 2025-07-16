@@ -320,18 +320,10 @@ class CryptoModelsManager:
                                 logger.error(f"Unexpected error during LoRA setup: {e}")
                                 logger.warning("Falling back to regular model mode")
                                 is_lora = False
-
-                    print(effective_model_path)
-                    print(local_ai_port)
-                    print(host)
-                    print(config_name)
-                    print(lora_paths)
-                    print(lora_scales)
                         
                     running_ai_command = self._build_image_generation_command(
                         effective_model_path, local_ai_port, host, config_name, lora_paths, lora_scales
                     )
-                    print(running_ai_command)
                     service_metadata = self._create_service_metadata(
                         main_hash, local_model_path, local_ai_port, port, context_length, task, False, None
                     )
