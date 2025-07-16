@@ -12,7 +12,7 @@ import pkg_resources
 import shutil
 from pathlib import Path
 from loguru import logger
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from crypto_models.config import config
 from crypto_models.utils import wait_for_health
 from crypto_models.download import download_model_from_filecoin_async
@@ -262,6 +262,7 @@ class CryptoModelsManager:
                 ram = metadata.get("ram", None)
                 task = metadata.get("task", "chat")
                 config_name = metadata.get("config_name", "flux-dev")
+                is_lora = metadata.get("lora", False)
                 
                 local_ai_port = self._get_free_port()
                 
@@ -274,7 +275,36 @@ class CryptoModelsManager:
                 elif task == "image-generation":
                     if not shutil.which("mlx-flux"):
                         raise CryptoAgentsServiceError("mlx-flux command not found in PATH")
-                    running_ai_command = self._build_image_generation_command(local_model_path, local_ai_port, host, config_name)
+                    
+                    # Initialize LoRA variables
+                    lora_paths = None
+                    lora_scales = None
+                    effective_model_path = local_model_path
+                    
+                    if is_lora:
+                        lora_metadata, error_msg = self._load_lora_metadata(local_model_path)
+                        if lora_metadata is None:
+                            logger.error(f"Failed to load LoRA metadata: {error_msg}")
+                            logger.warning("Falling back to regular model mode")
+                            is_lora = False
+                        else:
+                            try:
+                                base_model_hash = lora_metadata["base_model"]
+                                base_model_path = asyncio.run(download_model_from_filecoin_async(base_model_hash))
+                                lora_paths = lora_metadata["lora_paths"]
+                                lora_scales = lora_metadata["lora_scales"]
+                                effective_model_path = base_model_path  # Use base model path for LoRA
+                                logger.info(f"LoRA model detected - using base model: {base_model_path}")
+                                logger.info(f"LoRA paths: {lora_paths}")
+                                logger.info(f"LoRA scales: {lora_scales}")
+                            except Exception as e:
+                                logger.error(f"Error downloading base model for LoRA: {e}")
+                                logger.warning("Falling back to regular model mode")
+                                is_lora = False
+                        
+                    running_ai_command = self._build_image_generation_command(
+                        effective_model_path, local_ai_port, host, config_name, lora_paths, lora_scales
+                    )
                     service_metadata = self._create_service_metadata(
                         main_hash, local_model_path, local_ai_port, port, context_length, task, False, None
                     )
@@ -1508,8 +1538,10 @@ class CryptoModelsManager:
             logger.error(f"Failed to update service info: {str(e)}")
             return False
 
-    def _build_image_generation_command(self, model_path: str, port: int, host: str, config_name: str) -> list:
-        """Build the image-generation command with MLX Flux parameters."""
+    def _build_image_generation_command(self, model_path: str, port: int, host: str, config_name: str, 
+                                       lora_paths: Optional[List[str]] = None, 
+                                       lora_scales: Optional[List[float]] = None) -> list:
+        """Build the image-generation command with MLX Flux parameters and optional LoRA support."""
         command = [
             "mlx-flux",
             "serve",
@@ -1518,6 +1550,22 @@ class CryptoModelsManager:
             "--port", str(port),
             "--host", host
         ]
+        
+        # Add LoRA parameters if provided
+        if lora_paths and lora_scales:
+            if len(lora_paths) != len(lora_scales):
+                logger.warning(f"LoRA paths count ({len(lora_paths)}) doesn't match scales count ({len(lora_scales)})")
+            else:
+                # Convert paths and scales to comma-separated strings
+                lora_paths_str = ','.join(lora_paths)
+                lora_scales_str = ','.join(str(scale) for scale in lora_scales)
+                
+                command.extend([
+                    "--lora-paths", lora_paths_str,
+                    "--lora-scales", lora_scales_str
+                ])
+                logger.info(f"Added LoRA parameters: paths={lora_paths_str}, scales={lora_scales_str}")
+        
         return command
 
     def _build_model_command(self, folder_name: str, local_model_path: str, local_ai_port: int, host: str, context_length: int) -> list:
@@ -1621,7 +1669,37 @@ class CryptoModelsManager:
             elif task == "image-generation":
                 if not shutil.which("mlx-flux"):
                     raise CryptoAgentsServiceError("mlx-flux command not found in PATH")
-                running_ai_command = self._build_image_generation_command(local_model_path, local_ai_port, host, config_name)
+                
+                # Initialize LoRA variables
+                lora_paths = None
+                lora_scales = None
+                effective_model_path = local_model_path
+                is_lora = metadata.get("lora", False)
+                
+                if is_lora:
+                    lora_metadata, error_msg = self._load_lora_metadata(local_model_path)
+                    if lora_metadata is None:
+                        logger.error(f"Failed to load LoRA metadata during switch: {error_msg}")
+                        logger.warning("Falling back to regular model mode")
+                        is_lora = False
+                    else:
+                        try:
+                            base_model_hash = lora_metadata["base_model"]
+                            base_model_path = asyncio.run(download_model_from_filecoin_async(base_model_hash))
+                            lora_paths = lora_metadata["lora_paths"]
+                            lora_scales = lora_metadata["lora_scales"]
+                            effective_model_path = base_model_path  # Use base model path for LoRA
+                            logger.info(f"LoRA model detected in switch - using base model: {base_model_path}")
+                            logger.info(f"LoRA paths: {lora_paths}")
+                            logger.info(f"LoRA scales: {lora_scales}")
+                        except Exception as e:
+                            logger.error(f"Error downloading base model for LoRA during switch: {e}")
+                            logger.warning("Falling back to regular model mode")
+                            is_lora = False
+                
+                running_ai_command = self._build_image_generation_command(
+                    effective_model_path, local_ai_port, host, config_name, lora_paths, lora_scales
+                )
             else:
                 running_ai_command = self._build_model_command(folder_name, local_model_path, local_ai_port, host, context_length)
                 
@@ -1710,3 +1788,59 @@ class CryptoModelsManager:
         except Exception as e:
             logger.error(f"Error getting active model: {str(e)}")
             return None
+
+    def _validate_lora_metadata(self, lora_metadata: dict) -> tuple[bool, str]:
+        """Validate LoRA metadata structure and return validation result."""
+        required_fields = ["base_model", "lora_paths", "lora_scales"]
+        
+        for field in required_fields:
+            if field not in lora_metadata:
+                return False, f"Missing required field: {field}"
+        
+        lora_paths = lora_metadata["lora_paths"]
+        lora_scales = lora_metadata["lora_scales"]
+        
+        if not isinstance(lora_paths, list):
+            return False, "lora_paths must be a list"
+        
+        if not isinstance(lora_scales, list):
+            return False, "lora_scales must be a list"
+        
+        if len(lora_paths) != len(lora_scales):
+            return False, f"lora_paths count ({len(lora_paths)}) must match lora_scales count ({len(lora_scales)})"
+        
+        if len(lora_paths) == 0:
+            return False, "lora_paths cannot be empty"
+        
+        # Validate that all scales are numeric
+        for i, scale in enumerate(lora_scales):
+            if not isinstance(scale, (int, float)):
+                return False, f"lora_scales[{i}] must be a number, got {type(scale).__name__}"
+        
+        return True, "Valid LoRA metadata"
+    
+    def _load_lora_metadata(self, metadata_path: str) -> tuple[Optional[dict], Optional[str]]:
+        """Load and validate LoRA metadata from file."""
+        try:
+            with open(metadata_path, "r") as f:
+                lora_metadata = json.load(f)
+            
+            is_valid, message = self._validate_lora_metadata(lora_metadata)
+            if not is_valid:
+                logger.error(f"Invalid LoRA metadata: {message}")
+                return None, f"Invalid LoRA metadata: {message}"
+            
+            return lora_metadata, None
+        
+        except FileNotFoundError:
+            error_msg = f"LoRA metadata file not found: {metadata_path}"
+            logger.error(error_msg)
+            return None, error_msg
+        except json.JSONDecodeError as e:
+            error_msg = f"Invalid JSON in LoRA metadata file: {e}"
+            logger.error(error_msg)
+            return None, error_msg
+        except Exception as e:
+            error_msg = f"Error loading LoRA metadata: {e}"
+            logger.error(error_msg)
+            return None, error_msg
