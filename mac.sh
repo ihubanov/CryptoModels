@@ -16,6 +16,90 @@ log_error() {
     fi
 }
 
+# Version comparison function
+compare_versions() {
+    local installed="$1"
+    local remote="$2"
+    
+    # Validate version strings (basic semver check)
+    if [[ ! "$installed" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?([.-][a-zA-Z0-9]+)*$ ]]; then
+        log_error "Invalid installed version format: $installed"
+        return 2
+    fi
+    
+    if [[ ! "$remote" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?([.-][a-zA-Z0-9]+)*$ ]]; then
+        log_error "Invalid remote version format: $remote"
+        return 2
+    fi
+    
+    # Return 0 if update needed (remote > installed), 1 if no update needed, 2 if error
+    if [ "$installed" != "$remote" ] && [ "$(printf '%s\n' "$installed" "$remote" | sort -V | head -n1)" = "$installed" ]; then
+        return 0  # Update needed
+    else
+        return 1  # No update needed
+    fi
+}
+
+# Generic package update function
+update_package() {
+    local package_name="$1"
+    local github_url="$2"
+    local version_source_url="$3"
+    local version_regex="$4"
+    local install_cmd="$5"
+    
+    log_message "Checking $package_name installation..."
+    
+    if pip show "$package_name" &>/dev/null; then
+        log_message "$package_name is installed. Checking for updates..."
+        
+        # Get installed version
+        local installed_version=$(pip show "$package_name" | grep Version | awk '{print $2}')
+        log_message "Current $package_name version: $installed_version"
+        
+        # Get remote version
+        log_message "Checking latest version from repository..."
+        local temp_file=$(mktemp)
+        local remote_version=""
+        
+        if curl -s --connect-timeout 10 --max-time 30 "$version_source_url" | grep -o "$version_regex" | cut -d'"' -f2 > "$temp_file" 2>/dev/null; then
+            remote_version=$(cat "$temp_file")
+            rm -f "$temp_file"
+            
+            if [ -n "$remote_version" ]; then
+                log_message "Latest $package_name version: $remote_version"
+                
+                # Compare versions using our function
+                if compare_versions "$installed_version" "$remote_version"; then
+                    log_message "New version available. Updating $package_name..."
+                    if pip uninstall "$package_name" -y && eval "$install_cmd"; then
+                        log_message "$package_name updated to version $remote_version."
+                    else
+                        log_error "Failed to update $package_name. Continuing with installation..."
+                    fi
+                else
+                    case $? in
+                        1) log_message "Already running the latest version of $package_name. No update needed." ;;
+                        2) log_error "Version comparison failed for $package_name. Skipping update." ;;
+                    esac
+                fi
+            else
+                log_message "Could not determine latest version. Skipping update for safety."
+            fi
+        else
+            rm -f "$temp_file"
+            log_message "Could not check latest version from repository. Skipping update for safety."
+        fi
+    else
+        log_message "Installing $package_name..."
+        if eval "$install_cmd"; then
+            log_message "$package_name installed successfully."
+        else
+            log_error "Failed to install $package_name. Continuing with installation..."
+        fi
+    fi
+}
+
 # Error handling function
 handle_error() {
     local exit_code=$1
@@ -148,12 +232,8 @@ log_message "Virtual environment activated."
 
 
 # Step 7: Install mflux dependencies
-log_message "Installing mlx-flux"
-if pip install git+https://github.com/0x9334/mlx-flux.git; then
-    log_message "mlx-flux installed successfully."
-else
-    log_error "Failed to install mlx-flux. Continuing with installation..."
-fi
+log_message "Checking mlx-flux installation..."
+update_package "mlx-flux" "https://github.com/0x9334/mlx-flux.git" "https://raw.githubusercontent.com/0x9334/mlx-flux/main/setup.py" "version=\"[0-9.]*\"" "pip install git+https://github.com/0x9334/mlx-flux.git"
 PYTHON_VERSION_MAJOR_MINOR=$("$PYTHON_CMD" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
 if [ "$PYTHON_VERSION_MAJOR_MINOR" = "3.13" ]; then
     log_message "Detected Python 3.13. Installing compatible SentencePiece wheel..."
@@ -166,41 +246,6 @@ fi
 
 # Step 8: Install cryptomodels toolkit
 log_message "Setting up cryptomodels toolkit..."
-if pip show cryptomodels &>/dev/null; then
-    log_message "cryptomodels is installed. Checking for updates..."
-    
-    # Get installed version
-    INSTALLED_VERSION=$(pip show cryptomodels | grep Version | awk '{print $2}')
-    log_message "Current version: $INSTALLED_VERSION"
-    
-    # Get remote version (from GitHub repository without installing)
-    log_message "Checking latest version from repository..."
-    TEMP_VERSION_FILE=$(mktemp)
-    if curl -s https://raw.githubusercontent.com/eternalai-org/CryptoModels/main/crypto_models/__init__.py | grep -o "__version__ = \"[0-9.]*\"" | cut -d'"' -f2 > "$TEMP_VERSION_FILE"; then
-        REMOTE_VERSION=$(cat "$TEMP_VERSION_FILE")
-        rm "$TEMP_VERSION_FILE"
-        
-        log_message "Latest version: $REMOTE_VERSION"
-        
-        # Compare versions
-        if [ "$(printf '%s\n' "$INSTALLED_VERSION" "$REMOTE_VERSION" | sort -V | head -n1)" = "$INSTALLED_VERSION" ] && [ "$INSTALLED_VERSION" != "$REMOTE_VERSION" ]; then
-            log_message "New version available. Updating..."
-            pip uninstall cryptomodels -y || handle_error $? "Failed to uninstall cryptomodels"
-            pip install -q git+https://github.com/eternalai-org/CryptoModels.git || handle_error $? "Failed to update cryptomodels toolkit"
-            log_message "cryptomodels toolkit updated to version $REMOTE_VERSION."
-        else
-            log_message "Already running the latest version. No update needed."
-        fi
-    else
-        log_message "Could not check latest version. Proceeding with update to be safe..."
-        pip uninstall cryptomodels -y || handle_error $? "Failed to uninstall cryptomodels"
-        pip install -q git+https://github.com/eternalai-org/CryptoModels.git || handle_error $? "Failed to update cryptomodels toolkit"
-        log_message "cryptomodels toolkit updated."
-    fi
-else
-    log_message "Installing cryptomodels toolkit..."
-    pip install -q git+https://github.com/eternalai-org/CryptoModels.git || handle_error $? "Failed to install cryptomodels toolkit"
-    log_message "cryptomodels toolkit installed."
-fi
+update_package "cryptomodels" "https://github.com/eternalai-org/CryptoModels.git" "https://raw.githubusercontent.com/eternalai-org/CryptoModels/main/crypto_models/__init__.py" "__version__ = \"[0-9.]*\"" "pip install -q git+https://github.com/eternalai-org/CryptoModels.git"
 
 log_message "Setup completed successfully."
