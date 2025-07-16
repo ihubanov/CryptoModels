@@ -42,9 +42,9 @@ class PerformanceConfig:
     SHUTDOWN_CLIENT_TIMEOUT: float = float(os.getenv("CRYPTO_SHUTDOWN_CLIENT_TIMEOUT", "5.0"))  # 5 seconds
     
     # Service timeouts
-    SERVICE_START_TIMEOUT: int = int(os.getenv("CRYPTO_SERVICE_START_TIMEOUT", "1800"))  # 30 minutes
-    HTTP_TIMEOUT: float = float(os.getenv("CRYPTO_HTTP_TIMEOUT", "1800.0"))  # 30 minutes
-    STREAM_TIMEOUT: float = float(os.getenv("CRYPTO_STREAM_TIMEOUT", "1800.0"))  # 30 minutes
+    SERVICE_START_TIMEOUT: int = int(os.getenv("CRYPTO_SERVICE_START_TIMEOUT", "7200"))  # 2 hours
+    HTTP_TIMEOUT: float = float(os.getenv("CRYPTO_HTTP_TIMEOUT", "7200.0"))  # 2 hours
+    STREAM_TIMEOUT: float = float(os.getenv("CRYPTO_STREAM_TIMEOUT", "7200.0"))  # 2 hours
     
     # HTTP connection pooling
     POOL_CONNECTIONS: int = int(os.getenv("CRYPTO_POOL_CONNECTIONS", "50"))
