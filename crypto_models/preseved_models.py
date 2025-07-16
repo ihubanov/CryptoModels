@@ -15,5 +15,5 @@ PRESERVED_MODELS = {
     "devstral-small": "bafkreih4xgr5t7yc3yooz6i6usgpwhggaobspmgut4rnu42gi6cv77o4em",
     "flux-dev": "bafkreiaha3sjfmv4affmi5kbu6bnayenf2avwafp3cthhar3latmfi632u",
     "flux-schnell": "bafkreibks5pmc777snbo7dwk26sympe2o24tpqfedjq6gmgghwwu7iio34",
-    "flux-dev-nsfw": "bafkreia2g3ma7kufdcips6hmk44m4md5a3nhlsgylryy4juoqw2rukfiru"
+    "flux-dev-nsfw": "bafkreidbaksrogxispjejczfj36vtf5uzsbjt7irspl6kckynz5u2ugzke"
 }
