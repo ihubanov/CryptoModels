@@ -14,5 +14,6 @@ PRESERVED_MODELS = {
     "lfm2-1.2b": "bafkreiaztifhss23cftya3bkorbsenzohol2oc3dvngo2srbbosko6gmme",
     "devstral-small": "bafkreih4xgr5t7yc3yooz6i6usgpwhggaobspmgut4rnu42gi6cv77o4em",
     "flux-dev": "bafkreiaha3sjfmv4affmi5kbu6bnayenf2avwafp3cthhar3latmfi632u",
-    "flux-schnell": "bafkreibks5pmc777snbo7dwk26sympe2o24tpqfedjq6gmgghwwu7iio34"
+    "flux-schnell": "bafkreibks5pmc777snbo7dwk26sympe2o24tpqfedjq6gmgghwwu7iio34",
+    "flux-dev-nsfw": "bafkreicnfjkbnowj4bga3uvhupfxumnww75iyfxv54bmdn3dahtpfc4u6u"
 }
