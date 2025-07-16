@@ -282,7 +282,8 @@ class CryptoModelsManager:
                     effective_model_path = local_model_path
                     
                     if is_lora:
-                        lora_metadata, error_msg = self._load_lora_metadata(local_model_path)
+                        lora_metadata_path = os.path.join(local_model_path, "metadata.json")
+                        lora_metadata, error_msg = self._load_lora_metadata(lora_metadata_path)
                         if lora_metadata is None:
                             logger.error(f"Failed to load LoRA metadata: {error_msg}")
                             logger.warning("Falling back to regular model mode")
@@ -291,14 +292,32 @@ class CryptoModelsManager:
                             try:
                                 base_model_hash = lora_metadata["base_model"]
                                 base_model_path = asyncio.run(download_model_from_filecoin_async(base_model_hash))
-                                lora_paths = lora_metadata["lora_paths"]
+                                
+                                # Construct absolute LoRA paths
+                                lora_paths = []
+                                for lora_path in lora_metadata["lora_paths"]:
+                                    if os.path.isabs(lora_path):
+                                        lora_paths.append(lora_path)
+                                    else:
+                                        lora_paths.append(os.path.join(local_model_path, lora_path))
+                                
                                 lora_scales = lora_metadata["lora_scales"]
                                 effective_model_path = base_model_path  # Use base model path for LoRA
+                                
                                 logger.info(f"LoRA model detected - using base model: {base_model_path}")
                                 logger.info(f"LoRA paths: {lora_paths}")
                                 logger.info(f"LoRA scales: {lora_scales}")
+                                
+                            except KeyError as e:
+                                logger.error(f"Missing required field in LoRA metadata: {e}")
+                                logger.warning("Falling back to regular model mode")
+                                is_lora = False
+                            except (OSError, IOError) as e:
+                                logger.error(f"File system error during LoRA setup: {e}")
+                                logger.warning("Falling back to regular model mode")
+                                is_lora = False
                             except Exception as e:
-                                logger.error(f"Error downloading base model for LoRA: {e}")
+                                logger.error(f"Unexpected error during LoRA setup: {e}")
                                 logger.warning("Falling back to regular model mode")
                                 is_lora = False
                         
@@ -1676,7 +1695,8 @@ class CryptoModelsManager:
                 is_lora = metadata.get("lora", False)
                 
                 if is_lora:
-                    lora_metadata, error_msg = self._load_lora_metadata(local_model_path)
+                    lora_metadata_path = os.path.join(local_model_path, "metadata.json")
+                    lora_metadata, error_msg = self._load_lora_metadata(lora_metadata_path)
                     if lora_metadata is None:
                         logger.error(f"Failed to load LoRA metadata during switch: {error_msg}")
                         logger.warning("Falling back to regular model mode")
@@ -1684,15 +1704,33 @@ class CryptoModelsManager:
                     else:
                         try:
                             base_model_hash = lora_metadata["base_model"]
-                            base_model_path = asyncio.run(download_model_from_filecoin_async(base_model_hash))
-                            lora_paths = lora_metadata["lora_paths"]
+                            base_model_path = await download_model_from_filecoin_async(base_model_hash)
+                            
+                            # Construct absolute LoRA paths
+                            lora_paths = []
+                            for lora_path in lora_metadata["lora_paths"]:
+                                if os.path.isabs(lora_path):
+                                    lora_paths.append(lora_path)
+                                else:
+                                    lora_paths.append(os.path.join(local_model_path, lora_path))
+                            
                             lora_scales = lora_metadata["lora_scales"]
                             effective_model_path = base_model_path  # Use base model path for LoRA
+                            
                             logger.info(f"LoRA model detected in switch - using base model: {base_model_path}")
                             logger.info(f"LoRA paths: {lora_paths}")
                             logger.info(f"LoRA scales: {lora_scales}")
+                            
+                        except KeyError as e:
+                            logger.error(f"Missing required field in LoRA metadata during switch: {e}")
+                            logger.warning("Falling back to regular model mode")
+                            is_lora = False
+                        except (OSError, IOError) as e:
+                            logger.error(f"File system error during LoRA setup: {e}")
+                            logger.warning("Falling back to regular model mode")
+                            is_lora = False
                         except Exception as e:
-                            logger.error(f"Error downloading base model for LoRA during switch: {e}")
+                            logger.error(f"Unexpected error during LoRA setup: {e}")
                             logger.warning("Falling back to regular model mode")
                             is_lora = False
                 
