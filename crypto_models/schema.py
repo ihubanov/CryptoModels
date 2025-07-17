@@ -373,6 +373,7 @@ class ImageGenerationRequest(BaseModel):
     steps: Optional[int] = Field(default=50, ge=1, le=50, description="The number of inference steps (1-50)")
     priority: Optional[Priority] = Field(default=Priority.NORMAL, description="Task priority in queue")
     async_mode: Optional[bool] = Field(default=False, description="Whether to process asynchronously")
+    image_strength: Optional[float] = Field(default=0.8, description="The strength of the image generation")
 
 class ImageData(BaseModel):
     """Individual image data in the response"""

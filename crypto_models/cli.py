@@ -108,7 +108,7 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="🚀 CryptoModels - Decentralized AI Model Management Tool",
         formatter_class=CustomHelpFormatter,
-        epilog="💡 For more information, visit: https://github.com/your-repo/crypto-models"
+        epilog="💡 For more information, visit: https://github.com/eternalai-org/CryptoModels"
     )
     
     parser.add_argument(
