@@ -441,16 +441,21 @@ source cryptomodels/bin/activate || handle_error $? "Failed to activate virtual 
 log_message "Virtual environment activated."
 
 
-# Step 7: Install mflux dependencies
+# Step 7: Install mlx-flux dependencies
 log_message "Checking mlx-flux installation..."
-update_package "mlx-flux" "https://github.com/0x9334/mlx-flux.git" "https://raw.githubusercontent.com/0x9334/mlx-flux/main/setup.py" "version=\"[0-9.]*\"" "pip install git+https://github.com/0x9334/mlx-flux.git" "$MLX_FLUX_TAG"
+if update_package "mlx-flux" "https://github.com/0x9334/mlx-flux.git" "https://raw.githubusercontent.com/0x9334/mlx-flux/main/setup.py" "version=\"[0-9.]*\"" "pip install git+https://github.com/0x9334/mlx-flux.git" "$MLX_FLUX_TAG"; then
+    log_message "mlx-flux installation completed successfully."
+else
+    log_error "mlx-flux installation failed. This may happen on Intel Macs or due to compatibility issues. Continuing with installation..."
+fi
+
 PYTHON_VERSION_MAJOR_MINOR=$("$PYTHON_CMD" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
 if [ "$PYTHON_VERSION_MAJOR_MINOR" = "3.13" ]; then
     log_message "Detected Python 3.13. Installing compatible SentencePiece wheel..."
     if pip install -q https://github.com/anthonywu/sentencepiece/releases/download/0.2.1-py13dev/sentencepiece-0.2.1-cp313-cp313-macosx_11_0_arm64.whl; then
         log_message "SentencePiece for Python 3.13 installed successfully."
     else
-        log_error "Failed to install SentencePiece for Python 3.13. Continuing with installation..."
+        log_error "Failed to install SentencePiece for Python 3.13. This may happen on Intel Macs due to ARM64-specific wheel. Continuing with installation..."
     fi
 fi
 
