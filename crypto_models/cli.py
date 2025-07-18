@@ -1,7 +1,9 @@
 import sys
+import os
 import asyncio
 import argparse
 import random
+import json
 from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
@@ -535,8 +537,46 @@ def handle_check(args):
     try:
         local_path = DEFAULT_MODEL_DIR / f"{args.hash}{POSTFIX_MODEL_PATH}"
         is_downloaded = local_path.exists()
+        
         if is_downloaded:
-            print_success("True")
+            # For LoRA models, we need to do additional validation
+            if local_path.is_dir():
+                # This is likely a LoRA model - check if it has valid metadata and base model
+                metadata_path = local_path / "metadata.json"
+                if metadata_path.exists():
+                    try:
+                        with open(metadata_path, 'r') as f:
+                            lora_metadata = json.load(f)
+                        
+                        # Check if base model is available
+                        base_model_hash = lora_metadata.get("base_model")
+                        if base_model_hash:
+                            base_model_path = DEFAULT_MODEL_DIR / f"{base_model_hash}{POSTFIX_MODEL_PATH}"
+                            if not base_model_path.exists():
+                                print_warning(f"LoRA model found but base model missing: {base_model_hash}")
+                                print_info("False")
+                                return
+                        
+                        # Check if LoRA files exist
+                        lora_paths = lora_metadata.get("lora_paths", [])
+                        for lora_path in lora_paths:
+                            if not os.path.isabs(lora_path):
+                                lora_path = os.path.join(local_path, lora_path)
+                            if not os.path.exists(lora_path):
+                                print_warning(f"LoRA model found but LoRA file missing: {lora_path}")
+                                print_info("False")
+                                return
+                        
+                        print_success("True")
+                    except (json.JSONDecodeError, KeyError, Exception) as e:
+                        print_warning(f"LoRA model found but metadata is invalid: {str(e)}")
+                        print_info("False")
+                else:
+                    print_warning("LoRA model directory found but metadata.json is missing")
+                    print_info("False")
+            else:
+                # Regular model file
+                print_success("True")
         else:
             print_info("False")
     except Exception as e:
