@@ -20,7 +20,7 @@ else:
     MAX_ATTEMPTS = len(GATEWAY_URLS) * 3
 
 # Extraction buffer factor for disk space estimation
-EXTRACTION_BUFFER_FACTOR = 2.5  # 2.5x the total download size
+EXTRACTION_BUFFER_FACTOR = 2  # 2x the total download size
 
 # Performance optimizations (dynamic based on system RAM and CPU)
 total_ram_gb = psutil.virtual_memory().total / (1024 ** 3)
@@ -675,13 +675,6 @@ async def download_model_async(filecoin_hash: str) -> tuple[bool, str | None]:
         logger.info(f"Using existing model at {local_path_str}")
         return True, local_path_str
 
-    # Basic disk space check (2GB minimum)
-    try:
-        check_disk_space(DEFAULT_MODEL_DIR, required_bytes=2 * 1024 * 1024 * 1024)
-    except Exception as e:
-        logger.error(f"Insufficient disk space for download: {e}")
-        return False, None
-
     try:
         # Fetch model metadata using the dedicated async function
         success, data = await fetch_model_metadata_async(filecoin_hash)
@@ -698,20 +691,6 @@ async def download_model_async(filecoin_hash: str) -> tuple[bool, str | None]:
             data["model"] = model_metadata.get("model", None)
             data["projector"] = model_metadata.get("projector", None)
 
-        
-        # Try HuggingFace download first if available
-        if data["repo"] is not None:
-            success, hf_local_path = await download_model_from_hf(data)
-            if success:
-                logger.info(f"Successfully downloaded from HuggingFace: {hf_local_path}")
-                return hf_local_path
-            else:
-                logger.info("HuggingFace download failed, falling back to Filecoin")
-        
-        # Prepare for Filecoin download
-        folder_path = Path.cwd() / data["folder_name"]
-        folder_path.mkdir(exist_ok=True, parents=True)
-
         # More accurate disk space check after metadata is fetched
         if "files" in data:
             total_size_mb = sum(f.get("size_mb", 512) for f in data["files"])
@@ -721,6 +700,20 @@ async def download_model_async(filecoin_hash: str) -> tuple[bool, str | None]:
             except Exception as e:
                 logger.error(f"Insufficient disk space for model extraction: {e}")
                 return False, None
+
+        
+        # Try HuggingFace download first if available
+        if data["repo"] is not None:
+            success, hf_local_path = await download_model_from_hf(data)
+            if success:
+                logger.info(f"Successfully downloaded from HuggingFace: {hf_local_path}")
+                return hf_local_path
+            else:
+                logger.info("Download failed, falling back to Filecoin")
+        
+        # Prepare for Filecoin download
+        folder_path = Path.cwd() / data["folder_name"]
+        folder_path.mkdir(exist_ok=True, parents=True)
 
         # Download and process model with exponential backoff
         for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -885,7 +878,7 @@ async def download_model_from_hf(data: dict, max_attempts: int = 3) -> tuple[boo
     
     for attempt in range(1, max_attempts + 1):
         try:
-            logger.info(f"HuggingFace download attempt {attempt}/{max_attempts} for {repo_id}")
+            logger.info(f"Download attempt {attempt}/{max_attempts} for {repo_id}")
             if model is None:
                 snapshot_download(
                     repo_id=repo_id,
@@ -912,12 +905,12 @@ async def download_model_from_hf(data: dict, max_attempts: int = 3) -> tuple[boo
             return True, local_path_str
             
         except Exception as e:
-            logger.warning(f"HuggingFace download attempt {attempt} failed: {e}")
+            logger.warning(f"Download attempt {attempt} failed: {e}")
             if attempt < max_attempts:
                 logger.warning(f"Retrying in {SLEEP_TIME}s")
                 await asyncio.sleep(SLEEP_TIME)
             else:
-                logger.error(f"HuggingFace download failed after {max_attempts} attempts")
+                logger.error(f"Download failed after {max_attempts} attempts")
                 return False, None
     
     return False, None
