@@ -711,10 +711,10 @@ async def download_model_async(filecoin_hash: str) -> tuple[bool, str | None]:
                         return False, None
                     logger.info(f"Successfully downloaded base model and using existing LoRA model")
                     return True, local_path_str
-            else:
-                if os.path.exists(local_path_str):
-                    logger.info(f"Using existing model at {local_path_str}")
-                    return True, local_path_str
+        else:
+            if os.path.exists(local_path_str):
+                logger.info(f"Using existing model at {local_path_str}")
+                return True, local_path_str
 
         # More accurate disk space check after metadata is fetched
         if "files" in data:
