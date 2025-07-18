@@ -24,6 +24,7 @@ setup(
         "loguru==0.7.3",
         "psutil==7.0.0",
         "httpx==0.28.1",
+        "huggingface_hub==0.33.0",
         "lighthouseweb3==0.1.5",
         "python-dotenv==1.1.1",
         "fastapi==0.115.14",
