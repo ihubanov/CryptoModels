@@ -12,10 +12,12 @@ import pkg_resources
 import shutil
 from pathlib import Path
 from loguru import logger
-from typing import Optional, Dict, Any, List
 from crypto_models.config import config
 from crypto_models.utils import wait_for_health
-from crypto_models.download import download_model_from_filecoin_async
+from typing import Optional, Dict, Any, List
+from crypto_models.download import download_model_async, fetch_model_metadata_async
+from crypto_models.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH
+
 
 class CryptoAgentsServiceError(Exception):
     """Base exception for CryptoModels service errors."""
@@ -44,9 +46,7 @@ class CryptoModelsManager:
         # File paths from config
         self.msgpack_file = Path(config.file_paths.RUNNING_SERVICE_FILE)
         self.loaded_models: Dict[str, Any] = {}
-        self.llama_server_path = config.file_paths.LLAMA_SERVER or os.getenv("LLAMA_SERVER")
-        if not self.llama_server_path or not os.path.exists(self.llama_server_path):
-            raise CryptoAgentsServiceError("llama-server executable not found in LLAMA_SERVER or PATH")
+        self.llama_server_path = config.file_paths.LLAMA_SERVER
         self.start_lock_file = Path(config.file_paths.START_LOCK_FILE)
         self.logs_dir = Path(config.file_paths.LOGS_DIR)
         self.logs_dir.mkdir(exist_ok=True)
@@ -225,16 +225,13 @@ class CryptoModelsManager:
                 models_info = {}
                 for i, hash_val in enumerate(hashes_list):
                     logger.info(f"Downloading model {i+1}/{len(hashes_list)}: {hash_val}")
-                    local_model_path = asyncio.run(download_model_from_filecoin_async(hash_val))
-                    if not isinstance(local_model_path, str) or not local_model_path:
+                    success, local_model_path = asyncio.run(download_model_async(hash_val))
+                    if not success:
                         raise ModelNotFoundError(f"Model file not found for hash: {hash_val}")
                     
-                    if not os.path.exists(local_model_path):
-                        raise ModelNotFoundError(f"Model file not found at: {local_model_path}")
-
-                    # Load metadata for this model
-                    model_dir = os.path.dirname(local_model_path)
-                    metadata = self._load_or_fetch_metadata(hash_val, model_dir)
+                    success, metadata = asyncio.run(fetch_model_metadata_async(hash_val))
+                    if not success:
+                        raise ModelNotFoundError(f"Model metadata not found for hash: {hash_val}")
                     
                     models_info[hash_val] = {
                         "local_model_path": local_model_path,
@@ -291,7 +288,7 @@ class CryptoModelsManager:
                         else:
                             try:
                                 base_model_hash = lora_metadata["base_model"]
-                                base_model_path = asyncio.run(download_model_from_filecoin_async(base_model_hash))
+                                base_model_path = asyncio.run(download_model_async(base_model_hash))
                                 
                                 # Construct absolute LoRA paths
                                 lora_paths = []
@@ -1067,46 +1064,6 @@ class CryptoModelsManager:
                     command.extend([f"--{key}", str(value)])
         return command
 
-    def _load_or_fetch_metadata(self, hash: str, model_dir: str) -> dict:
-        """
-        Load metadata from cache or fetch from remote with optimized I/O.
-        Returns metadata_dict
-        """
-        metadata_file = os.path.join(model_dir, f"{hash}.json")
-        
-        # Try to load from cache first
-        if os.path.exists(metadata_file):
-            try:
-                with open(metadata_file, "r") as f:
-                    metadata = json.load(f)
-                    logger.info(f"Loaded metadata from cache: {metadata_file}")
-                    return metadata
-            except (json.JSONDecodeError, IOError) as e:
-                logger.warning(f"Invalid metadata file {metadata_file}, will fetch from remote: {e}")
-                # Remove corrupted file
-                try:
-                    os.remove(metadata_file)
-                except OSError:
-                    pass
-        
-        # Fetch from remote
-        filecoin_url = f"https://gateway.mesh3.network/ipfs/{hash}"
-        response_json = self._retry_request_json(filecoin_url, retries=3, delay=5, timeout=10)
-        
-        if not response_json:
-            logger.error(f"Failed to fetch metadata from {filecoin_url}")
-            return {}
-        
-        # Save to cache (create directory if needed)
-        try:
-            os.makedirs(model_dir, exist_ok=True)
-            with open(metadata_file, "w") as f:
-                json.dump(response_json, f)
-            logger.info(f"Cached metadata to {metadata_file}")
-        except IOError as e:
-            logger.warning(f"Failed to cache metadata: {e}")
-        
-        return response_json
     
     def _check_multimodal_support(self, local_model_path: str) -> tuple[bool, Optional[str]]:
         """
@@ -1704,7 +1661,7 @@ class CryptoModelsManager:
                     else:
                         try:
                             base_model_hash = lora_metadata["base_model"]
-                            base_model_path = await download_model_from_filecoin_async(base_model_hash)
+                            base_model_path = DEFAULT_MODEL_DIR / f"{base_model_hash}{POSTFIX_MODEL_PATH}"
                             
                             # Construct absolute LoRA paths
                             lora_paths = []

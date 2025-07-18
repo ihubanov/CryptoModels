@@ -1,42 +1,23 @@
 import os
-import random
-import requests
+import json
 import aiohttp
 import asyncio
 import psutil
 import time
-from pathlib import Path
-from crypto_models.utils import compute_file_hash, async_extract_zip, async_move, async_rmtree
-from loguru import logger
 import shutil
+from pathlib import Path
+from loguru import logger
+from crypto_models.models import MODELS
+from huggingface_hub import hf_hub_download, snapshot_download
+from crypto_models.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH, GATEWAY_URLS
+from crypto_models.utils import compute_file_hash, async_extract_zip, async_move, async_rmtree
 
-# Constants
-GATEWAY_URLS = [
-    # Lighthouse's own gateway (recommended for files stored on Lighthouse)
-    "https://gateway.lighthouse.storage/ipfs/",
-    # Mesh3 public gateway
-    "https://gateway.mesh3.network/ipfs/",
-    # IPFS official gateway
-    # "https://ipfs.io/ipfs/",
-    # Cloudflare IPFS gateway
-    # "https://cloudflare-ipfs.com/ipfs/",
-    # Cloudflare alternative
-    # "https://cf-ipfs.com/ipfs/",
-    # Pinata-backed gateway
-    # "https://dweb.link/ipfs/",
-    # 4everland Filecoin ecosystem gateway
-    # "https://4everland.io/ipfs/",
-    # Infura IPFS gateway
-    # "https://infura-ipfs.io/ipfs/",
-]
-DEFAULT_OUTPUT_DIR = Path.cwd() / "llms-storage"
-SLEEP_TIME = 60
+SLEEP_TIME = 5
 # Set MAX_ATTEMPTS: if only one gateway, try at least 6 times; otherwise, try 3 times per gateway
 if len(GATEWAY_URLS) == 1:
     MAX_ATTEMPTS = 6
 else:
     MAX_ATTEMPTS = len(GATEWAY_URLS) * 3
-POSTFIX_MODEL_PATH = ".gguf"
 
 # Extraction buffer factor for disk space estimation
 EXTRACTION_BUFFER_FACTOR = 2.5  # 2.5x the total download size
@@ -75,33 +56,55 @@ CONNECTION_POOL_SIZE = 32  # Increased connection pool
 logger.add("download.log", rotation="10 MB", retention="10 days", encoding="utf-8")
 
 
-def check_downloaded_model(filecoin_hash: str, output_dir: Path = DEFAULT_OUTPUT_DIR) -> bool:
+async def _cleanup_on_failure(folder_path: Path, local_path_str: str) -> None:
     """
-    Check if the model is already downloaded and optionally save metadata.
+    Clean up temporary files and folders on download failure.
     
     Args:
-        filecoin_hash: IPFS hash of the model metadata
-        output_file: Optional path to save metadata JSON
-    
-    Returns:
-        bool: Whether the model is already downloaded
+        folder_path: Path to the temporary extraction folder
+        local_path_str: Path to the partially downloaded model
     """
     try:
-        local_path = output_dir / f"{filecoin_hash}{POSTFIX_MODEL_PATH}"
-        local_path = local_path.absolute()
+        # Clean up temporary folder
+        if folder_path and folder_path.exists():
+            logger.info(f"Cleaning up temporary folder: {folder_path}")
+            await async_rmtree(str(folder_path))
+        
+        # Clean up partial model files
+        partial_paths = [
+            Path(local_path_str),
+            Path(local_path_str + "-projector"),
+            Path(local_path_str + ".tmp")
+        ]
+        
+        for path in partial_paths:
+            if path.exists():
+                logger.info(f"Removing partial file: {path}")
+                path.unlink(missing_ok=True)
+                
+    except Exception as e:
+        logger.warning(f"Failed to clean up temporary files: {e}")
 
-        # Check if model exists
-        is_downloaded = local_path.exists()
 
-        if is_downloaded:
-            logger.info(f"Model already exists at: {local_path}")
-
-        return is_downloaded
-
-    except requests.RequestException as e:
-        logger.warning(f"Failed to fetch model metadata: {e}")
-        return False
-
+def _calculate_backoff(attempt: int, base_sleep: int = SLEEP_TIME, max_backoff: int = 300) -> int:
+    """
+    Calculate exponential backoff with jitter.
+    
+    Args:
+        attempt: Current attempt number (1-based)
+        base_sleep: Base sleep time in seconds
+        max_backoff: Maximum backoff time in seconds
+        
+    Returns:
+        int: Backoff time in seconds
+    """
+    import random
+    
+    # Exponential backoff with jitter
+    backoff = min(base_sleep * (2 ** (attempt - 1)), max_backoff)
+    # Add random jitter (±20%)
+    jitter = random.uniform(0.8, 1.2)
+    return int(backoff * jitter)
 
 async def download_single_file_async(session: aiohttp.ClientSession, file_info: dict, folder_path: Path,
                                      max_attempts: int = MAX_ATTEMPTS, progress_callback=None,
@@ -498,8 +501,6 @@ async def pick_fastest_gateway(filecoin_hash: str, gateways: list[str], timeout:
     Returns:
         str: The fastest gateway URL, or the first in the list if all fail.
     """
-    import aiohttp
-    import asyncio
 
     # If there is only one gateway, return it immediately (no need to check)
     if len(gateways) == 1:
@@ -547,35 +548,55 @@ async def pick_fastest_gateway(filecoin_hash: str, gateways: list[str], timeout:
 def check_disk_space(path: Path, required_bytes: int = 2 * 1024 * 1024 * 1024) -> None:
     """
     Check if there is enough free disk space at the given path.
+    
     Args:
         path (Path): Directory to check.
         required_bytes (int): Minimum free space required in bytes (default: 2GB).
+        
     Raises:
-        Exception: If not enough disk space, with required and available GB in message.
+        Exception: If not enough disk space, with detailed space information.
     """
-    total, used, free = shutil.disk_usage(str(path))
-    if free < required_bytes:
-        required_gb = required_bytes / (1024 ** 3)
+    try:
+        total, used, free = shutil.disk_usage(str(path))
+        
+        if free < required_bytes:
+            required_gb = required_bytes / (1024 ** 3)
+            free_gb = free / (1024 ** 3)
+            total_gb = total / (1024 ** 3)
+            used_gb = used / (1024 ** 3)
+            
+            logger.error(f"Disk space check failed at {path}")
+            logger.error(f"Total: {total_gb:.2f} GB, Used: {used_gb:.2f} GB, Free: {free_gb:.2f} GB")
+            logger.error(f"Required: {required_gb:.2f} GB, Shortfall: {(required_bytes - free) / (1024 ** 3):.2f} GB")
+            
+            raise Exception(f"Not enough disk space: required {required_gb:.2f} GB, available {free_gb:.2f} GB")
+        
+        # Log successful disk space check for debugging
         free_gb = free / (1024 ** 3)
-        raise Exception(f"Not enough disk space: required {required_gb:.2f} GB, available {free_gb:.2f} GB")
+        required_gb = required_bytes / (1024 ** 3)
+        logger.debug(f"Disk space check passed: {free_gb:.2f} GB available, {required_gb:.2f} GB required")
+        
+    except OSError as e:
+        logger.error(f"Failed to check disk space at {path}: {e}")
+        raise Exception(f"Unable to check disk space at {path}: {e}")
+    
 
-
-async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Path = DEFAULT_OUTPUT_DIR) -> str | None:
+async def fetch_model_metadata_async(filecoin_hash: str, max_attempts: int = 3) -> tuple[bool, dict | None]:
     """
-    Asynchronously download a model from Filecoin using its IPFS hash.
-    This function will select the fastest gateway from a list of gateways by testing their response times,
-    and use the fastest one to download the model.
+    Asynchronously fetch model metadata from the fastest gateway with retry logic.
+    
+    Args:
+        filecoin_hash (str): The IPFS hash of the model
+        max_attempts (int): Maximum number of retry attempts
+        
+    Returns:
+        dict: Model metadata JSON, or None if all attempts fail
     """
-    # Ensure output directory exists
-    output_dir.mkdir(exist_ok=True, parents=True)
-    local_path = output_dir / f"{filecoin_hash}{POSTFIX_MODEL_PATH}"
-    local_path_str = str(local_path.absolute())
-
-    # Check if model is already downloaded
-    if check_downloaded_model(filecoin_hash, output_dir):
-        logger.info(f"Using existing model at {local_path_str}")
-        return local_path_str
-
+    metadata_path = DEFAULT_MODEL_DIR / f"{filecoin_hash}.json"
+    if os.path.exists(metadata_path):
+        with open(metadata_path, "r") as f:
+            return True, json.load(f)
+    
     # Select the fastest gateway before downloading
     logger.info("Checking gateway speeds...")
     best_gateway = await pick_fastest_gateway(filecoin_hash, GATEWAY_URLS)
@@ -586,153 +607,323 @@ async def download_model_from_filecoin_async(filecoin_hash: str, output_dir: Pat
     timeout = aiohttp.ClientTimeout(total=180, connect=60)
     connector = aiohttp.TCPConnector(limit=CONNECTION_POOL_SIZE, ssl=False)
 
-    # Initialize variables outside the loop
-    folder_path = None
+    # Use exponential backoff for retries
+    for attempt in range(1, max_attempts + 1):
+        backoff = min(SLEEP_TIME * (2 ** (attempt - 1)), 300)
 
-    try:
-        # Use exponential backoff for retries
-        for attempt in range(1, MAX_ATTEMPTS + 1):
-            backoff = min(SLEEP_TIME * (2 ** (attempt - 1)), 300)
+        try:
+            logger.info(f"Downloading model metadata (attempt {attempt}/{max_attempts})")
 
-            try:
-                logger.info(f"Downloading model metadata (attempt {attempt}/{MAX_ATTEMPTS})")
-
-                async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
-                    async with session.get(input_link) as response:
-                        if response.status != 200:
-                            logger.warning(f"Failed to fetch metadata: HTTP {response.status}")
-                            if attempt < MAX_ATTEMPTS:
-                                logger.warning(f"Retrying in {backoff} seconds")
-                                await asyncio.sleep(backoff)
-                                continue
-                            else:
-                                raise Exception(f"Failed to fetch metadata after {MAX_ATTEMPTS} attempts")
-
-                        # Parse metadata
-                        data = await response.json()
-                        data["filecoin_hash"] = filecoin_hash
-                        folder_name = data["folder_name"]
-                        folder_path = Path.cwd() / folder_name
-
-                        # Create folder if it doesn't exist
-                        folder_path.mkdir(exist_ok=True, parents=True)
-
-                # --- Disk space check after metadata is fetched ---
-                if "files" in data:
-                    total_size_mb = sum(f.get("size_mb", 512) for f in data["files"])
-                    # Use buffer factor, convert MB to bytes
-                    required_space_bytes = int(total_size_mb * EXTRACTION_BUFFER_FACTOR * 1024 * 1024)
-                    check_disk_space(output_dir, required_bytes=required_space_bytes)
-                # --- End disk space check ---
-
-                # Download files
-                paths = await download_files_from_lighthouse_async(data)
-                if not paths:
-                    logger.warning("Failed to download model files")
-                    if attempt < MAX_ATTEMPTS:
-                        logger.warning(f"Retrying in {backoff} seconds")
-                        await asyncio.sleep(backoff)
-                        continue
-                    else:
-                        raise Exception("Failed to download model files after all attempts")
-
-                # Extract files
-                try:
-                    logger.info("Extracting downloaded files...")
-                    await async_extract_zip(paths)
-                except Exception as e:
-                    logger.warning(f"Failed to extract files: {e}")
-                    # Do not retry if disk full
-                    if "Not enough disk space" in str(e):
-                        raise Exception(f"Failed to extract files due to insufficient disk space: {e}")
-                    if attempt < MAX_ATTEMPTS:
-                        logger.warning(f"Retrying in {backoff} seconds")
-                        await asyncio.sleep(backoff)
-                        continue
-                    else:
-                        raise Exception(f"Failed to extract files after {MAX_ATTEMPTS} attempts: {e}")
-
-                # Move files to final location
-                try:
-                    source_text_path = folder_path / folder_name
-                    source_text_path = source_text_path.absolute()
-                    logger.info(f"Moving model to {local_path_str}")
-
-                    if source_text_path.exists():
-                        # Handle projector path for multimodal models
-                        source_projector_path = folder_path / (folder_name + "-projector")
-                        source_projector_path = source_projector_path.absolute()
-
-                        if source_projector_path.exists():
-                            projector_dest = local_path_str + "-projector"
-                            logger.info(f"Moving projector to {projector_dest}")
-                            await async_move(str(source_projector_path), projector_dest)
-
-                        # Move model to final location
-                        await async_move(str(source_text_path), local_path_str)
-
-                        # Clean up folder after successful move
-                        if folder_path.exists():
-                            logger.info(f"Cleaning up temporary folder {folder_path}")
-                            await async_rmtree(str(folder_path))
-
-                        logger.info(f"Model download complete: {local_path_str}")
-                        return local_path_str
-                    else:
-                        logger.warning(f"Model not found at {source_text_path}")
-                        if attempt < MAX_ATTEMPTS:
+            async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+                async with session.get(input_link) as response:
+                    if response.status != 200:
+                        logger.warning(f"Failed to fetch metadata: HTTP {response.status}")
+                        if attempt < max_attempts:
                             logger.warning(f"Retrying in {backoff} seconds")
                             await asyncio.sleep(backoff)
                             continue
                         else:
-                            raise Exception(f"Model not found at {source_text_path} after all attempts")
-                except Exception as e:
-                    logger.warning(f"Failed to move model: {e}")
+                            return False, None
+
+                    # Parse metadata
+                    data = await response.json()
+                    data["filecoin_hash"] = filecoin_hash
+                    with open(metadata_path, "w") as f:
+                        json.dump(data, f)
+                    return True, data
+
+        except aiohttp.ClientError as e:
+            logger.warning(f"HTTP error on attempt {attempt}: {e}")
+            if attempt < max_attempts:
+                logger.warning(f"Retrying in {backoff} seconds")
+                await asyncio.sleep(backoff)
+                continue
+            else:
+                raise Exception(f"HTTP error after {max_attempts} attempts: {e}")
+        except Exception as e:
+            logger.warning(f"Download attempt {attempt} failed: {e}")
+            if attempt < max_attempts:
+                logger.warning(f"Retrying in {backoff} seconds")
+                await asyncio.sleep(backoff)
+                continue
+            else:
+                return False, None
+
+    logger.error("All metadata fetch attempts failed")
+    return False, None
+
+
+async def download_model_async(filecoin_hash: str) -> tuple[bool, str | None]:
+    """
+    Asynchronously download a model from Filecoin using its IPFS hash.
+    This function will select the fastest gateway from a list of gateways by testing their response times,
+    and use the fastest one to download the model.
+    
+    Args:
+        filecoin_hash (str): The IPFS hash of the model
+        
+    Returns:
+        str | None: Local path to the downloaded model, or None if download fails
+    """
+    # Ensure output directory exists
+    DEFAULT_MODEL_DIR.mkdir(exist_ok=True, parents=True)
+    local_path = DEFAULT_MODEL_DIR / f"{filecoin_hash}{POSTFIX_MODEL_PATH}"
+    local_path_str = str(local_path.absolute())
+
+    # Early return if model already exists
+    if os.path.exists(local_path_str):
+        logger.info(f"Using existing model at {local_path_str}")
+        return True, local_path_str
+
+    # Basic disk space check (2GB minimum)
+    try:
+        check_disk_space(DEFAULT_MODEL_DIR, required_bytes=2 * 1024 * 1024 * 1024)
+    except Exception as e:
+        logger.error(f"Insufficient disk space for download: {e}")
+        return False, None
+
+    try:
+        # Fetch model metadata using the dedicated async function
+        success, data = await fetch_model_metadata_async(filecoin_hash)
+        if not success:
+            logger.error("Failed to fetch model metadata")
+            return False, None
+            
+        data["filecoin_hash"] = filecoin_hash
+        data["local_path"] = local_path_str
+        model_metadata = MODELS.get(filecoin_hash, None)
+
+        if model_metadata is not None:
+            data["repo"] = model_metadata["repo"]
+            data["model"] = model_metadata.get("model", None)
+            data["projector"] = model_metadata.get("projector", None)
+
+        
+        # Try HuggingFace download first if available
+        if data["repo"] is not None:
+            success, hf_local_path = await download_model_from_hf(data)
+            if success:
+                logger.info(f"Successfully downloaded from HuggingFace: {hf_local_path}")
+                return hf_local_path
+            else:
+                logger.info("HuggingFace download failed, falling back to Filecoin")
+        
+        # Prepare for Filecoin download
+        folder_path = Path.cwd() / data["folder_name"]
+        folder_path.mkdir(exist_ok=True, parents=True)
+
+        # More accurate disk space check after metadata is fetched
+        if "files" in data:
+            total_size_mb = sum(f.get("size_mb", 512) for f in data["files"])
+            required_space_bytes = int(total_size_mb * EXTRACTION_BUFFER_FACTOR * 1024 * 1024)
+            try:
+                check_disk_space(DEFAULT_MODEL_DIR, required_bytes=required_space_bytes)
+            except Exception as e:
+                logger.error(f"Insufficient disk space for model extraction: {e}")
+                return False, None
+
+        # Download and process model with exponential backoff
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            backoff = _calculate_backoff(attempt)
+            
+            try:
+                logger.info(f"Download attempt {attempt}/{MAX_ATTEMPTS}")
+                
+                # Download files from Filecoin
+                paths = await download_files_from_lighthouse_async(data)
+                if not paths:
                     if attempt < MAX_ATTEMPTS:
-                        logger.warning(f"Retrying in {backoff} seconds")
+                        logger.warning(f"Download failed, retrying in {backoff}s")
                         await asyncio.sleep(backoff)
                         continue
                     else:
-                        raise Exception(f"Failed to move model after {MAX_ATTEMPTS} attempts: {e}")
+                        logger.error("All download attempts failed")
+                        await _cleanup_on_failure(folder_path, local_path_str)
+                        return False, None
+
+                # Extract downloaded files
+                try:
+                    logger.info("Extracting downloaded files...")
+                    await async_extract_zip(paths)
+                except Exception as e:
+                    # Don't retry if disk space issue
+                    if "Not enough disk space" in str(e):
+                        logger.error(f"Extraction failed due to insufficient disk space: {e}")
+                        await _cleanup_on_failure(folder_path, local_path_str)
+                        return False, None
+                    
+                    if attempt < MAX_ATTEMPTS:
+                        logger.warning(f"Extraction failed, retrying in {backoff}s: {e}")
+                        await asyncio.sleep(backoff)
+                        continue
+                    else:
+                        logger.error(f"Extraction failed after {MAX_ATTEMPTS} attempts: {e}")
+                        await _cleanup_on_failure(folder_path, local_path_str)
+                        return False, None
+
+                # Move files to final location
+                final_path = await _move_model_to_final_location(data, folder_path, local_path_str)
+                if final_path:
+                    logger.info(f"Model download complete: {final_path}")
+                    return True, final_path
+                
+                # If move failed, retry
+                if attempt < MAX_ATTEMPTS:
+                    logger.warning(f"Move failed, retrying in {backoff}s")
+                    await asyncio.sleep(backoff)
+                    continue
+                else:
+                    logger.error(f"Move failed after {MAX_ATTEMPTS} attempts")
+                    await _cleanup_on_failure(folder_path, local_path_str)
+                    return False, None
 
             except aiohttp.ClientError as e:
                 logger.warning(f"HTTP error on attempt {attempt}: {e}")
                 if attempt < MAX_ATTEMPTS:
-                    logger.warning(f"Retrying in {backoff} seconds")
+                    logger.warning(f"Retrying in {backoff}s")
                     await asyncio.sleep(backoff)
                     continue
                 else:
-                    raise Exception(f"HTTP error after {MAX_ATTEMPTS} attempts: {e}")
+                    logger.error(f"HTTP error after {MAX_ATTEMPTS} attempts: {e}")
+                    await _cleanup_on_failure(folder_path, local_path_str)
+                    return False, None
+                    
             except Exception as e:
-                logger.warning(f"Download attempt {attempt} failed: {e}")
+                # Don't retry if disk space issue
                 if "Not enough disk space" in str(e):
-                    raise Exception(f"Failed to extract files due to insufficient disk space: {e}")
+                    logger.error(f"Download failed due to insufficient disk space: {e}")
+                    await _cleanup_on_failure(folder_path, local_path_str)
+                    return False, None
+                
+                logger.warning(f"Download attempt {attempt} failed: {e}")
                 if attempt < MAX_ATTEMPTS:
-                    logger.warning(f"Retrying in {backoff} seconds")
+                    logger.warning(f"Retrying in {backoff}s")
                     await asyncio.sleep(backoff)
                     continue
                 else:
-                    raise Exception(f"Download failed after {MAX_ATTEMPTS} attempts: {e}")
+                    logger.error(f"Download failed after {MAX_ATTEMPTS} attempts: {e}")
+                    await _cleanup_on_failure(folder_path, local_path_str)
+                    return False, None
 
     except Exception as e:
         logger.error(f"Download failed: {e}")
+        # Clean up on unexpected failure
+        try:
+            await _cleanup_on_failure(folder_path, local_path_str)
+        except:
+            pass  # Ignore cleanup errors
+        return False, None
 
-    logger.error("All download attempts failed")
-    return None
 
+async def _move_model_to_final_location(data: dict, folder_path: Path, local_path_str: str) -> str | None:
+    """
+    Move extracted model files to their final location.
+    
+    Args:
+        data: Model metadata dictionary
+        folder_path: Path to the temporary extraction folder
+        local_path_str: Final destination path for the model
+        
+    Returns:
+        str | None: Final model path if successful, None if failed
+    """
+    try:
+        source_text_path = folder_path / data["folder_name"]
+        source_text_path = source_text_path.absolute()
+        
+        if not source_text_path.exists():
+            logger.error(f"Model not found at {source_text_path}")
+            return None
+
+        # Handle projector path for multimodal models
+        source_projector_path = folder_path / (data["folder_name"] + "-projector")
+        source_projector_path = source_projector_path.absolute()
+
+        if source_projector_path.exists():
+            projector_dest = local_path_str + "-projector"
+            logger.info(f"Moving projector to {projector_dest}")
+            await async_move(str(source_projector_path), projector_dest)
+
+        # Move model to final location
+        logger.info(f"Moving model to {local_path_str}")
+        await async_move(str(source_text_path), local_path_str)
+
+        # Clean up temporary folder after successful move
+        if folder_path.exists():
+            logger.info(f"Cleaning up temporary folder {folder_path}")
+            await async_rmtree(str(folder_path))
+
+        return local_path_str
+        
+    except Exception as e:
+        logger.error(f"Failed to move model: {e}")
+        return None
+    
+from tqdm.auto import tqdm
+
+class CustomTqdm(tqdm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.bar_format = "[LOCAL AI] --{percentage:3.0f}% {bar} --{rate_fmt}"
+
+async def download_model_from_hf(data: dict, max_attempts: int = 3) -> tuple[bool, str | None]:
+    """
+    Download model from HuggingFace Hub with retry logic.
+    
+    Args:
+        data: Model metadata dictionary containing hf_repo, hf_file, and local_path
+        max_attempts: Maximum number of retry attempts
+        
+    Returns:
+        tuple[bool, str | None]: (success, local_path) - True and path if successful, False and None if failed
+    """
+    
+    repo_id = data["repo"]
+    model = data["model"]
+    projector = data["projector"]
+    local_path_str = data["local_path"]
+    
+    for attempt in range(1, max_attempts + 1):
+        try:
+            logger.info(f"HuggingFace download attempt {attempt}/{max_attempts} for {repo_id}")
+            if model is None:
+                snapshot_download(
+                    repo_id=repo_id,
+                    local_dir = local_path_str
+                )
+            else:
+                hf_hub_download(
+                    repo_id=repo_id,
+                    filename=model,
+                    local_dir=DEFAULT_MODEL_DIR
+                )
+                await async_move(str(DEFAULT_MODEL_DIR / model), local_path_str)
+    
+                if projector is not None:
+                    projector_path = local_path_str + "-projector"
+                    hf_hub_download(
+                        repo_id=repo_id,
+                        filename=projector,
+                        local_dir=DEFAULT_MODEL_DIR
+                    )
+                    await async_move(str(DEFAULT_MODEL_DIR / projector), projector_path)
+            
+            logger.info(f"Successfully downloaded model from HuggingFace: {local_path_str}")
+            return True, local_path_str
+            
+        except Exception as e:
+            logger.warning(f"HuggingFace download attempt {attempt} failed: {e}")
+            if attempt < max_attempts:
+                logger.warning(f"Retrying in {SLEEP_TIME}s")
+                await asyncio.sleep(SLEEP_TIME)
+            else:
+                logger.error(f"HuggingFace download failed after {max_attempts} attempts")
+                return False, None
+    
+    return False, None
 
 if __name__ == "__main__":
-    import sys
-    import asyncio
+    model_hash = "bafkreihq4usl2t3i6pqoilvorp4up263yieuxcqs6xznlmrig365bvww5i"
 
-    # Get filecoin_hash from command line argument or use a default for testing
-    if len(sys.argv) > 1:
-        filecoin_hash = sys.argv[1]
-    else:
-        # Replace this with a real hash for testing
-        filecoin_hash = "bafkreiclwlxc56ppozipczuwkmgnlrxrerrvaubc5uhvfs3g2hp3lftrwm"
-
-    # Run the async download function and print the result
-    logger.info(f"Testing download_model_from_filecoin_async with hash: {filecoin_hash}")
-    result = asyncio.run(download_model_from_filecoin_async(filecoin_hash))
-    logger.info("Download result:", result)
+    data = asyncio.run(download_model_async(model_hash))
+    print(data)

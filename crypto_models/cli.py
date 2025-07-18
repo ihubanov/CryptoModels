@@ -12,13 +12,14 @@ from rich import print as rprint
 from crypto_models import __version__
 from crypto_models.config import config
 from crypto_models.core import CryptoModelsManager
+from crypto_models.download import download_model_async
 from crypto_models.upload import upload_folder_to_lighthouse
-from crypto_models.download import download_model_from_filecoin_async, check_downloaded_model, DEFAULT_OUTPUT_DIR, POSTFIX_MODEL_PATH
-from crypto_models.preseved_models import PRESERVED_MODELS
+from crypto_models.models import MODEL_TO_HASH
+from crypto_models.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH
 
 manager = CryptoModelsManager()
 
-def get_all_downloaded_models(output_dir: Path = DEFAULT_OUTPUT_DIR) -> list:
+def get_all_downloaded_models() -> list:
     """
     Get all downloaded model hashes from the llms-storage directory.
     
@@ -27,11 +28,11 @@ def get_all_downloaded_models(output_dir: Path = DEFAULT_OUTPUT_DIR) -> list:
     """
     downloaded_models = []
     
-    if not output_dir.exists():
+    if not DEFAULT_MODEL_DIR.exists():
         return downloaded_models
     
     # Look for all .gguf files in the directory
-    for model_file in output_dir.glob(f"*{POSTFIX_MODEL_PATH}"):
+    for model_file in DEFAULT_MODEL_DIR.glob(f"*{POSTFIX_MODEL_PATH}"):
         # Extract hash from filename (remove .gguf extension)
         model_hash = model_file.stem
         if model_hash:  # Make sure it's not empty
@@ -90,7 +91,7 @@ def show_available_models():
     table.add_column("Model Name", style="bold magenta", justify="left")
     table.add_column("Hash", style="dim", justify="left")
     
-    for model_name, model_hash in PRESERVED_MODELS.items():
+    for model_name, model_hash in MODEL_TO_HASH.items():
         table.add_row(model_name, model_hash[:16] + "...")
         
     console.print(table)
@@ -349,8 +350,12 @@ def handle_download(args):
     """Handle model download with beautiful output"""
     print_info(f"Starting download for hash: {args.hash}")
     try:
-        asyncio.run(download_model_from_filecoin_async(args.hash))
-        print_success("Model downloaded successfully!")
+        success, local_path = asyncio.run(download_model_async(args.hash))
+        if success:
+            print_success(f"Model downloaded successfully to {local_path}")
+        else:
+            print_error("Download failed")
+            sys.exit(1)
     except Exception as e:
         print_error(f"Download failed: {str(e)}")
         sys.exit(1)
@@ -379,8 +384,8 @@ def handle_run(args):
         # Map model names to hashes
         model_hashes = []
         for model_name in model_names:
-            if model_name in PRESERVED_MODELS:
-                model_hash = PRESERVED_MODELS[model_name]
+            if model_name in MODEL_TO_HASH:
+                model_hash = MODEL_TO_HASH[model_name]
                 model_hashes.append(model_hash)
                 print_success(f"Found model '{model_name}' → {model_hash[:16]}...")
             else:
@@ -528,7 +533,8 @@ def handle_check(args):
     """Handle model check with beautiful output"""
     print_info(f"Checking if model is downloaded for hash: {args.hash}")
     try:
-        is_downloaded = check_downloaded_model(args.hash)
+        local_path = DEFAULT_MODEL_DIR / f"{args.hash}{POSTFIX_MODEL_PATH}"
+        is_downloaded = local_path.exists()
         if is_downloaded:
             print_success("True")
         else:
