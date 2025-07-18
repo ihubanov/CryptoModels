@@ -875,6 +875,7 @@ async def download_model_from_hf(data: dict, max_attempts: int = 3) -> tuple[boo
     model = data["model"]
     projector = data["projector"]
     local_path_str = data["local_path"]
+    tmp_model_dir = str(DEFAULT_MODEL_DIR / f"tmp_{time.time()}")
     
     for attempt in range(1, max_attempts + 1):
         try:
@@ -882,8 +883,9 @@ async def download_model_from_hf(data: dict, max_attempts: int = 3) -> tuple[boo
             if model is None:
                 snapshot_download(
                     repo_id=repo_id,
-                    local_dir = local_path_str
+                    local_dir = tmp_model_dir
                 )
+                await async_move(tmp_model_dir, local_path_str)
             else:
                 hf_hub_download(
                     repo_id=repo_id,
