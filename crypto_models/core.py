@@ -288,7 +288,9 @@ class CryptoModelsManager:
                         else:
                             try:
                                 base_model_hash = lora_metadata["base_model"]
-                                base_model_path = asyncio.run(download_model_async(base_model_hash))
+                                success, base_model_path = asyncio.run(download_model_async(base_model_hash))
+                                if not success:
+                                    raise ModelNotFoundError(f"Base model file not found for hash: {base_model_hash}")
                                 
                                 # Construct absolute LoRA paths
                                 lora_paths = []
