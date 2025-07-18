@@ -51,21 +51,21 @@ MODELS = {
         "repo": "Qwen/Qwen3-30B-GGUF",
         "model": "Qwen3-30B-A3B-Q8_0.gguf"
     },
-    # "bafkreiaevddz5ssjnbkmdrl6dzw5sugwirzi7wput7z2ttcwnvj2wiiw5q": {
-    #     "repo": "google/gemma-3-4b-it-qat-q4_0-gguf",
-    #     "model": "gemma-3-4b-it-q4_0.gguf",
-    #     "projector": "mmproj-model-f16-4B.gguf"
-    # },
-    # "bafkreic2bkjuu3fvdoxnvusdt4in6fa6lubzhtjtmcp2zvokvfjpyndakq": {
-    #     "repo": "google/gemma-3-12b-it-qat-q4_0-gguf",
-    #     "model": "gemma-3-12b-it-q4_0.gguf",
-    #     "projector": "mmproj-model-f16-12B.gguf"
-    # },
-    # "bafkreihi2cbsgja5dwa5nsuixicx2x3gbcnh7gsocxbmjxegtewoq2syve": {
-    #     "repo": "google/gemma-3-27b-it-qat-q4_0-gguf",
-    #     "model": "gemma-3-27b-it-q4_0.gguf",
-    #     "projector": "mmproj-model-f16-27B.gguf"
-    # },
+    "bafkreiaevddz5ssjnbkmdrl6dzw5sugwirzi7wput7z2ttcwnvj2wiiw5q": {
+        "repo": "lmstudio-community/gemma-3-4B-it-qat-GGUF",
+        "model": "gemma-3-4B-it-QAT-Q4_0.gguf",
+        "projector": "mmproj-model-f16.gguf"
+    },
+    "bafkreic2bkjuu3fvdoxnvusdt4in6fa6lubzhtjtmcp2zvokvfjpyndakq": {
+        "repo": "lmstudio-community/gemma-3-12B-it-qat-GGUF",
+        "model": "gemma-3-12B-it-QAT-Q4_0.gguf",
+        "projector": "mmproj-model-f16.gguf"
+    },
+    "bafkreihi2cbsgja5dwa5nsuixicx2x3gbcnh7gsocxbmjxegtewoq2syve": {
+        "repo": "lmstudio-community/gemma-3-27B-it-qat-GGUF",
+        "model": "gemma-3-27B-it-QAT-Q4_0.gguf",
+        "projector": "mmproj-model-f16.gguf"
+    },
     "bafkreihz3mz422vpoy7sccwj5tujkerxbjxdlmsqqf3ridxbe3m6ipnq5i": {
         "repo": "unsloth/gemma-3n-E4B-it-GGUF",
         "model": "gemma-3n-E4B-it-Q8_0.gguf"

@@ -687,30 +687,31 @@ async def download_model_async(filecoin_hash: str) -> tuple[bool, str | None]:
         data["local_path"] = local_path_str
         model_metadata = MODELS.get(filecoin_hash, None)
 
-        if model_metadata is not None:
-            data["repo"] = model_metadata["repo"]
-            data["model"] = model_metadata.get("model", None)
-            data["projector"] = model_metadata.get("projector", None)
-
         # More accurate disk space check after metadata is fetched
         if "files" in data:
             total_size_mb = sum(f.get("size_mb", 512) for f in data["files"])
+            data["total_size_mb"] = total_size_mb
             required_space_bytes = int(total_size_mb * EXTRACTION_BUFFER_FACTOR * 1024 * 1024)
             try:
                 check_disk_space(DEFAULT_MODEL_DIR, required_bytes=required_space_bytes)
             except Exception as e:
                 logger.error(f"Insufficient disk space for model extraction: {e}")
                 return False, None
+            
+        if model_metadata is not None:
 
-        
-        # Try HuggingFace download first if available
-        if data["repo"] is not None:
-            success, hf_local_path = await download_model_from_hf(data)
-            if success:
-                logger.info(f"Successfully downloaded from HuggingFace: {hf_local_path}")
-                return True, hf_local_path
-            else:
-                logger.info("Download failed, falling back to Filecoin")
+            data["repo"] = model_metadata["repo"]
+            data["model"] = model_metadata.get("model", None)
+            data["projector"] = model_metadata.get("projector", None)
+
+            # Try HuggingFace download first if available
+            if data["repo"] is not None:
+                success, hf_local_path = await download_model_from_hf(data)
+                if success:
+                    logger.info(f"Successfully downloaded from HuggingFace: {hf_local_path}")
+                    return True, hf_local_path
+                else:
+                    logger.info("Download failed, falling back to Filecoin")
         
         # Prepare for Filecoin download
         folder_path = Path.cwd() / data["folder_name"]
