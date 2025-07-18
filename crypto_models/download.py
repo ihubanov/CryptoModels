@@ -672,11 +672,6 @@ async def download_model_async(filecoin_hash: str) -> tuple[bool, str | None]:
     local_path = DEFAULT_MODEL_DIR / f"{filecoin_hash}{POSTFIX_MODEL_PATH}"
     local_path_str = str(local_path.absolute())
 
-    # Early return if model already exists
-    if os.path.exists(local_path_str):
-        logger.info(f"Using existing model at {local_path_str}")
-        return True, local_path_str
-
     try:
         # Fetch model metadata using the dedicated async function
         success, data = await fetch_model_metadata_async(filecoin_hash)
@@ -687,6 +682,39 @@ async def download_model_async(filecoin_hash: str) -> tuple[bool, str | None]:
         data["filecoin_hash"] = filecoin_hash
         data["local_path"] = local_path_str
         model_metadata = MODELS.get(filecoin_hash, None)
+        is_lora = data.get("lora", False)
+        lora_metadata = {}
+
+        if is_lora:
+            # First, try to load metadata from local LoRA model if it exists
+            if os.path.exists(local_path_str):
+                metadata_path = os.path.join(local_path_str, "metadata.json")
+                try:
+                    with open(metadata_path, "r") as f:
+                        lora_metadata = json.load(f)
+                except (FileNotFoundError, json.JSONDecodeError) as e:
+                    logger.warning(f"Failed to load local LoRA metadata: {e}")
+                    lora_metadata = {}
+            
+                base_model_hash = lora_metadata["base_model"]
+                lora_base_model_path_str = str(DEFAULT_MODEL_DIR / f"{base_model_hash}{POSTFIX_MODEL_PATH}")
+                if os.path.exists(lora_base_model_path_str):
+                    logger.info(f"Using existing LoRA model at {local_path_str}")
+                    logger.info(f"Using existing base model at {lora_base_model_path_str}")
+                    return True, local_path_str
+                else:
+                    logger.warning(f"LoRA model exists but base model not found at {lora_base_model_path_str}")
+                    logger.info(f"Downloading missing base model: {base_model_hash}")
+                    success, base_model_path = await download_model_async(base_model_hash)
+                    if not success:
+                        logger.error(f"Failed to download base model: {base_model_hash}")
+                        return False, None
+                    logger.info(f"Successfully downloaded base model and using existing LoRA model")
+                    return True, local_path_str
+            else:
+                if os.path.exists(local_path_str):
+                    logger.info(f"Using existing model at {local_path_str}")
+                    return True, local_path_str
 
         # More accurate disk space check after metadata is fetched
         if "files" in data:
@@ -704,31 +732,38 @@ async def download_model_async(filecoin_hash: str) -> tuple[bool, str | None]:
             data["repo"] = model_metadata["repo"]
             data["model"] = model_metadata.get("model", None)
             data["projector"] = model_metadata.get("projector", None)
-            is_lora = data.get("lora", False)
+
             if is_lora:
                 success, hf_local_path = await download_model_from_hf(data)
                 if not success:
                     logger.error("Failed to download LoRA model, falling back to Filecoin")
                 else:
-                    metadata_path = os.path.join(hf_local_path, "metadata.json")
-                    metadata = {}
-                    try:
-                        with open(metadata_path, "r") as f:
-                            metadata = json.load(f)
-                        base_model_hash = metadata["base_model"]
-                        success, base_model_path = await download_model_async(base_model_hash)
-                        if not success:
-                            logger.error(f"Failed to download base model: {base_model_hash}")
+                    # After successful LoRA download, load metadata to get base model hash
+                    if not lora_metadata:
+                        # Try to load metadata from the downloaded LoRA model
+                        lora_metadata_path = os.path.join(hf_local_path, "metadata.json")
+                        try:
+                            with open(lora_metadata_path, "r") as f:
+                                lora_metadata = json.load(f)
+                        except (FileNotFoundError, json.JSONDecodeError) as e:
+                            logger.error(f"Failed to load LoRA metadata from downloaded model: {e}")
                             return False, None
-                        logger.info(f"Successfully downloaded LoRA model and base model: {hf_local_path}")
-                        return True, hf_local_path
-                    except Exception as e:
-                        logger.error(f"Failed to load metadata: {e}")
+                    
+                    base_model_hash = lora_metadata.get("base_model", None)
+                    if base_model_hash is None:
+                        logger.error("No base_model found in LoRA metadata")
                         return False, None
+                    
+                    success, base_model_path = await download_model_async(base_model_hash)
+                    if not success:
+                        logger.error(f"Failed to download base model: {base_model_hash}")
+                        return False, None
+                    logger.info(f"Successfully downloaded LoRA model and base model: {hf_local_path}")
+                    return True, hf_local_path
             else:
                 success, hf_local_path = await download_model_from_hf(data)
                 if success:
-                    logger.info(f"Successfully downloaded from HuggingFace: {hf_local_path}")
+                    logger.info(f"Successfully downloaded: {hf_local_path}")
                     return True, hf_local_path
                 else:
                     logger.info("Download failed, falling back to Filecoin")
@@ -1031,7 +1066,7 @@ async def download_model_from_hf(data: dict, max_attempts: int = 3) -> tuple[boo
             progress_tracker.complete_download()
             await progress_tracker.cleanup()
             
-            logger.info(f"Successfully downloaded model from HuggingFace: {local_path_str}")
+            logger.info(f"Successfully downloaded model: {local_path_str}")
             return True, local_path_str
             
         except Exception as e:
