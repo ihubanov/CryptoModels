@@ -868,7 +868,7 @@ class HuggingFaceProgressTracker:
         self.lock = threading.Lock()
         
         # Estimated download speed (MB/s) - starts conservative and adjusts
-        self.estimated_speed_mbps = 7.0 # Start with 7 MB/s estimate
+        self.estimated_speed_mbps = 5.0 # Start with 5 MB/s estimate
         
         # Start background task for periodic progress updates
         self.progress_task = None
@@ -926,7 +926,6 @@ class HuggingFaceProgressTracker:
                 f"[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL] "
                 f"--progress 100.0% "
                 f"--speed {actual_speed_mbps:.2f} MB/s "
-                f"--source HuggingFace --completed"
             )
             
     async def cleanup(self):
