@@ -663,7 +663,7 @@ async def download_model_async(filecoin_hash: str) -> tuple[bool, str | None]:
         filecoin_hash (str): The IPFS hash of the model
         
     Returns:
-        str | None: Local path to the downloaded model, or None if download fails
+        tuple[bool, str | None]: (success, local_path) - True and path if successful, False and None if failed
     """
     # Ensure output directory exists
     DEFAULT_MODEL_DIR.mkdir(exist_ok=True, parents=True)
@@ -707,7 +707,7 @@ async def download_model_async(filecoin_hash: str) -> tuple[bool, str | None]:
             success, hf_local_path = await download_model_from_hf(data)
             if success:
                 logger.info(f"Successfully downloaded from HuggingFace: {hf_local_path}")
-                return hf_local_path
+                return True, hf_local_path
             else:
                 logger.info("Download failed, falling back to Filecoin")
         
