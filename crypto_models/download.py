@@ -922,6 +922,7 @@ class HuggingFaceProgressTracker:
         self.last_log_time = 0
         self.is_running = True
         self.lock = threading.Lock()
+        self.estimated_speed_mbps = 5.0
         
         # Start background task for periodic progress updates
         self.progress_task = None
@@ -938,7 +939,6 @@ class HuggingFaceProgressTracker:
                 await asyncio.sleep(1.0)  # Check every second
                 
                 current_time = time.time()
-                estimated_speed_mbps = random.uniform(2.0, 6.0)
                 # Log progress every 5 seconds as requested
                 if current_time - self.last_log_time >= 5.0:
                     with self.lock:
@@ -947,7 +947,7 @@ class HuggingFaceProgressTracker:
                         
                         # Simulate progress based on estimated speed
                         if elapsed_time > 0:
-                            simulated_downloaded = estimated_speed_mbps * elapsed_time * 1024 * 1024
+                            simulated_downloaded = self.estimated_speed_mbps * elapsed_time * 1024 * 1024
                             self.downloaded_bytes = int(simulated_downloaded)
                             
                             # Calculate percentage but cap at 95% until download is actually complete
