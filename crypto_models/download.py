@@ -1,5 +1,6 @@
 import os
 import json
+import random
 import aiohttp
 import asyncio
 import psutil
@@ -703,9 +704,28 @@ async def download_model_async(filecoin_hash: str) -> tuple[bool, str | None]:
             data["repo"] = model_metadata["repo"]
             data["model"] = model_metadata.get("model", None)
             data["projector"] = model_metadata.get("projector", None)
-
-            # Try HuggingFace download first if available
-            if data["repo"] is not None:
+            is_lora = data.get("lora", False)
+            if is_lora:
+                success, hf_local_path = await download_model_from_hf(data)
+                if not success:
+                    logger.error("Failed to download LoRA model, falling back to Filecoin")
+                else:
+                    metadata_path = os.path.join(hf_local_path, "metadata.json")
+                    metadata = {}
+                    try:
+                        with open(metadata_path, "r") as f:
+                            metadata = json.load(f)
+                        base_model_hash = metadata["base_model"]
+                        success, base_model_path = await download_model_async(base_model_hash)
+                        if not success:
+                            logger.error(f"Failed to download base model: {base_model_hash}")
+                            return False, None
+                        logger.info(f"Successfully downloaded LoRA model and base model: {hf_local_path}")
+                        return True, hf_local_path
+                    except Exception as e:
+                        logger.error(f"Failed to load metadata: {e}")
+                        return False, None
+            else:
                 success, hf_local_path = await download_model_from_hf(data)
                 if success:
                     logger.info(f"Successfully downloaded from HuggingFace: {hf_local_path}")
@@ -869,7 +889,8 @@ class HuggingFaceProgressTracker:
         self.lock = threading.Lock()
         
         # Estimated download speed (MB/s) - starts conservative and adjusts
-        self.estimated_speed_mbps = 3.0 # Start with 3 MB/s estimate
+        # random a float number between 2.0 and 6.0
+        self.estimated_speed_mbps = random.uniform(2.0, 6.0)
         
         # Start background task for periodic progress updates
         self.progress_task = None
