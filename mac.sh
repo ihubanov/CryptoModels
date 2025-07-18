@@ -1,9 +1,6 @@
 #!/bin/bash
 set -o pipefail
 
-# FORCE REINSTALL MODE - This will remove and reinstall everything
-FORCE_REINSTALL=true
-
 # Logging functions
 log_message() {
     local message="$1"
@@ -57,21 +54,6 @@ update_package() {
     # If specific tag is provided, use tag-based installation
     if [ -n "$specific_tag" ]; then
         install_package_by_tag "$package_name" "$github_url" "$specific_tag"
-        return $?
-    fi
-    
-    # Force reinstall mode - always uninstall first
-    if [ "$FORCE_REINSTALL" = true ]; then
-        if pip show "$package_name" &>/dev/null; then
-            log_message "FORCE REINSTALL: Uninstalling existing $package_name..."
-            pip uninstall "$package_name" -y
-        fi
-        log_message "FORCE REINSTALL: Installing $package_name..."
-        if eval "$install_cmd"; then
-            log_message "$package_name installed successfully."
-        else
-            log_error "Failed to install $package_name."
-        fi
         return $?
     fi
     
@@ -139,68 +121,57 @@ install_package_by_tag() {
     
     log_message "Checking $package_name installation for tag: $tag"
     
-    # Force reinstall mode - always uninstall first
-    if [ "$FORCE_REINSTALL" = true ]; then
-        if pip show "$package_name" &>/dev/null; then
-            log_message "FORCE REINSTALL: Uninstalling existing $package_name..."
+    # Check if package is already installed
+    if pip show "$package_name" &>/dev/null; then
+        local installed_version=$(pip show "$package_name" | grep Version | awk '{print $2}')
+        log_message "Current $package_name version: $installed_version"
+        
+        # Try to get more detailed information about the installed package
+        local installed_location=$(pip show "$package_name" | grep Location | awk '{print $2}')
+        local is_git_install=false
+        local installed_git_ref=""
+        
+        # Check if this is a git installation
+        if [ -d "$installed_location/$package_name/.git" ]; then
+            is_git_install=true
+            # Try to get the git reference (tag/branch/commit)
+            if [ -f "$installed_location/$package_name/.git/HEAD" ]; then
+                installed_git_ref=$(cat "$installed_location/$package_name/.git/HEAD" 2>/dev/null | sed 's|refs/heads/||' | sed 's|refs/tags/||')
+            fi
+        fi
+        
+        # Check for tag mismatch
+        local needs_update=false
+        local mismatch_reason=""
+        
+        if [ "$is_git_install" = true ] && [ -n "$installed_git_ref" ]; then
+            # For git installations, compare the git reference
+            if [ "$installed_git_ref" != "$tag" ]; then
+                needs_update=true
+                mismatch_reason="Git reference mismatch: installed=$installed_git_ref, desired=$tag"
+            fi
+        else
+            # For non-git installations or when we can't determine git ref, compare version
+            if [ "$installed_version" != "$tag" ]; then
+                needs_update=true
+                mismatch_reason="Version mismatch: installed=$installed_version, desired=$tag"
+            fi
+
+        fi
+        
+        if [ "$needs_update" = true ]; then
+            log_message "Tag mismatch detected: $mismatch_reason"
+            log_message "Updating $package_name to tag $tag..."
             pip uninstall "$package_name" -y || {
                 log_error "Failed to uninstall $package_name"
                 return 1
             }
-        fi
-        log_message "FORCE REINSTALL: Installing $package_name from tag $tag..."
-    else
-        # Check if package is already installed
-        if pip show "$package_name" &>/dev/null; then
-            local installed_version=$(pip show "$package_name" | grep Version | awk '{print $2}')
-            log_message "Current $package_name version: $installed_version"
-            
-            # Try to get more detailed information about the installed package
-            local installed_location=$(pip show "$package_name" | grep Location | awk '{print $2}')
-            local is_git_install=false
-            local installed_git_ref=""
-            
-            # Check if this is a git installation
-            if [ -d "$installed_location/$package_name/.git" ]; then
-                is_git_install=true
-                # Try to get the git reference (tag/branch/commit)
-                if [ -f "$installed_location/$package_name/.git/HEAD" ]; then
-                    installed_git_ref=$(cat "$installed_location/$package_name/.git/HEAD" 2>/dev/null | sed 's|refs/heads/||' | sed 's|refs/tags/||')
-                fi
-            fi
-            
-            # Check for tag mismatch
-            local needs_update=false
-            local mismatch_reason=""
-            
-            if [ "$is_git_install" = true ] && [ -n "$installed_git_ref" ]; then
-                # For git installations, compare the git reference
-                if [ "$installed_git_ref" != "$tag" ]; then
-                    needs_update=true
-                    mismatch_reason="Git reference mismatch: installed=$installed_git_ref, desired=$tag"
-                fi
-            else
-                # For non-git installations or when we can't determine git ref, compare version
-                if [ "$installed_version" != "$tag" ]; then
-                    needs_update=true
-                    mismatch_reason="Version mismatch: installed=$installed_version, desired=$tag"
-                fi
-            fi
-            
-            if [ "$needs_update" = true ]; then
-                log_message "Tag mismatch detected: $mismatch_reason"
-                log_message "Updating $package_name to tag $tag..."
-                pip uninstall "$package_name" -y || {
-                    log_error "Failed to uninstall $package_name"
-                    return 1
-                }
-            else
-                log_message "$package_name is already installed with the correct tag ($tag). No update needed."
-                return 0
-            fi
         else
-            log_message "$package_name not found. Installing from tag $tag..."
+            log_message "$package_name is already installed with the correct tag ($tag). No update needed."
+            return 0
         fi
+    else
+        log_message "$package_name not found. Installing from tag $tag..."
     fi
     
     # Install from specific tag
@@ -315,7 +286,7 @@ show_package_status() {
 #   MLX_FLUX_TAG="feature-xyz"   # Install from specific branch
 
 MLX_FLUX_TAG="1.0.2"           # Leave empty for latest, or set specific tag
-CRYPTOMODELS_TAG="1.1.27"   # Leave empty for latest, or set specific tag
+CRYPTOMODELS_TAG="1.1.28"   # Leave empty for latest, or set specific tag
 
 # Uncomment the lines below to see available tags before installation
 # list_available_tags "https://github.com/0x9334/mlx-flux.git" "mlx-flux"
@@ -423,29 +394,9 @@ else
     log_message "PATH already updated in .zshrc."
 fi
 
-# Force reinstall warning
-if [ "$FORCE_REINSTALL" = true ]; then
-    log_message "🚨 FORCE REINSTALL MODE ENABLED 🚨"
-    log_message "This will remove and reinstall all components:"
-    log_message "  - Virtual environment will be deleted and recreated"
-    log_message "  - All Python packages will be uninstalled and reinstalled"
-    log_message "  - Homebrew packages will be reinstalled"
-    log_message ""
-    log_message "Starting force reinstall in 5 seconds..."
-    sleep 5
-fi
-
-# Step 4: Force reinstall pigz
+# Step 4: Install pigz
 log_message "Checking for pigz installation..."
-if [ "$FORCE_REINSTALL" = true ]; then
-    if command_exists pigz; then
-        log_message "FORCE REINSTALL: Uninstalling pigz..."
-        brew uninstall --force pigz 2>/dev/null || true
-    fi
-    log_message "FORCE REINSTALL: Installing pigz..."
-    brew install pigz || handle_error $? "Failed to install pigz"
-    log_message "pigz installed successfully."
-elif command_exists pigz; then
+if command_exists pigz; then
     log_message "pigz is already installed."
 else
     log_message "Installing pigz..."
@@ -453,16 +404,9 @@ else
     log_message "pigz installed successfully."
 fi
 
-# Step 5: Force reinstall llama.cpp
+# Step 5: Install llama.cpp
 log_message "Checking llama.cpp version..."
-if [ "$FORCE_REINSTALL" = true ]; then
-    if command_exists llama-cli; then
-        log_message "FORCE REINSTALL: Uninstalling llama.cpp..."
-        brew uninstall --force llama.cpp 2>/dev/null || true
-    fi
-    log_message "FORCE REINSTALL: Installing llama.cpp..."
-    brew install llama.cpp.rb || handle_error $? "Failed to install llama.cpp"
-elif command_exists llama-cli; then
+if command_exists llama-cli; then
     INSTALLED_VERSION=$(llama-cli --version 2>&1 | grep -oE 'version: [0-9]+' | cut -d' ' -f2 || echo "0")
     log_message "Current llama.cpp version: $INSTALLED_VERSION"
     
@@ -487,12 +431,8 @@ hash -r
 llama-cli --version || handle_error $? "llama.cpp verification failed"
 log_message "llama.cpp setup complete."
 
-# Step 6: Force recreate virtual environment
-if [ "$FORCE_REINSTALL" = true ]; then
-    log_message "FORCE REINSTALL: Removing existing virtual environment..."
-    rm -rf cryptomodels
-fi
 
+# Step 6: Create and activate virtual environment
 log_message "Creating virtual environment 'cryptomodels'..."
 "$PYTHON_CMD" -m venv cryptomodels || handle_error $? "Failed to create virtual environment"
 
