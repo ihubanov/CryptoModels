@@ -68,8 +68,7 @@ MODELS = {
     # },
     "bafkreihz3mz422vpoy7sccwj5tujkerxbjxdlmsqqf3ridxbe3m6ipnq5i": {
         "repo": "unsloth/gemma-3n-E4B-it-GGUF",
-        "model": "gemma-3n-E4B-it-Q8_0.gguf",
-        "projector": "mmproj-model-f16-4B.gguf"
+        "model": "gemma-3n-E4B-it-Q8_0.gguf"
     },
     "bafkreiaztifhss23cftya3bkorbsenzohol2oc3dvngo2srbbosko6gmme": {
         "repo": "LiquidAI/LFM2-1.2B-GGUF",

@@ -868,7 +868,7 @@ class HuggingFaceProgressTracker:
         self.lock = threading.Lock()
         
         # Estimated download speed (MB/s) - starts conservative and adjusts
-        self.estimated_speed_mbps = 5.0 # Start with 5 MB/s estimate
+        self.estimated_speed_mbps = 3.0 # Start with 3 MB/s estimate
         
         # Start background task for periodic progress updates
         self.progress_task = None
