@@ -230,8 +230,11 @@ class CryptoModelsManager:
                         raise ModelNotFoundError(f"Model file not found for hash: {hash_val}")
                     
                     success, metadata = asyncio.run(fetch_model_metadata_async(hash_val))
+                    
                     if not success:
                         raise ModelNotFoundError(f"Model metadata not found for hash: {hash_val}")
+                    
+                    metadata.pop("files")
                     
                     models_info[hash_val] = {
                         "local_model_path": local_model_path,
@@ -455,6 +458,8 @@ class CryptoModelsManager:
         try:
             with open(self.msgpack_file, "wb") as f:
                 msgpack.dump(metadata, f)
+                
+            print(f"metadata: {metadata}")
         except Exception as e:
             logger.error(f"Error dumping running service: {str(e)}", exc_info=True)
             return False
@@ -1507,8 +1512,6 @@ class CryptoModelsManager:
                     service_info = msgpack.load(f)
             else:
                 service_info = {}
-
-            logger.info(f"service_info: {service_info}")
             
             service_info.update(updates)
             
