@@ -26,6 +26,7 @@ from crypto_models.schema import (
     ModelCard,
     ModelList,
     ModelPermission,
+    LoraConfigRequest,
     ChatCompletionRequest,
     ChatCompletionResponse,
     EmbeddingRequest,
@@ -1161,6 +1162,12 @@ async def update(request: Dict[str, Any]):
         return {"status": "ok", "message": "Service info updated successfully"}
     else:
         raise HTTPException(status_code=500, detail="Failed to update service info")
+    
+@app.post("/update/lora")
+async def update_lora(request: LoraConfigRequest):
+    """Update the LoRA for a given model hash."""
+    request_dict = convert_request_to_dict(request)
+    return await crypto_models_manager.update_lora(request_dict)
 
 # Model-based endpoints that use the request queue
 @app.post("/chat/completions")

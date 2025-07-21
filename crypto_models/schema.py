@@ -350,6 +350,14 @@ class ModelList(BaseModel):
     object: str = "list"
     data: List[ModelCard] = [] 
 
+class LoraItem(BaseModel):
+    path: str
+    scale: float
+
+class LoraConfigRequest(BaseModel):
+    model_hash: str
+    lora_items: List[LoraItem]
+
 
 class ImageSize(str, Enum):
     SMALL_SQUARE = "256x256"

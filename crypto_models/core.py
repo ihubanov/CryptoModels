@@ -1525,6 +1525,21 @@ class CryptoModelsManager:
         except Exception as e:
             logger.error(f"Failed to update service info: {str(e)}")
             return False
+        
+    def update_lora(self, request: Dict[str, Any]) -> bool:
+        """Update the LoRA for a given model hash."""
+        try:
+            with open(self.msgpack_file, "rb") as f:
+                service_info = msgpack.load(f)
+            models = service_info.get("models", {})
+            if request["model_hash"] not in models:
+                raise CryptoAgentsServiceError(f"Model {request['model_hash']} not found in available models")
+            models[request["model_hash"]]["lora_config"] = request["lora_items"]
+            with open(self.msgpack_file, "wb") as f:
+                msgpack.dump(service_info, f)
+            return True
+        except Exception as e:
+            raise CryptoAgentsServiceError(f"Failed to load service info: {str(e)}")
 
     def _build_image_generation_command(self, model_path: str, port: int, host: str, config_name: str, 
                                        lora_paths: Optional[List[str]] = None, 
@@ -1677,8 +1692,6 @@ class CryptoModelsManager:
                     for i in range(len(lora_config)):
                         lora_paths.append(lora_config[str(i)]["path"])
                         lora_scales.append(lora_config[str(i)]["scale"])
-
-                    
                 
                 running_ai_command = self._build_image_generation_command(
                     effective_model_path, local_ai_port, host, config_name, lora_paths, lora_scales
