@@ -233,6 +233,16 @@ class CryptoModelsManager:
                     if not success:
                         raise ModelNotFoundError(f"Model metadata not found for hash: {hash_val}")
                     
+                    models_info[hash_val] = {
+                        "local_model_path": base_model_path,
+                        "metadata": metadata,
+                        "on_demand": i > 0,  # First model is not on-demand
+                        "local_projector_path": base_model_path + "-projector",
+                        "context_length": context_length,
+                        "lora_config": lora_config,
+                        "base_model_path": base_model_path
+                    }
+                    
                     is_lora = metadata.get("lora", False)
                     lora_config = None
                     if is_lora:
@@ -258,14 +268,7 @@ class CryptoModelsManager:
                             }
                         models_info[hash_val]["lora_config"] = lora_config
                         models_info[hash_val]["base_model_path"] = base_model_path
-                    
-                    models_info[hash_val] = {
-                        "local_model_path": local_model_path,
-                        "metadata": metadata,
-                        "on_demand": i > 0,  # First model is not on-demand
-                        "local_projector_path": local_model_path + "-projector",
-                        "context_length": context_length,
-                    }
+                
 
                 # Check if any existing model is running
                 model_running = self.get_running_model()
