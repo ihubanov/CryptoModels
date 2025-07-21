@@ -221,7 +221,6 @@ class CryptoModelsManager:
                     logger.info(f"On-demand models: {on_demand_hashes}")
                 
                 # Download and prepare all models
-                lora_config = {}
                 models_info = {}
                 for i, hash_val in enumerate(hashes_list):
                     
@@ -235,7 +234,9 @@ class CryptoModelsManager:
                         raise ModelNotFoundError(f"Model metadata not found for hash: {hash_val}")
                     
                     is_lora = metadata.get("lora", False)
+                    lora_config = None
                     if is_lora:
+                        lora_config = {}
                         lora_metadata_path = os.path.join(local_model_path, "metadata.json")
                         lora_metadata, error_msg = self._load_lora_metadata(lora_metadata_path)
                         if lora_metadata is None:
@@ -245,19 +246,14 @@ class CryptoModelsManager:
                         success, base_model_path = asyncio.run(download_model_async(base_model_hash))
                         if not success:
                             raise ModelNotFoundError(f"Base model file not found for hash: {base_model_hash}")
-                        lora_paths = []
-                        lora_config = {}
                         lora_scales = lora_metadata["lora_scales"]
                         if len(lora_metadata["lora_paths"]) == 0:
                             logger.warning(f"No LoRA paths found in metadata for hash: {hash_val}")
                             continue
                         for i, lora_path in enumerate(lora_metadata["lora_paths"]):
-                            if os.path.isabs(lora_path):
-                                lora_paths.append(lora_path)
-                            else:
-                                lora_paths.append(os.path.join(local_model_path, lora_path))
+                            absolute_lora_path = os.path.join(local_model_path, lora_path)
                             lora_config[str(i)] = {
-                                "path": lora_path,
+                                "path": absolute_lora_path,
                                 "scale": lora_scales[i]
                             }
                         models_info[hash_val]["lora_config"] = lora_config
@@ -310,15 +306,14 @@ class CryptoModelsManager:
                     if is_lora:
                         base_model_path = main_model_info["base_model_path"]
                         lora_config = main_model_info["lora_config"]
-                        for lora_item in lora_config.items():
-                            lora_paths.append(lora_item[0])
-                            lora_scales.append(lora_item[1]["scale"])
-                        effective_model_path = base_model_path
+
                         lora_paths = []
                         lora_scales = []
                         for i in range(len(lora_config)):
                             lora_paths.append(lora_config[str(i)]["path"])
                             lora_scales.append(lora_config[str(i)]["scale"])
+                        
+                        effective_model_path = base_model_path
                         
                         logger.info(f"LoRA model detected - using base model: {base_model_path}")
                         logger.info(f"LoRA paths: {lora_paths}")
