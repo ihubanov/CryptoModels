@@ -1534,7 +1534,12 @@ class CryptoModelsManager:
             models = service_info.get("models", {})
             if request["model_hash"] not in models:
                 raise CryptoAgentsServiceError(f"Model {request['model_hash']} not found in available models")
-            models[request["model_hash"]]["lora_config"] = request["lora_items"]
+            model_info = models[request["model_hash"]]
+            if model_info.get("lora_config", None) is None:
+                raise CryptoAgentsServiceError(f"Model {request['model_hash']} is not a LoRA model")
+            model_info["lora_config"] = request["lora_items"]
+            models[request["model_hash"]] = model_info
+            service_info["models"] = models
             with open(self.msgpack_file, "wb") as f:
                 msgpack.dump(service_info, f)
             return True
