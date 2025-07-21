@@ -3,6 +3,7 @@ Schema definitions for API requests and responses following OpenAI's API standar
 """
 
 import re
+import os
 from typing_extensions import Literal
 from pydantic import BaseModel, Field, validator, root_validator
 from typing import List, Dict, Optional, Union, Any, ClassVar

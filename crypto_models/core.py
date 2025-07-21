@@ -1533,18 +1533,23 @@ class CryptoModelsManager:
                 service_info = msgpack.load(f)
             models = service_info.get("models", {})
             if request["model_hash"] not in models:
-                raise CryptoAgentsServiceError(f"Model {request['model_hash']} not found in available models")
+                return False
             model_info = models[request["model_hash"]]
             if model_info.get("lora_config", None) is None:
-                raise CryptoAgentsServiceError(f"Model {request['model_hash']} is not a LoRA model")
-            model_info["lora_config"] = request["lora_items"]
+                return False
+            model_info["lora_config"] = {}
+            for idx, item in enumerate(request["lora_items"]):
+                model_info["lora_config"][str(idx)] = {
+                    "path": item["path"],
+                    "scale": item["scale"]
+                }
             models[request["model_hash"]] = model_info
             service_info["models"] = models
             with open(self.msgpack_file, "wb") as f:
                 msgpack.dump(service_info, f)
             return True
         except Exception as e:
-            raise CryptoAgentsServiceError(f"Failed to load service info: {str(e)}")
+            return False
 
     def _build_image_generation_command(self, model_path: str, port: int, host: str, config_name: str, 
                                        lora_paths: Optional[List[str]] = None, 
