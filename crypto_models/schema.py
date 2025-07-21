@@ -336,9 +336,11 @@ class ModelCard(BaseModel):
     parent: Optional[str] = None
     permission: List[ModelPermission] = Field(default_factory=lambda: [ModelPermission()])
     ram: Optional[float] = None
+    folder_name: Optional[str] = None
     lora_config: Optional[dict] = None
     on_demand: Optional[bool] = None
     task: Optional[str] = None
+    multimodal: Optional[bool] = None
     context_length: Optional[int] = None
     base_model_path: Optional[str] = None
     local_model_path: Optional[str] = None
@@ -347,7 +349,6 @@ class ModelCard(BaseModel):
 class ModelList(BaseModel):
     object: str = "list"
     data: List[ModelCard] = [] 
-
 
 
 class ImageSize(str, Enum):

@@ -240,7 +240,6 @@ class CryptoModelsManager:
                         "local_model_path": local_model_path,
                         "metadata": metadata,
                         "on_demand": i > 0,  # First model is not on-demand
-                        "local_projector_path": local_model_path + "-projector",
                         "context_length": context_length,
                     }
                     
@@ -268,7 +267,11 @@ class CryptoModelsManager:
                                 "scale": lora_scales[i]
                             }
                         models_info[hash_val]["lora_config"] = lora_config
-                        models_info[hash_val]["base_model_path"] = base_model_path     
+                        models_info[hash_val]["base_model_path"] = base_model_path
+
+                    is_multimodal, projector_path = self._check_multimodal_support(local_model_path) 
+                    models_info[hash_val]["multimodal"] = is_multimodal
+                    models_info[hash_val]["local_projector_path"] = projector_path
 
                 # Check if any existing model is running
                 model_running = self.get_running_model()
@@ -329,7 +332,8 @@ class CryptoModelsManager:
                         main_hash, local_model_path, local_ai_port, port, context_length, task, False, None, lora_config
                     )
                 else:
-                    is_multimodal, projector_path = self._check_multimodal_support(local_model_path)
+                    is_multimodal = main_model_info["multimodal"]
+                    projector_path = main_model_info["local_projector_path"]
                     
                     service_metadata = self._create_service_metadata(
                         main_hash, local_model_path, local_ai_port, port, context_length, 
@@ -1084,7 +1088,7 @@ class CryptoModelsManager:
 
     def _create_service_metadata(self, hash: str, local_model_path: str, local_ai_port: int, 
                                 port: int, context_length: int, task: str, 
-                                is_multimodal: bool, projector_path: Optional[str], lora_config: Optional[dict] = None) -> dict:
+                                is_multimodal: bool, projector_path: Optional[str]) -> dict:
         """Create service metadata dictionary with all required fields."""
         return {
             "task": task,

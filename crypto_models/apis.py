@@ -1356,6 +1356,7 @@ async def v1_list_models():
             owned_by = metadata.get("owned_by", "user")
             model_id = folder_name if folder_name else model_hash
             raw_ram_value = metadata.get("ram")
+            multimodal = model_info.get("multimodal", None)
             parsed_ram_value = None
             if isinstance(raw_ram_value, (int, float)):
                 parsed_ram_value = float(raw_ram_value)
@@ -1380,7 +1381,8 @@ async def v1_list_models():
                 context_length=context_length,
                 base_model_path=base_model_path,
                 local_model_path=local_model_path,
-                local_projector_path=local_projector_path
+                local_projector_path=local_projector_path,
+                multimodal=multimodal
             )
             model_cards.append(model_card)
             status = "🟢 Active" if is_active else ("🔴 On-demand" if is_on_demand else "⚪ Unknown")
@@ -1398,6 +1400,7 @@ async def v1_list_models():
         permission = service_info.get("permission", None)
         created = service_info.get("created", int(time.time()))
         owned_by = service_info.get("owned_by", "user")
+        multimodal = service_info.get("multimodal", None)
         if not model_hash:
             logger.warning("/v1/models: No model hash found in service_info, though service_info itself was present. Returning empty list.")
             return ModelList(data=[])
@@ -1427,7 +1430,8 @@ async def v1_list_models():
             context_length=context_length,
             base_model_path=base_model_path,
             local_model_path=local_model_path,
-            local_projector_path=local_projector_path
+            local_projector_path=local_projector_path,
+            multimodal=multimodal
         )
         model_cards.append(model_card)
         logger.info(f"/v1/models: Single-model service - returning model {model_id}")
