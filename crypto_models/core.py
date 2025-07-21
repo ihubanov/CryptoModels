@@ -265,8 +265,7 @@ class CryptoModelsManager:
                                 "scale": lora_scales[i]
                             }
                         models_info[hash_val]["lora_config"] = lora_config
-                        models_info[hash_val]["base_model_path"] = base_model_path
-                
+                        models_info[hash_val]["base_model_path"] = base_model_path     
 
                 # Check if any existing model is running
                 model_running = self.get_running_model()
@@ -356,7 +355,10 @@ class CryptoModelsManager:
                         "local_projector_path": model_info["local_projector_path"],
                         "metadata": model_info["metadata"],
                         "on_demand": model_info["on_demand"],
-                        "active": hash_val == main_hash
+                        "active": hash_val == main_hash,
+                        "lora_config": model_info.get("lora_config", None),
+                        "base_model_path": model_info.get("base_model_path", None),
+                        "context_length": model_info.get("context_length", 32768)
                     }
             
                 logger.info(f"Starting main model process: {' '.join(running_ai_command)}")
