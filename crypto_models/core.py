@@ -1507,6 +1507,8 @@ class CryptoModelsManager:
                     service_info = msgpack.load(f)
             else:
                 service_info = {}
+
+            logger.info(f"service_info: {service_info}")
             
             service_info.update(updates)
             
