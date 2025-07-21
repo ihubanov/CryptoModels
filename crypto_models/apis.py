@@ -1268,6 +1268,7 @@ async def list_models():
         model_hash = service_info.get("hash")
         folder_name_from_info = service_info.get("folder_name")
         task = service_info.get("task", "chat")  # Default to chat if not specified
+        lora_config = service_info.get("lora_config", None)
         
         if not model_hash:
             logger.warning("/v1/models: No model hash found in service_info, though service_info itself was present. Returning empty list.")
@@ -1292,7 +1293,8 @@ async def list_models():
             root=model_id,  # Use folder name as root for display
             ram=parsed_ram_value,
             folder_name=folder_name_from_info,
-            task=task
+            task=task,
+            lora_config=lora_config
         )
         
         model_cards.append(model_card)
