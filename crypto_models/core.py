@@ -1568,6 +1568,11 @@ class CryptoModelsManager:
             return self._build_ai_command(
                 local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
             )
+        elif "openreasoning-nemotron" in folder_name.lower():
+            template_path, best_practice_path = self._get_family_template_and_practice("openreasoning-nemotron")
+            return self._build_ai_command(
+                local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
+            )
         elif "qwen25" in folder_name.lower():
             template_path, best_practice_path = self._get_family_template_and_practice("qwen25")
             return self._build_ai_command(
