@@ -1009,7 +1009,7 @@ async def download_model_from_hf(data: dict, max_attempts: int = 3) -> tuple[boo
     model = data["model"]
     projector = data["projector"]
     local_path_str = data["local_path"]
-    tmp_model_dir = str(DEFAULT_MODEL_DIR / f"tmp_{time.time()}")
+    tmp_model_dir = str(DEFAULT_MODEL_DIR / f"tmp_{repo_id.replace('/', '_')}")
     
     # Get total size for progress tracking
     total_size_mb = data.get("total_size_mb", 1000)  # Default to 1GB if not specified
@@ -1038,7 +1038,6 @@ async def download_model_from_hf(data: dict, max_attempts: int = 3) -> tuple[boo
                 )
                 await async_move(tmp_model_dir, local_path_str)
             else:
-                # Download specific model file
                 await loop.run_in_executor(
                     None,
                     lambda: hf_hub_download(

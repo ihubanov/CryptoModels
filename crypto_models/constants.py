@@ -8,15 +8,15 @@ GATEWAY_URLS = [
     # Mesh3 public gateway
     "https://gateway.mesh3.network/ipfs/",
     # IPFS official gateway
-    # "https://ipfs.io/ipfs/",
+    "https://ipfs.io/ipfs/",
     # Cloudflare IPFS gateway
-    # "https://cloudflare-ipfs.com/ipfs/",
+    "https://cloudflare-ipfs.com/ipfs/",
     # Cloudflare alternative
-    # "https://cf-ipfs.com/ipfs/",
+    "https://cf-ipfs.com/ipfs/",
     # Pinata-backed gateway
-    # "https://dweb.link/ipfs/",
+    "https://dweb.link/ipfs/",
     # 4everland Filecoin ecosystem gateway
-    # "https://4everland.io/ipfs/",
+    "https://4everland.io/ipfs/",
     # Infura IPFS gateway
-    # "https://infura-ipfs.io/ipfs/",
+    "https://infura-ipfs.io/ipfs/",
 ]
