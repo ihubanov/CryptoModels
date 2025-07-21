@@ -25,6 +25,7 @@ from crypto_models.schema import (
     Message,
     ModelCard,
     ModelList,
+    ModelPermission,
     ChatCompletionRequest,
     ChatCompletionResponse,
     EmbeddingRequest,
