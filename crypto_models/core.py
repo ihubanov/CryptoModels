@@ -59,7 +59,6 @@ class CryptoModelsManager:
         try:
             # Look for .tmp files in the same directory as the lock file
             lock_dir = self.start_lock_file.parent
-            temp_pattern = f"{self.start_lock_file.name}.tmp"
             
             for temp_file in lock_dir.glob(f"*.tmp"):
                 # Only remove temp files that match our naming pattern
@@ -222,8 +221,10 @@ class CryptoModelsManager:
                     logger.info(f"On-demand models: {on_demand_hashes}")
                 
                 # Download and prepare all models
+                lora_config = {}
                 models_info = {}
                 for i, hash_val in enumerate(hashes_list):
+                    
                     logger.info(f"Downloading model {i+1}/{len(hashes_list)}: {hash_val}")
                     success, local_model_path = asyncio.run(download_model_async(hash_val))
                     if not success:
@@ -233,11 +234,37 @@ class CryptoModelsManager:
                     if not success:
                         raise ModelNotFoundError(f"Model metadata not found for hash: {hash_val}")
                     
+                    is_lora = metadata.get("lora", False)
+                    if is_lora:
+                        lora_metadata_path = os.path.join(local_model_path, "metadata.json")
+                        lora_metadata, error_msg = self._load_lora_metadata(lora_metadata_path)
+                        if lora_metadata is None:
+                            logger.warning(f"Error loading LoRA metadata: {error_msg}")
+                            continue
+                        base_model_hash = lora_metadata["base_model"]
+                        success, base_model_path = asyncio.run(download_model_async(base_model_hash))
+                        if not success:
+                            raise ModelNotFoundError(f"Base model file not found for hash: {base_model_hash}")
+                        lora_paths = []
+                        lora_scales = lora_metadata["lora_scales"]
+                        for i, lora_path in enumerate(lora_metadata["lora_paths"]):
+                            if os.path.isabs(lora_path):
+                                lora_paths.append(lora_path)
+                            else:
+                                lora_paths.append(os.path.join(local_model_path, lora_path))
+                            lora_config[str(i)] = {
+                                "path": lora_path,
+                                "scale": lora_scales[i]
+                            }
+                        models_info[hash_val]["lora_config"] = lora_config
+                        models_info[hash_val]["base_model_path"] = base_model_path
+                    
                     models_info[hash_val] = {
                         "local_model_path": local_model_path,
                         "metadata": metadata,
                         "on_demand": i > 0,  # First model is not on-demand
-                        "local_projector_path": local_model_path + "-projector"
+                        "local_projector_path": local_model_path + "-projector",
+                        "context_length": context_length,
                     }
 
                 # Check if any existing model is running
@@ -260,71 +287,44 @@ class CryptoModelsManager:
                 task = metadata.get("task", "chat")
                 config_name = metadata.get("config_name", "flux-dev")
                 is_lora = metadata.get("lora", False)
-                
                 local_ai_port = self._get_free_port()
                 
                 # Build command and service metadata for main model
                 if task == "embed":
                     running_ai_command = self._build_embed_command(local_model_path, local_ai_port, host)
                     service_metadata = self._create_service_metadata(
-                        main_hash, local_model_path, local_ai_port, port, context_length, task, False, None
+                        main_hash, local_model_path, local_ai_port, port, context_length, task, False, None, None
                     )
                 elif task == "image-generation":
                     if not shutil.which("mlx-flux"):
                         raise CryptoAgentsServiceError("mlx-flux command not found in PATH")
                     
-                    # Initialize LoRA variables
+                    effective_model_path = local_model_path
                     lora_paths = None
                     lora_scales = None
-                    effective_model_path = local_model_path
                     
                     if is_lora:
-                        lora_metadata_path = os.path.join(local_model_path, "metadata.json")
-                        lora_metadata, error_msg = self._load_lora_metadata(lora_metadata_path)
-                        if lora_metadata is None:
-                            logger.error(f"Failed to load LoRA metadata: {error_msg}")
-                            logger.warning("Falling back to regular model mode")
-                            is_lora = False
-                        else:
-                            try:
-                                base_model_hash = lora_metadata["base_model"]
-                                success, base_model_path = asyncio.run(download_model_async(base_model_hash))
-                                if not success:
-                                    raise ModelNotFoundError(f"Base model file not found for hash: {base_model_hash}")
-                                
-                                # Construct absolute LoRA paths
-                                lora_paths = []
-                                for lora_path in lora_metadata["lora_paths"]:
-                                    if os.path.isabs(lora_path):
-                                        lora_paths.append(lora_path)
-                                    else:
-                                        lora_paths.append(os.path.join(local_model_path, lora_path))
-                                
-                                lora_scales = lora_metadata["lora_scales"]
-                                effective_model_path = base_model_path  # Use base model path for LoRA
-                                
-                                logger.info(f"LoRA model detected - using base model: {base_model_path}")
-                                logger.info(f"LoRA paths: {lora_paths}")
-                                logger.info(f"LoRA scales: {lora_scales}")
-                                
-                            except KeyError as e:
-                                logger.error(f"Missing required field in LoRA metadata: {e}")
-                                logger.warning("Falling back to regular model mode")
-                                is_lora = False
-                            except (OSError, IOError) as e:
-                                logger.error(f"File system error during LoRA setup: {e}")
-                                logger.warning("Falling back to regular model mode")
-                                is_lora = False
-                            except Exception as e:
-                                logger.error(f"Unexpected error during LoRA setup: {e}")
-                                logger.warning("Falling back to regular model mode")
-                                is_lora = False
+                        base_model_path = main_model_info["base_model_path"]
+                        lora_config = main_model_info["lora_config"]
+                        for lora_item in lora_config.items():
+                            lora_paths.append(lora_item[0])
+                            lora_scales.append(lora_item[1]["scale"])
+                        effective_model_path = base_model_path
+                        lora_paths = []
+                        lora_scales = []
+                        for i in range(len(lora_config)):
+                            lora_paths.append(lora_config[str(i)]["path"])
+                            lora_scales.append(lora_config[str(i)]["scale"])
                         
+                        logger.info(f"LoRA model detected - using base model: {base_model_path}")
+                        logger.info(f"LoRA paths: {lora_paths}")
+                        logger.info(f"LoRA scales: {lora_scales}")
+                                
                     running_ai_command = self._build_image_generation_command(
                         effective_model_path, local_ai_port, host, config_name, lora_paths, lora_scales
                     )
                     service_metadata = self._create_service_metadata(
-                        main_hash, local_model_path, local_ai_port, port, context_length, task, False, None
+                        main_hash, local_model_path, local_ai_port, port, context_length, task, False, None, lora_config
                     )
                 else:
                     is_multimodal, projector_path = self._check_multimodal_support(local_model_path)
@@ -358,7 +358,7 @@ class CryptoModelsManager:
                         "on_demand": model_info["on_demand"],
                         "active": hash_val == main_hash
                     }
-                
+            
                 logger.info(f"Starting main model process: {' '.join(running_ai_command)}")
                 
                 # Create log files for AI process
@@ -1078,7 +1078,7 @@ class CryptoModelsManager:
 
     def _create_service_metadata(self, hash: str, local_model_path: str, local_ai_port: int, 
                                 port: int, context_length: int, task: str, 
-                                is_multimodal: bool, projector_path: Optional[str]) -> dict:
+                                is_multimodal: bool, projector_path: Optional[str], lora_config: Optional[dict] = None) -> dict:
         """Create service metadata dictionary with all required fields."""
         return {
             "task": task,
@@ -1639,6 +1639,7 @@ class CryptoModelsManager:
             folder_name = metadata.get("folder_name", "")
             task = metadata.get("task", "chat")
             config_name = metadata.get("config_name", "flux-dev")
+            is_lora = metadata.get("lora", False)
             
             # Get current service configuration
             local_ai_port = service_info["port"]
@@ -1656,47 +1657,18 @@ class CryptoModelsManager:
                 lora_paths = None
                 lora_scales = None
                 effective_model_path = local_model_path
-                is_lora = metadata.get("lora", False)
                 
                 if is_lora:
-                    lora_metadata_path = os.path.join(local_model_path, "metadata.json")
-                    lora_metadata, error_msg = self._load_lora_metadata(lora_metadata_path)
-                    if lora_metadata is None:
-                        logger.error(f"Failed to load LoRA metadata during switch: {error_msg}")
-                        logger.warning("Falling back to regular model mode")
-                        is_lora = False
-                    else:
-                        try:
-                            base_model_hash = lora_metadata["base_model"]
-                            base_model_path = DEFAULT_MODEL_DIR / f"{base_model_hash}{POSTFIX_MODEL_PATH}"
-                            
-                            # Construct absolute LoRA paths
-                            lora_paths = []
-                            for lora_path in lora_metadata["lora_paths"]:
-                                if os.path.isabs(lora_path):
-                                    lora_paths.append(lora_path)
-                                else:
-                                    lora_paths.append(os.path.join(local_model_path, lora_path))
-                            
-                            lora_scales = lora_metadata["lora_scales"]
-                            effective_model_path = base_model_path  # Use base model path for LoRA
-                            
-                            logger.info(f"LoRA model detected in switch - using base model: {base_model_path}")
-                            logger.info(f"LoRA paths: {lora_paths}")
-                            logger.info(f"LoRA scales: {lora_scales}")
-                            
-                        except KeyError as e:
-                            logger.error(f"Missing required field in LoRA metadata during switch: {e}")
-                            logger.warning("Falling back to regular model mode")
-                            is_lora = False
-                        except (OSError, IOError) as e:
-                            logger.error(f"File system error during LoRA setup: {e}")
-                            logger.warning("Falling back to regular model mode")
-                            is_lora = False
-                        except Exception as e:
-                            logger.error(f"Unexpected error during LoRA setup: {e}")
-                            logger.warning("Falling back to regular model mode")
-                            is_lora = False
+                    base_model_path = target_model["base_model_path"]
+                    lora_config = target_model["lora_config"]       
+                    effective_model_path = base_model_path
+                    lora_paths = []
+                    lora_scales = []
+                    for i in range(len(lora_config)):
+                        lora_paths.append(lora_config[str(i)]["path"])
+                        lora_scales.append(lora_config[str(i)]["scale"])
+
+                    
                 
                 running_ai_command = self._build_image_generation_command(
                     effective_model_path, local_ai_port, host, config_name, lora_paths, lora_scales

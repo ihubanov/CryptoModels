@@ -338,6 +338,7 @@ class ModelCard(BaseModel):
     ram: Optional[float] = None
     folder_name: Optional[str] = None
     task: Optional[str] = None
+    lora_config: Optional[dict] = None
 
 class ModelList(BaseModel):
     object: str = "list"

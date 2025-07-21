@@ -1232,6 +1232,7 @@ async def list_models():
             is_active = model_info.get("active", False)
             is_on_demand = model_info.get("on_demand", False)
             task = metadata.get("task", "chat")  # Default to chat if not specified
+            lora_config = model_info.get("lora_config", None)
             
             # Prefer folder_name for user-facing ID, fallback to hash
             model_id = folder_name if folder_name else model_hash
@@ -1253,7 +1254,8 @@ async def list_models():
                 root=model_id,  # Use folder name as root for display
                 ram=parsed_ram_value,
                 folder_name=folder_name,
-                task=task
+                task=task,
+                lora_config=lora_config
             )
             
             model_cards.append(model_card)
