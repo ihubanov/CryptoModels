@@ -246,7 +246,11 @@ class CryptoModelsManager:
                         if not success:
                             raise ModelNotFoundError(f"Base model file not found for hash: {base_model_hash}")
                         lora_paths = []
+                        lora_config = {}
                         lora_scales = lora_metadata["lora_scales"]
+                        if len(lora_metadata["lora_paths"]) == 0:
+                            logger.warning(f"No LoRA paths found in metadata for hash: {hash_val}")
+                            continue
                         for i, lora_path in enumerate(lora_metadata["lora_paths"]):
                             if os.path.isabs(lora_path):
                                 lora_paths.append(lora_path)
