@@ -13,6 +13,7 @@ MODEL_TO_HASH = {
     "gemma-3n-e4b": "bafkreihz3mz422vpoy7sccwj5tujkerxbjxdlmsqqf3ridxbe3m6ipnq5i",
     "lfm2-1.2b": "bafkreiaztifhss23cftya3bkorbsenzohol2oc3dvngo2srbbosko6gmme",
     "devstral-small": "bafkreih4xgr5t7yc3yooz6i6usgpwhggaobspmgut4rnu42gi6cv77o4em",
+    "openreasoning-nemotron-32b": "bafkreidrdplo7mcfhrvocaa26yge6kmxmuwrexm5rffnzo5lbe6fkhjuvq",
     "flux-dev": "bafkreiaha3sjfmv4affmi5kbu6bnayenf2avwafp3cthhar3latmfi632u",
     "flux-schnell": "bafkreibks5pmc777snbo7dwk26sympe2o24tpqfedjq6gmgghwwu7iio34",
     "flux-dev-nsfw": "bafkreidbaksrogxispjejczfj36vtf5uzsbjt7irspl6kckynz5u2ugzke"
@@ -73,6 +74,10 @@ MODELS = {
     "bafkreiaztifhss23cftya3bkorbsenzohol2oc3dvngo2srbbosko6gmme": {
         "repo": "LiquidAI/LFM2-1.2B-GGUF",
         "model": "LFM2-1.2B-Q8_0.gguf"
+    },
+    "bafkreidrdplo7mcfhrvocaa26yge6kmxmuwrexm5rffnzo5lbe6fkhjuvq": {
+        "repo": "lmstudio-community/OpenReasoning-Nemotron-32B-GGUF",
+        "model": "OpenReasoning-Nemotron-32B-Q8_0.gguf"
     },
     "bafkreih4xgr5t7yc3yooz6i6usgpwhggaobspmgut4rnu42gi6cv77o4em": {
         "repo": "mistralai/Devstral-Small-2507_gguf",

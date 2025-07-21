@@ -187,6 +187,13 @@ We've prepared several models for you to test with. Each model is listed with it
 |-------|------|-----|---------|
 | lfm2-1.2b | 1.25 GB | 1.72 GB | `eai model run lfm2-1.2b` |
 
+#### 🔤 OpenReasoning-Nemotron Series
+[Learn more about OpenReasoning-Nemotron](https://huggingface.co/nvidia/OpenReasoning-Nemotron-32B)
+
+| Model | Size | RAM | Command |
+|-------|------|-----|---------|
+| openreasoning-nemotron-32b | 34.8 GB | 45.21 GB | `eai model run openreasoning-nemotron-32b` |
+
 #### 🎨 Flux Series
 [Learn more about Flux](https://bfl.ai/models/flux-kontext)
 
