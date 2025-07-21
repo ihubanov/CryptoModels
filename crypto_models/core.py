@@ -459,7 +459,6 @@ class CryptoModelsManager:
             with open(self.msgpack_file, "wb") as f:
                 msgpack.dump(metadata, f)
                 
-            print(f"metadata: {metadata}")
         except Exception as e:
             logger.error(f"Error dumping running service: {str(e)}", exc_info=True)
             return False
