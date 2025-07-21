@@ -299,7 +299,7 @@ class CryptoModelsManager:
                 if task == "embed":
                     running_ai_command = self._build_embed_command(local_model_path, local_ai_port, host)
                     service_metadata = self._create_service_metadata(
-                        main_hash, local_model_path, local_ai_port, port, context_length, task, False, None, None
+                        main_hash, local_model_path, local_ai_port, port, context_length, task, False, None
                     )
                 elif task == "image-generation":
                     if not shutil.which("mlx-flux"):
@@ -329,7 +329,7 @@ class CryptoModelsManager:
                         effective_model_path, local_ai_port, host, config_name, lora_paths, lora_scales
                     )
                     service_metadata = self._create_service_metadata(
-                        main_hash, local_model_path, local_ai_port, port, context_length, task, False, None, lora_config
+                        main_hash, local_model_path, local_ai_port, port, context_length, task, False, None
                     )
                 else:
                     is_multimodal = main_model_info["multimodal"]
