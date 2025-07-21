@@ -10,13 +10,15 @@ GATEWAY_URLS = [
     # IPFS official gateway
     "https://ipfs.io/ipfs/",
     # Cloudflare IPFS gateway
-    "https://cloudflare-ipfs.com/ipfs/",
+    # "https://cloudflare-ipfs.com/ipfs/",
     # Cloudflare alternative
-    "https://cf-ipfs.com/ipfs/",
+    # "https://cf-ipfs.com/ipfs/",
     # Pinata-backed gateway
     "https://dweb.link/ipfs/",
     # 4everland Filecoin ecosystem gateway
-    "https://4everland.io/ipfs/",
+    # "https://4everland.io/ipfs/",
     # Infura IPFS gateway
     "https://infura-ipfs.io/ipfs/",
 ]
+
+ETERNAL_AI_METADATA_GW = "https://agent.api.eternalai.org/api/vibe/model/"

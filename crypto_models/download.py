@@ -11,7 +11,7 @@ from pathlib import Path
 from loguru import logger
 from crypto_models.models import MODELS
 from huggingface_hub import hf_hub_download, snapshot_download
-from crypto_models.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH, GATEWAY_URLS
+from crypto_models.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH, GATEWAY_URLS, ETERNAL_AI_METADATA_GW
 from crypto_models.utils import compute_file_hash, async_extract_zip, async_move, async_rmtree
 
 SLEEP_TIME = 5
@@ -601,7 +601,9 @@ async def fetch_model_metadata_async(filecoin_hash: str, max_attempts: int = 3) 
     
     # Select the fastest gateway before downloading
     logger.info("Checking gateway speeds...")
-    best_gateway = await pick_fastest_gateway(filecoin_hash, GATEWAY_URLS)
+    # for meta-data add more with ETERNAL_AI_METADATA_GW
+    gateways_with_eternal = GATEWAY_URLS + [ETERNAL_AI_METADATA_GW]
+    best_gateway = await pick_fastest_gateway(filecoin_hash, gateways_with_eternal)
     logger.info(f"Using fastest gateway: {best_gateway}")
     input_link = f"{best_gateway}{filecoin_hash}"
 
