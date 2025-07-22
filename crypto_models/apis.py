@@ -1260,12 +1260,13 @@ async def list_models():
                     parsed_ram_value = float(raw_ram_value.lower().replace("gb", "").strip())
                 except ValueError:
                     logger.warning(f"/v1/models: Could not parse RAM value '{raw_ram_value}' to float for model {model_id}")
-                    
+
             model_card = ModelCard(
                 id=model_hash,
                 object="model",
                 created=created,
                 owned_by=owned_by,
+                active=active,
                 root=model_id,
                 parent=parent,
                 permission=permission if permission is not None else [ModelPermission()],
@@ -1277,9 +1278,7 @@ async def list_models():
                 context_length=context_length,
                 base_model_path=base_model_path,
                 local_model_path=local_model_path,
-                local_projector_path=local_projector_path,
-                created=created,
-                active=active
+                local_projector_path=local_projector_path
             )
             model_cards.append(model_card)
             status = "🟢 Active" if is_active else ("🔴 On-demand" if is_on_demand else "⚪ Unknown")
