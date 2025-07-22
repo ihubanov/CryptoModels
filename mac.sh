@@ -285,7 +285,7 @@ show_package_status() {
 #   MLX_FLUX_TAG="main"          # Install from main branch
 #   MLX_FLUX_TAG="feature-xyz"   # Install from specific branch
 
-MLX_FLUX_TAG="1.0.3"           # Leave empty for latest, or set specific tag
+MLX_FLUX_TAG="1.0.4"           # Leave empty for latest, or set specific tag
 CRYPTOMODELS_TAG="1.1.30"   # Leave empty for latest, or set specific tag
 
 # Uncomment the lines below to see available tags before installation
