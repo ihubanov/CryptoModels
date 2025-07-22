@@ -32,7 +32,6 @@ setup(
         "aiohttp==3.12.13",
         "setuptools==80.9.0",
         "pydantic==2.11.7",
-        "pillow==11.3.0",
         "asyncio==3.4.3",
         "json_repair==0.47.6",
         "msgpack==1.1.1"
