@@ -11,7 +11,7 @@ from pathlib import Path
 from loguru import logger
 from crypto_models.models import MODELS
 from huggingface_hub import hf_hub_download, snapshot_download
-from crypto_models.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH, GATEWAY_URLS, ETERNAL_AI_METADATA_GW
+from crypto_models.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH, GATEWAY_URLS, ETERNAL_AI_METADATA_GW, PREFIX_DOWNLOAD_LOG
 from crypto_models.utils import compute_file_hash, async_extract_zip, async_move, async_rmtree
 
 SLEEP_TIME = 5
@@ -392,9 +392,10 @@ class ProgressTracker:
             else:
                 # Fall back to file-based progress if no total size available
                 percentage = (self.completed_files / self.total_files) * 100
-
-            logger.info(
-                f"[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL] --progress {percentage:.1f}% ({self.completed_files}/{self.total_files} files) --speed {speed_mbps:.2f} MB/s")
+            logger.info("[ProgressTracker]")
+            logger.info(f"{PREFIX_DOWNLOAD_LOG} "
+                        f"--progress {percentage:.1f}% ({self.completed_files}/{self.total_files} files) "
+                        f"--speed {speed_mbps:.2f} MB/s")
 
     async def cleanup(self):
         """Clean up background tasks"""
@@ -958,9 +959,9 @@ class HuggingFaceProgressTracker:
                             
                             # Calculate current speed
                             current_speed_mbps = (self.downloaded_bytes / (1024 * 1024)) / elapsed_time
-                            
+                            logger.info("[HuggingFaceProgressTracker]")
                             logger.info(
-                                f"[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL] "
+                                f"{PREFIX_DOWNLOAD_LOG} "
                                 f"--progress {percentage:.1f}% "
                                 f"--speed {current_speed_mbps:.2f} MB/s "
                             )
@@ -977,9 +978,9 @@ class HuggingFaceProgressTracker:
             self.is_running = False
             elapsed_time = time.time() - self.start_time
             actual_speed_mbps = (self.total_size_bytes / (1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
-            
+            logger.info("[HuggingFaceProgressTracker]")
             logger.info(
-                f"[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL] "
+                f"{PREFIX_DOWNLOAD_LOG} "
                 f"--progress 100.0% "
                 f"--speed {actual_speed_mbps:.2f} MB/s "
             )
