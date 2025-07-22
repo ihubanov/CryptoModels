@@ -435,6 +435,8 @@ class CryptoModelsManager:
 
                 self._dump_running_service(service_metadata)
 
+                print(service_metadata)
+
                 # Update service metadata to the FastAPI app
                 try:
                     update_url = f"http://localhost:{port}/update"
@@ -1519,6 +1521,8 @@ class CryptoModelsManager:
                 service_info = {}
             
             service_info.update(updates)
+
+            print
             
             with open(self.msgpack_file, "wb") as f:
                 msgpack.dump(service_info, f)
