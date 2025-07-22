@@ -292,6 +292,11 @@ def parse_args():
         metavar="CONFIG"
     )
     preserve_command.add_argument(
+        "--gguf-folder",
+        action="store_true",
+        help="🔍 Indicate if this is a gguf folder include multiple files",
+    )
+    preserve_command.add_argument(
         "--lora",
         action="store_true",
         help="🔍 Indicate if this is a lora model (default: False)",
@@ -470,9 +475,9 @@ def handle_serve(args):
         print_info(f"Single model: {main_hash}")
     
     print_info(f"Starting model server...")
-    print_info(f"Host: {args.host}, Port: {args.port}")
+    print_info(f"Host: {args.host}, Port: {args.port}, Context: {args.context_length}")
     
-    if not manager.start(model_hashes_str, args.port, args.host):
+    if not manager.start(model_hashes_str, args.port, args.host, args.context_length):
         print_error("Failed to start model server")
         sys.exit(1)
     else:
@@ -522,6 +527,7 @@ def handle_preserve(args):
         "hf_repo": args.hf_repo,
         "hf_file": args.hf_file,
         "lora": args.lora,
+        "gguf_folder": args.gguf_folder,
     }
     
     try:

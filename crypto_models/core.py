@@ -16,7 +16,6 @@ from crypto_models.config import config
 from crypto_models.utils import wait_for_health
 from typing import Optional, Dict, Any, List
 from crypto_models.download import download_model_async, fetch_model_metadata_async
-from crypto_models.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH
 
 
 class CryptoAgentsServiceError(Exception):
@@ -291,6 +290,7 @@ class CryptoModelsManager:
                 family = metadata.get("family", None)
                 ram = metadata.get("ram", None)
                 task = metadata.get("task", "chat")
+                gguf_folder = metadata.get("gguf_folder", False)
                 config_name = metadata.get("config_name", "flux-dev")
                 is_lora = metadata.get("lora", False)
                 local_ai_port = self._get_free_port()
@@ -334,6 +334,15 @@ class CryptoModelsManager:
                 else:
                     is_multimodal = main_model_info["multimodal"]
                     projector_path = main_model_info["local_projector_path"]
+                    
+                    if gguf_folder:
+                        # list all files in the folder
+                        files = os.listdir(local_model_path)
+                        # filter files that end with .gguf
+                        files = [f for f in files if f.endswith(".gguf")]
+                        # sort files by name
+                        files.sort()
+                        local_model_path = os.path.join(local_model_path, files[0])
                     
                     service_metadata = self._create_service_metadata(
                         main_hash, local_model_path, local_ai_port, port, context_length, 
@@ -1044,7 +1053,7 @@ class CryptoModelsManager:
             "--port", str(port),
             "--host", host,
             "--embedding",
-            "--pooling", "cls",
+            "--pooling", "mean",
             "-ub", "8192",
             "-ngl", "9999"
         ]
@@ -1059,7 +1068,7 @@ class CryptoModelsManager:
             "--host", host,
             "-c", str(context_length),
             "-fa",
-            "--pooling", "cls",
+            "--pooling", "mean",
             "--embeddings",
             "--no-webui",
             "-ngl", "9999",
@@ -1676,6 +1685,7 @@ class CryptoModelsManager:
             task = metadata.get("task", "chat")
             config_name = metadata.get("config_name", "flux-dev")
             is_lora = metadata.get("lora", False)
+            gguf_folder = metadata.get("gguf_folder", False)
             
             # Get current service configuration
             local_ai_port = service_info["port"]
@@ -1708,10 +1718,20 @@ class CryptoModelsManager:
                     effective_model_path, local_ai_port, host, config_name, lora_paths, lora_scales
                 )
             else:
-                running_ai_command = self._build_model_command(folder_name, local_model_path, local_ai_port, host, context_length)
+                is_multimodal = target_model["multimodal"]
+                projector_path = target_model["local_projector_path"]
                 
-                # Add multimodal support if available
-                is_multimodal, projector_path = self._check_multimodal_support(local_model_path)
+                if gguf_folder:
+                    # list all files in the folder
+                    files = os.listdir(local_model_path)
+                    # filter files that end with .gguf
+                    files = [f for f in files if f.endswith(".gguf")]
+                    # sort files by name
+                    files.sort()
+                    local_model_path = os.path.join(local_model_path, files[0])
+                
+                running_ai_command = self._build_model_command(folder_name, local_model_path, local_ai_port, host, context_length)
+
                 if is_multimodal:
                     running_ai_command.extend([
                         "--mmproj", str(projector_path)

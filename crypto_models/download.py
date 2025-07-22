@@ -734,6 +734,7 @@ async def download_model_async(filecoin_hash: str) -> tuple[bool, str | None]:
             data["repo"] = model_metadata["repo"]
             data["model"] = model_metadata.get("model", None)
             data["projector"] = model_metadata.get("projector", None)
+            data["allow_patterns"] = model_metadata.get("allow_patterns", None)
 
             if is_lora:
                 success, hf_local_path = await download_model_from_hf(data)
@@ -1011,6 +1012,7 @@ async def download_model_from_hf(data: dict) -> tuple[bool, str | None]:
     model = data["model"]
     projector = data["projector"]
     local_path_str = data["local_path"]
+    allow_patterns = data["allow_patterns"]
     tmp_model_dir = str(DEFAULT_MODEL_DIR / f"tmp_{repo_id.replace('/', '_')}")
     
     # Get total size for progress tracking
@@ -1031,14 +1033,28 @@ async def download_model_from_hf(data: dict) -> tuple[bool, str | None]:
             loop = asyncio.get_event_loop()
             
             if model is None:
-                # Download entire repository
-                await loop.run_in_executor(
-                    None,
-                    lambda: snapshot_download(
-                        repo_id=repo_id,
-                        local_dir=tmp_model_dir
+
+                if allow_patterns is not None:
+                    # Download only the files that match the allow_patterns
+                    await loop.run_in_executor(
+                        None,
+                        lambda: snapshot_download(
+                            repo_id=repo_id,
+                            local_dir=tmp_model_dir,
+                            allow_patterns=allow_patterns
+                        )
                     )
-                )
+                    
+                else:
+
+                    await loop.run_in_executor(
+                        None,
+                        lambda: snapshot_download(
+                            repo_id=repo_id,
+                            local_dir=tmp_model_dir
+                        )
+                    )
+            
                 await async_move(tmp_model_dir, local_path_str)
             else:
                 await loop.run_in_executor(
