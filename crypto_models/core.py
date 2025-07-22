@@ -1053,7 +1053,7 @@ class CryptoModelsManager:
             "--port", str(port),
             "--host", host,
             "--embedding",
-            "--pooling", "cls",
+            "--pooling", "mean",
             "-ub", "8192",
             "-ngl", "9999"
         ]
@@ -1068,7 +1068,7 @@ class CryptoModelsManager:
             "--host", host,
             "-c", str(context_length),
             "-fa",
-            "--pooling", "cls",
+            "--pooling", "mean",
             "--embeddings",
             "--no-webui",
             "-ngl", "9999",
