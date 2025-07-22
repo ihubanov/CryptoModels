@@ -934,7 +934,19 @@ class HuggingFaceProgressTracker:
         """Start the background progress tracking task"""
         if self.progress_task is None:
             self.progress_task = asyncio.create_task(self._periodic_progress_update())
-        
+
+    def estimate_download(self, elapsed_time):
+        simulated_downloaded = self.estimated_speed_mbps * elapsed_time * 1024 * 1024
+        self.downloaded_bytes = int(simulated_downloaded)
+
+        # Calculate percentage but cap at 95% until download is actually complete
+        percentage = (self.downloaded_bytes / self.total_size_bytes) * 100
+        percentage = min(percentage, 95.0)  # Cap at 95% during download
+
+        # Calculate current speed
+        current_speed_mbps = (self.downloaded_bytes / (1024 * 1024)) / elapsed_time
+        return percentage, current_speed_mbps
+
     async def _periodic_progress_update(self):
         """Background task to log progress periodically every 5 seconds"""
         while self.is_running:
@@ -950,15 +962,7 @@ class HuggingFaceProgressTracker:
                         
                         # Simulate progress based on estimated speed
                         if elapsed_time > 0:
-                            simulated_downloaded = self.estimated_speed_mbps * elapsed_time * 1024 * 1024
-                            self.downloaded_bytes = int(simulated_downloaded)
-                            
-                            # Calculate percentage but cap at 95% until download is actually complete
-                            percentage = (self.downloaded_bytes / self.total_size_bytes) * 100
-                            percentage = min(percentage, 95.0)  # Cap at 95% during download
-                            
-                            # Calculate current speed
-                            current_speed_mbps = (self.downloaded_bytes / (1024 * 1024)) / elapsed_time
+                            percentage, current_speed_mbps = self.estimate_download(elapsed_time)
                             logger.info("[HuggingFaceProgressTracker]")
                             logger.info(
                                 f"{PREFIX_DOWNLOAD_LOG} "
