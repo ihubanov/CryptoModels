@@ -3,6 +3,7 @@ Schema definitions for API requests and responses following OpenAI's API standar
 """
 
 import re
+import os
 from typing_extensions import Literal
 from pydantic import BaseModel, Field, validator, root_validator
 from typing import List, Dict, Optional, Union, Any, ClassVar
@@ -332,17 +333,32 @@ class ModelCard(BaseModel):
     object: str = "model"
     created: int = Field(default_factory=lambda: int(time.time()))
     owned_by: str = "user"
+    active: bool = False
     root: Optional[str] = None
     parent: Optional[str] = None
     permission: List[ModelPermission] = Field(default_factory=lambda: [ModelPermission()])
     ram: Optional[float] = None
     folder_name: Optional[str] = None
+    lora_config: Optional[dict] = None
+    on_demand: Optional[bool] = None
     task: Optional[str] = None
+    multimodal: Optional[bool] = None
+    context_length: Optional[int] = None
+    base_model_path: Optional[str] = None
+    local_model_path: Optional[str] = None
+    local_projector_path: Optional[str] = None
 
 class ModelList(BaseModel):
     object: str = "list"
     data: List[ModelCard] = [] 
 
+class LoraItem(BaseModel):
+    path: str
+    scale: float
+
+class LoraConfigRequest(BaseModel):
+    model_hash: str
+    lora_items: List[LoraItem]
 
 
 class ImageSize(str, Enum):

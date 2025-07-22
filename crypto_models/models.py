@@ -16,7 +16,8 @@ MODEL_TO_HASH = {
     "openreasoning-nemotron-32b": "bafkreidrdplo7mcfhrvocaa26yge6kmxmuwrexm5rffnzo5lbe6fkhjuvq",
     "flux-dev": "bafkreiaha3sjfmv4affmi5kbu6bnayenf2avwafp3cthhar3latmfi632u",
     "flux-schnell": "bafkreibks5pmc777snbo7dwk26sympe2o24tpqfedjq6gmgghwwu7iio34",
-    "flux-dev-nsfw": "bafkreidbaksrogxispjejczfj36vtf5uzsbjt7irspl6kckynz5u2ugzke"
+    "flux-dev-nsfw": "bafkreidbaksrogxispjejczfj36vtf5uzsbjt7irspl6kckynz5u2ugzke",
+    "flux-dev-18-loras": "bafkreihiaeosw2jlyvzo7od46ihe4iwutgmppqj5d7z74g25qljlcmcikq"
 }
 
 MODELS = {
@@ -88,5 +89,8 @@ MODELS = {
     },
     "bafkreidbaksrogxispjejczfj36vtf5uzsbjt7irspl6kckynz5u2ugzke": {
         "repo": "NikolaSigmoid/FLUX.1-dev-NSFW-Master"
+    },
+    "bafkreihiaeosw2jlyvzo7od46ihe4iwutgmppqj5d7z74g25qljlcmcikq": {
+        "repo": "NikolaSigmoid/FLUX.1-dev-18-loras"
     }
 }
