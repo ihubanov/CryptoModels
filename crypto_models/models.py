@@ -56,7 +56,7 @@ MODELS = {
     },
     "bafkreie4uj3gluik5ob2ib3cm2pt6ww7n4vqpmjnq6pas4gkkor42yuysa": {
         "repo": "unsloth/Qwen3-235B-A22B-Instruct-2507-GGUF",
-        "allow_patterns": ["*Q4_K_M*"]
+        "pattern": "Q4_K_M"
     },
     "bafkreiaevddz5ssjnbkmdrl6dzw5sugwirzi7wput7z2ttcwnvj2wiiw5q": {
         "repo": "lmstudio-community/gemma-3-4B-it-qat-GGUF",
