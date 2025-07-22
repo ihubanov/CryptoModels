@@ -995,13 +995,13 @@ class HuggingFaceProgressTracker:
                 pass
 
 
-async def download_model_from_hf(data: dict, max_attempts: int = 3) -> tuple[bool, str | None]:
+async def download_model_from_hf(data: dict) -> tuple[bool, str | None]:
     """
-    Download model from HuggingFace Hub with retry logic and progress tracking.
+    Download model from HuggingFace Hub with infinite retry logic and exponential backoff.
+    Downloads forever until finished or canceled by user.
     
     Args:
         data: Model metadata dictionary containing hf_repo, hf_file, and local_path
-        max_attempts: Maximum number of retry attempts
         
     Returns:
         tuple[bool, str | None]: (success, local_path) - True and path if successful, False and None if failed
@@ -1019,9 +1019,10 @@ async def download_model_from_hf(data: dict, max_attempts: int = 3) -> tuple[boo
     # Create progress tracker
     progress_tracker = HuggingFaceProgressTracker(total_size_mb, repo_id)
     
-    for attempt in range(1, max_attempts + 1):
+    attempt = 1
+    while True:  # Infinite loop until success or user cancellation
         try:
-            logger.info(f"Download attempt {attempt}/{max_attempts} for {repo_id}")
+            logger.info(f"Download attempt {attempt} for {repo_id}")
             
             # Start progress tracking
             progress_tracker.start_progress_tracking()
@@ -1070,22 +1071,25 @@ async def download_model_from_hf(data: dict, max_attempts: int = 3) -> tuple[boo
             logger.info(f"Successfully downloaded model: {local_path_str}")
             return True, local_path_str
             
+        except KeyboardInterrupt:
+            logger.info("Download canceled by user")
+            await progress_tracker.cleanup()
+            return False, None
+            
         except Exception as e:
             logger.warning(f"Download attempt {attempt} failed: {e}")
             
             # Clean up progress tracker on failure
             await progress_tracker.cleanup()
             
-            if attempt < max_attempts:
-                logger.warning(f"Retrying in {SLEEP_TIME}s")
-                await asyncio.sleep(SLEEP_TIME)
-                # Create a new progress tracker for the next attempt
-                progress_tracker = HuggingFaceProgressTracker(total_size_mb, repo_id)
-            else:
-                logger.error(f"Download failed after {max_attempts} attempts")
-                return False, None
-    
-    return False, None
+            # Calculate exponential backoff with jitter
+            backoff_time = _calculate_backoff(attempt)
+            logger.warning(f"Retrying in {backoff_time}s (attempt {attempt + 1})")
+            await asyncio.sleep(backoff_time)
+            
+            # Create a new progress tracker for the next attempt
+            progress_tracker = HuggingFaceProgressTracker(total_size_mb, repo_id)
+            attempt += 1
 
 if __name__ == "__main__":
     model_hash = "bafkreihq4usl2t3i6pqoilvorp4up263yieuxcqs6xznlmrig365bvww5i"
