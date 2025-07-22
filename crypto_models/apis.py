@@ -1247,7 +1247,7 @@ async def list_models():
                 object="model",
                 created=created,
                 owned_by=owned_by,
-                active=is_active,
+                active=active,
                 root=model_id,
                 parent=parent,
                 permission=permission if permission is not None else [ModelPermission()],
@@ -1262,7 +1262,7 @@ async def list_models():
                 local_projector_path=local_projector_path
             )
             model_cards.append(model_card)
-            status = "🟢 Active" if is_active else ("🔴 On-demand" if is_on_demand else "⚪ Unknown")
+            status = "🟢 Active" if active else ("🔴 On-demand" if is_on_demand else "⚪ Unknown")
             logger.debug(f"/v1/models: Added model {model_id} ({model_hash[:16]}...) - {status}")
     else:
         model_hash = service_info.get("hash")
