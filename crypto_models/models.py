@@ -7,7 +7,7 @@ MODEL_TO_HASH = {
     "qwen3-14b": "bafkreiclwlxc56ppozipczuwkmgnlrxrerrvaubc5uhvfs3g2hp3lftrwm",
     "qwen3-32b": "bafkreihq4usl2t3i6pqoilvorp4up263yieuxcqs6xznlmrig365bvww5i",
     "qwen3-30b-a3b": "bafkreieroiopteqmtbjadlnpq3qkakdu7omvtuavs2l2qbu46ijnfdo2ly",
-    "qwen3-235b-a22b": "bafkreifhjehx2fyfmjg5lzm4jb6iq6pbmi5opluthkhfxn27ciptfwwnwe",
+    "qwen3-235b-a22b": "bafkreie4uj3gluik5ob2ib3cm2pt6ww7n4vqpmjnq6pas4gkkor42yuysa",
     "gemma-3-4b": "bafkreiaevddz5ssjnbkmdrl6dzw5sugwirzi7wput7z2ttcwnvj2wiiw5q",
     "gemma-3-12b": "bafkreic2bkjuu3fvdoxnvusdt4in6fa6lubzhtjtmcp2zvokvfjpyndakq",
     "gemma-3-27b": "bafkreihi2cbsgja5dwa5nsuixicx2x3gbcnh7gsocxbmjxegtewoq2syve",
@@ -54,7 +54,7 @@ MODELS = {
         "repo": "Qwen/Qwen3-30B-GGUF",
         "model": "Qwen3-30B-A3B-Q8_0.gguf"
     },
-    "bafkreifhjehx2fyfmjg5lzm4jb6iq6pbmi5opluthkhfxn27ciptfwwnwe": {
+    "bafkreie4uj3gluik5ob2ib3cm2pt6ww7n4vqpmjnq6pas4gkkor42yuysa": {
         "repo": "unsloth/Qwen3-235B-A22B-Instruct-2507-GGUF",
         "allow_patterns": ["*Q4_K_M*"]
     },

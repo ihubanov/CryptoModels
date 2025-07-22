@@ -527,6 +527,7 @@ def handle_preserve(args):
         "hf_repo": args.hf_repo,
         "hf_file": args.hf_file,
         "lora": args.lora,
+        "gguf_folder": args.gguf_folder,
     }
     
     try:
