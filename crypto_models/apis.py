@@ -1247,7 +1247,6 @@ async def list_models():
             permission = model_info.get("permission", None)
             created = metadata.get("created", int(time.time()))
             owned_by = metadata.get("owned_by", "user")
-            active = model_info.get("active", False)
 
             model_id = folder_name if folder_name else model_hash
             raw_ram_value = metadata.get("ram")
@@ -1266,7 +1265,7 @@ async def list_models():
                 object="model",
                 created=created,
                 owned_by=owned_by,
-                active=active,
+                active=is_active,
                 root=model_id,
                 parent=parent,
                 permission=permission if permission is not None else [ModelPermission()],
