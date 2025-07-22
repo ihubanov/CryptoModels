@@ -1247,10 +1247,12 @@ async def list_models():
             permission = model_info.get("permission", None)
             created = metadata.get("created", int(time.time()))
             owned_by = metadata.get("owned_by", "user")
-            # Prefer folder_name for user-facing ID, fallback to hash
+            active = model_info.get("active", False)
+
             model_id = folder_name if folder_name else model_hash
             raw_ram_value = metadata.get("ram")
             parsed_ram_value = None
+
             if isinstance(raw_ram_value, (int, float)):
                 parsed_ram_value = float(raw_ram_value)
             elif isinstance(raw_ram_value, str):
@@ -1258,6 +1260,7 @@ async def list_models():
                     parsed_ram_value = float(raw_ram_value.lower().replace("gb", "").strip())
                 except ValueError:
                     logger.warning(f"/v1/models: Could not parse RAM value '{raw_ram_value}' to float for model {model_id}")
+                    
             model_card = ModelCard(
                 id=model_hash,
                 object="model",
@@ -1274,7 +1277,9 @@ async def list_models():
                 context_length=context_length,
                 base_model_path=base_model_path,
                 local_model_path=local_model_path,
-                local_projector_path=local_projector_path
+                local_projector_path=local_projector_path,
+                created=created,
+                active=active
             )
             model_cards.append(model_card)
             status = "🟢 Active" if is_active else ("🔴 On-demand" if is_on_demand else "⚪ Unknown")

@@ -353,6 +353,7 @@ class CryptoModelsManager:
                 service_metadata["folder_name"] = folder_name
                 service_metadata["ram"] = ram
                 service_metadata["running_ai_command"] = running_ai_command
+                created = int(time.time())
                 
                 # Add multi-model information
                 service_metadata["models"] = {}
@@ -365,7 +366,8 @@ class CryptoModelsManager:
                         "active": hash_val == main_hash,
                         "lora_config": model_info.get("lora_config", None),
                         "base_model_path": model_info.get("base_model_path", None),
-                        "context_length": model_info.get("context_length", 32768)
+                        "context_length": model_info.get("context_length", 32768),
+                        "created": created
                     }
             
                 logger.info(f"Starting main model process: {' '.join(running_ai_command)}")
