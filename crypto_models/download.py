@@ -916,7 +916,7 @@ async def _move_model_to_final_location(data: dict, folder_path: Path, local_pat
 class HuggingFaceProgressTracker:
     """Track HuggingFace download progress with simulated progress updates"""
     
-    def __init__(self, total_size_mb: float, repo_id: str, tmp_model_dir: str):
+    def __init__(self, total_size_mb: float, repo_id: str, tmp_model_dir: str, is_snapshot: bool = True, file_path: str = None):
         self.total_size_mb = total_size_mb
         self.total_size_bytes = int(total_size_mb * 1024 * 1024)
         self.repo_id = repo_id
@@ -927,7 +927,10 @@ class HuggingFaceProgressTracker:
         self.lock = threading.Lock()
         self.estimated_speed_mbps = self.total_size_mb / 1024
         self.tmp_model_dir = tmp_model_dir
-
+        # True if using snapshot_download, False if using hf_hub_download (single file)
+        self.is_snapshot = is_snapshot
+        # File path for hf_hub_download (single file), None for snapshot_download
+        self.file_path = file_path
         # Start background task for periodic progress updates
         self.progress_task = None
         
@@ -948,24 +951,42 @@ class HuggingFaceProgressTracker:
         current_speed_mbps = (self.downloaded_bytes / (1024 * 1024)) / elapsed_time
         return percentage, current_speed_mbps
 
+    def find_latest_incomplete_file(self, cache_dir):
+        latest_file = None
+        latest_mtime = 0
+        for root, dirs, files in os.walk(cache_dir):
+            for f in files:
+                if f.endswith('.incomplete'):
+                    fp = os.path.join(root, f)
+                    mtime = os.path.getmtime(fp)
+                    if mtime > latest_mtime:
+                        latest_file = fp
+                        latest_mtime = mtime
+        return latest_file
+
     def get_real_download_progress(self, elapsed_time: float) -> tuple[float, float]:
         """
-        Calculate real download progress by summing all file sizes in the directory recursively.
+        Calculate real download progress for either a directory (snapshot_download) or a single file (hf_hub_download).
         Args:
-            download_dir (str): Path to the directory to scan (e.g. HuggingFace .cache dir)
             elapsed_time (float): Elapsed time in seconds
         Returns:
             tuple: (percentage, current_speed_mbps)
         """
-        total_downloaded = 0
-        for dirpath, dirnames, filenames in os.walk(self.tmp_model_dir):
-            for f in filenames:
-                fp = os.path.join(dirpath, f)
-                if os.path.isfile(fp):
-                    total_downloaded += os.path.getsize(fp)
-        percentage = (total_downloaded / self.total_size_bytes) * 100 if self.total_size_bytes > 0 else 0
+        if self.is_snapshot:
+            # Sum all file sizes in the directory recursively
+            self.downloaded_bytes = 0
+            for dirpath, dirnames, filenames in os.walk(self.tmp_model_dir):
+                for f in filenames:
+                    fp = os.path.join(dirpath, f)
+                    if os.path.isfile(fp):
+                        self.downloaded_bytes += os.path.getsize(fp)
+        else:
+            incomplete_file = self.find_latest_incomplete_file(self.file_path)
+            self.downloaded_bytes = os.path.getsize(incomplete_file)
+
+        percentage = (self.downloaded_bytes / self.total_size_bytes) * 100 if self.total_size_bytes > 0 else 0
         percentage = min(percentage, 99.0)  # Cap at 99% until complete
-        current_speed_mbps = (total_downloaded / (1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
+        current_speed_mbps = (self.downloaded_bytes / (1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
         return percentage, current_speed_mbps
 
     async def _periodic_progress_update(self):
@@ -1026,10 +1047,8 @@ async def download_model_from_hf(data: dict) -> tuple[bool, str | None]:
     """
     Download model from HuggingFace Hub with infinite retry logic and exponential backoff.
     Downloads forever until finished or canceled by user.
-    
     Args:
         data: Model metadata dictionary containing hf_repo, hf_file, and local_path
-        
     Returns:
         tuple[bool, str | None]: (success, local_path) - True and path if successful, False and None if failed
     """
@@ -1039,12 +1058,17 @@ async def download_model_from_hf(data: dict) -> tuple[bool, str | None]:
     projector = data["projector"]
     local_path_str = data["local_path"]
     tmp_model_dir = str(DEFAULT_MODEL_DIR / f"tmp_{repo_id.replace('/', '_')}")
-    
     # Get total size for progress tracking
     total_size_mb = data.get("total_size_mb", 1000)  # Default to 1GB if not specified
-    
-    # Create progress tracker
-    progress_tracker = HuggingFaceProgressTracker(total_size_mb, repo_id, tmp_model_dir)
+    # Create progress tracker with correct mode
+    if model is None:
+        # Use snapshot_download (directory)
+        progress_tracker = HuggingFaceProgressTracker(total_size_mb, repo_id, tmp_model_dir, is_snapshot=True)
+    else:
+        # Use hf_hub_download (single file)
+        file_path = f"{DEFAULT_MODEL_DIR}/.cache/huggingface/download"
+        progress_tracker = HuggingFaceProgressTracker(total_size_mb, repo_id, tmp_model_dir, is_snapshot=False,
+                                                      file_path=file_path)
     
     attempt = 1
     while True:  # Infinite loop until success or user cancellation
@@ -1073,7 +1097,7 @@ async def download_model_from_hf(data: dict) -> tuple[bool, str | None]:
                     lambda: hf_hub_download(
                         repo_id=repo_id,
                         filename=model,
-                        local_dir=DEFAULT_MODEL_DIR
+                        local_dir=DEFAULT_MODEL_DIR,
                     )
                 )
                 await async_move(str(DEFAULT_MODEL_DIR / model), local_path_str)
@@ -1086,7 +1110,7 @@ async def download_model_from_hf(data: dict) -> tuple[bool, str | None]:
                         lambda: hf_hub_download(
                             repo_id=repo_id,
                             filename=projector,
-                            local_dir=DEFAULT_MODEL_DIR
+                            local_dir=DEFAULT_MODEL_DIR,
                         )
                     )
                     await async_move(str(DEFAULT_MODEL_DIR / projector), projector_path)
@@ -1114,8 +1138,13 @@ async def download_model_from_hf(data: dict) -> tuple[bool, str | None]:
             logger.warning(f"Retrying in {backoff_time}s (attempt {attempt + 1})")
             await asyncio.sleep(backoff_time)
             
-            # Create a new progress tracker for the next attempt
-            progress_tracker = HuggingFaceProgressTracker(total_size_mb, repo_id)
+            # Create a new progress tracker for the next attempt, with correct mode
+            if model is None:
+                progress_tracker = HuggingFaceProgressTracker(total_size_mb, repo_id, tmp_model_dir, is_snapshot=True)
+            else:
+                file_path = f"{DEFAULT_MODEL_DIR}/.cache/huggingface/download"
+                progress_tracker = HuggingFaceProgressTracker(total_size_mb, repo_id, tmp_model_dir, is_snapshot=False,
+                                                              file_path=file_path)
             attempt += 1
 
 if __name__ == "__main__":
