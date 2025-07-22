@@ -1172,47 +1172,29 @@ async def update_lora(request: LoraConfigRequest):
     else:
         return {"status": "error", "message": "Failed to update LoRA"}
 
-# Model-based endpoints that use the request queue
 @app.post("/chat/completions")
-async def chat_completions(request: ChatCompletionRequest):
-    """Endpoint for chat completion requests."""
-    request_dict = convert_request_to_dict(request)
-    return await RequestProcessor.process_request("/chat/completions", request_dict)
-
 @app.post("/v1/chat/completions")
-async def v1_chat_completions(request: ChatCompletionRequest):
-    """Endpoint for chat completion requests (v1 API)."""
+async def chat_completions(request: ChatCompletionRequest):
+    """Endpoint for chat completion requests (supports both /v1 and non-/v1)."""
     request_dict = convert_request_to_dict(request)
     return await RequestProcessor.process_request("/v1/chat/completions", request_dict)
 
-
 @app.post("/embeddings")
-async def embeddings(request: EmbeddingRequest):
-    """Endpoint for embedding requests."""
-    request_dict = convert_request_to_dict(request)
-    return await RequestProcessor.process_request("/embeddings", request_dict)
-
 @app.post("/v1/embeddings")
-async def v1_embeddings(request: EmbeddingRequest):
-    """Endpoint for embedding requests (v1 API)."""
+async def embeddings(request: EmbeddingRequest):
+    """Endpoint for embedding requests (supports both /v1 and non-/v1)."""
     request_dict = convert_request_to_dict(request)
     return await RequestProcessor.process_request("/v1/embeddings", request_dict)
 
-
 @app.post("/images/generations")
-async def image_generations(request: ImageGenerationRequest):
-    """Endpoint for image generation requests."""
-    request_dict = convert_request_to_dict(request)
-    return await RequestProcessor.process_request("/images/generations", request_dict)
-    
-
 @app.post("/v1/images/generations")
-async def v1_image_generations(request: ImageGenerationRequest):
-    """Endpoint for image generation requests (v1 API)."""
+async def image_generations(request: ImageGenerationRequest):
+    """Endpoint for image generation requests (supports both /v1 and non-/v1)."""
     request_dict = convert_request_to_dict(request)
     return await RequestProcessor.process_request("/v1/images/generations", request_dict)
 
-@app.get("/models")
+@app.get("/models", response_model=ModelList)
+@app.get("/v1/models", response_model=ModelList)
 async def list_models():
     """
     Provides a list of available models, compatible with OpenAI's /v1/models endpoint.
@@ -1235,7 +1217,7 @@ async def list_models():
         for model_hash, model_info in models.items():
             metadata = model_info.get("metadata", {})
             folder_name = metadata.get("folder_name", "")
-            is_active = model_info.get("active", False)
+            active = model_info.get("active", False)
             is_on_demand = model_info.get("on_demand", False)
             task = metadata.get("task", "chat")
             lora_config = model_info.get("lora_config", None)
@@ -1324,127 +1306,8 @@ async def list_models():
             context_length=context_length,
             base_model_path=base_model_path,
             local_model_path=local_model_path,
-            local_projector_path=local_projector_path
-        )
-        model_cards.append(model_card)
-        logger.info(f"/v1/models: Single-model service - returning model {model_id}")
-    logger.info(f"/v1/models: Returning {len(model_cards)} models")
-    return ModelList(data=model_cards)
-
-
-@app.get("/v1/models", response_model=ModelList)
-async def v1_list_models():
-    """
-    Provides a list of available models, compatible with OpenAI's /v1/models endpoint.
-    Returns all models in multi-model service including main and on-demand models.
-    """
-    try:
-        service_info = get_service_info()
-    except HTTPException as e:
-        if e.status_code == 503:
-            logger.info("/v1/models: Service information not available. No model loaded or /update not called.")
-            return ModelList(data=[])
-        logger.error(f"/v1/models: Unexpected HTTPException while fetching service_info: {e.detail}")
-        raise
-
-    model_cards = []
-    models = service_info.get("models", {})
-
-    if models:
-        logger.info(f"/v1/models: Multi-model service detected with {len(models)} models")
-        for model_hash, model_info in models.items():
-            metadata = model_info.get("metadata", {})
-            folder_name = metadata.get("folder_name", "")
-            is_active = model_info.get("active", False)
-            is_on_demand = model_info.get("on_demand", False)
-            task = metadata.get("task", "chat")
-            lora_config = model_info.get("lora_config", None)
-            context_length = model_info.get("context_length", None)
-            base_model_path = model_info.get("base_model_path", None)
-            local_model_path = model_info.get("local_model_path", None)
-            local_projector_path = model_info.get("local_projector_path", None)
-            parent = model_info.get("parent", None)
-            permission = model_info.get("permission", None)
-            created = metadata.get("created", int(time.time()))
-            owned_by = metadata.get("owned_by", "user")
-            model_id = folder_name if folder_name else model_hash
-            raw_ram_value = metadata.get("ram")
-            multimodal = model_info.get("multimodal", None)
-            parsed_ram_value = None
-            if isinstance(raw_ram_value, (int, float)):
-                parsed_ram_value = float(raw_ram_value)
-            elif isinstance(raw_ram_value, str):
-                try:
-                    parsed_ram_value = float(raw_ram_value.lower().replace("gb", "").strip())
-                except ValueError:
-                    logger.warning(f"/v1/models: Could not parse RAM value '{raw_ram_value}' to float for model {model_id}")
-            model_card = ModelCard(
-                id=model_hash,
-                object="model",
-                created=created,
-                owned_by=owned_by,
-                root=model_id,
-                parent=parent,
-                permission=permission if permission is not None else [ModelPermission()],
-                ram=parsed_ram_value,
-                folder_name=folder_name,
-                lora_config=lora_config,
-                on_demand=is_on_demand,
-                task=task,
-                context_length=context_length,
-                base_model_path=base_model_path,
-                local_model_path=local_model_path,
-                local_projector_path=local_projector_path,
-                multimodal=multimodal
-            )
-            model_cards.append(model_card)
-            status = "🟢 Active" if is_active else ("🔴 On-demand" if is_on_demand else "⚪ Unknown")
-            logger.debug(f"/v1/models: Added model {model_id} ({model_hash[:16]}...) - {status}")
-    else:
-        model_hash = service_info.get("hash")
-        folder_name_from_info = service_info.get("folder_name")
-        task = service_info.get("task", "chat")
-        lora_config = service_info.get("lora_config", None)
-        context_length = service_info.get("context_length", None)
-        base_model_path = service_info.get("base_model_path", None)
-        local_model_path = service_info.get("local_model_path", None)
-        local_projector_path = service_info.get("local_projector_path", None)
-        parent = service_info.get("parent", None)
-        permission = service_info.get("permission", None)
-        created = service_info.get("created", int(time.time()))
-        owned_by = service_info.get("owned_by", "user")
-        multimodal = service_info.get("multimodal", None)
-        if not model_hash:
-            logger.warning("/v1/models: No model hash found in service_info, though service_info itself was present. Returning empty list.")
-            return ModelList(data=[])
-        model_id = folder_name_from_info if folder_name_from_info else model_hash
-        raw_ram_value = service_info.get("ram")
-        parsed_ram_value = None
-        if isinstance(raw_ram_value, (int, float)):
-            parsed_ram_value = float(raw_ram_value)
-        elif isinstance(raw_ram_value, str):
-            try:
-                parsed_ram_value = float(raw_ram_value.lower().replace("gb", "").strip())
-            except ValueError:
-                logger.warning(f"/v1/models: Could not parse RAM value '{raw_ram_value}' to float.")
-        model_card = ModelCard(
-            id=model_hash,
-            object="model",
-            created=created,
-            owned_by=owned_by,
-            root=model_id,
-            parent=parent,
-            permission=permission if permission is not None else [ModelPermission()],
-            ram=parsed_ram_value,
-            folder_name=folder_name_from_info,
-            lora_config=lora_config,
-            on_demand=None,
-            task=task,
-            context_length=context_length,
-            base_model_path=base_model_path,
-            local_model_path=local_model_path,
             local_projector_path=local_projector_path,
-            multimodal=multimodal
+            active = True
         )
         model_cards.append(model_card)
         logger.info(f"/v1/models: Single-model service - returning model {model_id}")
