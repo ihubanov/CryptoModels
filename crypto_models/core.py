@@ -1623,6 +1623,11 @@ class CryptoModelsManager:
             return self._build_ai_command(
                 local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
             )
+        elif "dolphin-3.0" in folder_name.lower():
+            template_path, best_practice_path = self._get_family_template_and_practice("dolphin-3.0")
+            return self._build_ai_command(
+                local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
+            )
         elif "qwen3" in folder_name.lower():
             template_path, best_practice_path = self._get_family_template_and_practice("qwen3")
             return self._build_ai_command(
