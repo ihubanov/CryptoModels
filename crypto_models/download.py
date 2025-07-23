@@ -916,7 +916,7 @@ async def _move_model_to_final_location(data: dict, folder_path: Path, local_pat
 class HuggingFaceProgressTracker:
     """Track HuggingFace download progress with simulated progress updates"""
     
-    def __init__(self, total_size_mb: float, repo_id: str, tmp_model_dir: str):
+    def __init__(self, total_size_mb: float, repo_id: str):
         self.total_size_mb = total_size_mb
         self.total_size_bytes = int(total_size_mb * 1024 * 1024)
         self.repo_id = repo_id
@@ -926,7 +926,6 @@ class HuggingFaceProgressTracker:
         self.is_running = True
         self.lock = threading.Lock()
         self.estimated_speed_mbps = self.total_size_mb / 1024
-        self.tmp_model_dir = tmp_model_dir
 
         # Start background task for periodic progress updates
         self.progress_task = None
@@ -936,7 +935,7 @@ class HuggingFaceProgressTracker:
         if self.progress_task is None:
             self.progress_task = asyncio.create_task(self._periodic_progress_update())
 
-    def estimate_download(self, elapsed_time) -> tuple[float, float]:
+    def estimate_download(self, elapsed_time):
         simulated_downloaded = self.estimated_speed_mbps * elapsed_time * 1024 * 1024
         self.downloaded_bytes = int(simulated_downloaded)
 
@@ -946,26 +945,6 @@ class HuggingFaceProgressTracker:
 
         # Calculate current speed
         current_speed_mbps = (self.downloaded_bytes / (1024 * 1024)) / elapsed_time
-        return percentage, current_speed_mbps
-
-    def get_real_download_progress(self, elapsed_time: float) -> tuple[float, float]:
-        """
-        Calculate real download progress by summing all file sizes in the directory recursively.
-        Args:
-            download_dir (str): Path to the directory to scan (e.g. HuggingFace .cache dir)
-            elapsed_time (float): Elapsed time in seconds
-        Returns:
-            tuple: (percentage, current_speed_mbps)
-        """
-        total_downloaded = 0
-        for dirpath, dirnames, filenames in os.walk(self.tmp_model_dir):
-            for f in filenames:
-                fp = os.path.join(dirpath, f)
-                if os.path.isfile(fp):
-                    total_downloaded += os.path.getsize(fp)
-        percentage = (total_downloaded / self.total_size_bytes) * 100 if self.total_size_bytes > 0 else 0
-        percentage = min(percentage, 99.0)  # Cap at 99% until complete
-        current_speed_mbps = (total_downloaded / (1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
         return percentage, current_speed_mbps
 
     async def _periodic_progress_update(self):
@@ -983,8 +962,7 @@ class HuggingFaceProgressTracker:
                         
                         # Simulate progress based on estimated speed
                         if elapsed_time > 0:
-                            # percentage, current_speed_mbps = self.estimate_download(elapsed_time)
-                            percentage, current_speed_mbps = self.get_real_download_progress(elapsed_time)
+                            percentage, current_speed_mbps = self.estimate_download(elapsed_time)
                             logger.info("[HuggingFaceProgressTracker]")
                             logger.info(
                                 f"{PREFIX_DOWNLOAD_LOG} "
@@ -1044,7 +1022,7 @@ async def download_model_from_hf(data: dict) -> tuple[bool, str | None]:
     total_size_mb = data.get("total_size_mb", 1000)  # Default to 1GB if not specified
     
     # Create progress tracker
-    progress_tracker = HuggingFaceProgressTracker(total_size_mb, repo_id, tmp_model_dir)
+    progress_tracker = HuggingFaceProgressTracker(total_size_mb, repo_id)
     
     attempt = 1
     while True:  # Infinite loop until success or user cancellation
