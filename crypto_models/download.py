@@ -1152,7 +1152,7 @@ snapshot_download(repo_id="{repo_id}", local_dir="{local_dir}")
                             percent = float(match.group(5))
                             speed = float(match.group(8))
                         logger.info(f"[HF-PTY] {line}")
-                        logger.info(f"[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL] --progress {percent:.1f}% --speed {speed:.2f} MB/s")
+                        logger.info(f"{PREFIX_DOWNLOAD_LOG} --progress {percent:.1f}% --speed {speed:.2f} MB/s")
                     else:
                         logger.info(f"[HF-PTY] {line}")
         except OSError:
