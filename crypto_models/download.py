@@ -930,7 +930,7 @@ class HuggingFaceProgressTracker:
         self.last_log_time = 0
         self.is_running = True
         self.lock = threading.Lock()
-        self.estimated_speed_mbps = self.total_size_mb / 1024
+        self.estimated_speed_mbps = self.total_size_mb / 4096
 
         # Start background task for periodic progress updates
         self.progress_task = None
