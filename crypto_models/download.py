@@ -948,6 +948,9 @@ class HuggingFaceProgressTracker:
         current_speed_mbps = (self.downloaded_bytes / (1024 * 1024)) / elapsed_time
         return percentage, current_speed_mbps
 
+    def estimate_real_download(self, elapsed_time):
+        return 0.0, 0.0
+
     async def _periodic_progress_update(self):
         """Background task to log progress periodically every 5 seconds"""
         while self.is_running:
