@@ -1,0 +1,84 @@
+{%- set tools = tools if tools is defined else None -%}
+{%- set date_string = date_string if date_string is defined else "1 Sep 2024" -%}
+
+{%- set system_message = messages[0].content if messages[0].role == "system" else "" -%}
+{%- if messages[0].role == "system" -%}
+    {%- set messages = messages[1:] -%}
+{%- endif -%}
+
+{%- if not tool_prompt -%}
+    {%- set tool_prompt = "For each function call return a json object with function name and arguments within <tool_call> </tool_call> tags with the following schema:\n<tool_call>\n{\\\"name\\\": <function-name>, \\\"arguments\\\": <args-dict>}\n</tool_call>" -%}
+{%- endif -%}
+
+{%- if system_message or tools -%}
+  {{- '<|im_start|>system\n'}}
+{%- endif -%}
+
+{%- if system_message %}
+  {{- system_message + "\n"}}
+{%- endif -%}
+
+{%- if tools  -%}
+  {{- "You are a function-calling AI model. You are provided with function signatures within <tools> </tools> XML tags. You may call one or more functions to assist with the user query. Don't make assumptions about what values to plug into functions.\n" }}
+  {{- "<tools>\n" }}
+  {{- tools }}
+  {{- "\n</tools>\n" }}
+  {{- tool_prompt -}}
+{%- endif -%}
+
+{%- if system_message or tools -%}
+  {{- '<|im_end|>\n'}}
+{%- endif -%}
+
+{# Main message loop #}
+{%- for message in messages -%}
+    {%- if message.role == "user" or message.role == "assistant" or message.role == "tool" -%}
+        {%- if loop.first and message.role != "user" -%}
+            {{ raise_exception("Invalid sequence: The first message role must be 'user' after 'system' if provided .") }}
+        {%- endif -%}
+
+        {%- if not loop.first and message.role in ["user", "assistant"] and message.role == loop.previtem.role -%}
+            {{ raise_exception("Invalid sequence: Consecutive messages cannot have the same role ('user' or 'assistant').") }}
+        {%- endif -%}
+
+        {%- if message.role == "user" and not loop.first and loop.previtem.role != "assistant" -%}
+            {{ raise_exception("Invalid sequence: A 'user' message must be preceded by an 'assistant' message.") }}
+        {%- endif -%}
+
+        {%- if message.role == "tool" and not loop.first and loop.previtem.role not in ["assistant", "tool"] -%}
+            {{ raise_exception("Invalid sequence: A 'tool' message must be preceded by 'assistant' or 'tool'.") }}
+        {%- endif -%}
+    {%- else -%}
+        {{- raise_exception("Invalid role detected: only 'user', 'assistant', or 'tool' roles are accepted.") }}
+    {%- endif -%}
+    {%- if message.role == "user" or (message.role == "assistant" and message.tool_calls is not defined) -%}
+        {{- '<|im_start|>' + message.role + '\n' + message.content | trim + '<|im_end|>\n'}}
+    {%- elif message.role == "assistant" -%}
+        {{- '<|im_start|>' + message.role }}
+        {%- for tool_call in message.tool_calls -%}
+            {{ '\n<tool_call>\n' }}
+              {%- if tool_call.function -%}
+                {"name": "{{ tool_call.function.name }}", "arguments": {{ tool_call.function.arguments | tojson }} }
+              {%- else -%}
+                {"name": "{{ tool_call.name }}", "arguments": {{ tool_call.arguments | tojson }} }
+              {%- endif -%}
+            {{ '\n</tool_call>' }}
+        {%- endfor -%}
+        {{- '<|im_end|>\n' }}
+    {%- elif message.role == "tool" -%}
+        {%- if loop.previtem and loop.previtem.role != "tool" -%}
+            {{- '<|im_start|>tool\n' }}
+        {%- endif -%}
+        {{- '<tool_response>\n' }} 
+            {{- message.content }}
+        {{- '\n</tool_response>\n' }}
+        {%- if loop.last or loop.nextitem.role != "tool" -%}
+            {{- '<|im_end|>\n'}}
+        {%- endif -%}
+    {%- endif -%}
+{%- endfor -%}
+
+{# Prompt for assistant generation if needed #}
+{%- if add_generation_prompt -%}
+    {{- '<|im_start|>assistant\n' }}
+{%- endif -%}

@@ -15,6 +15,7 @@ MODEL_TO_HASH = {
     "lfm2-1.2b": "bafkreiaztifhss23cftya3bkorbsenzohol2oc3dvngo2srbbosko6gmme",
     "devstral-small": "bafkreih4xgr5t7yc3yooz6i6usgpwhggaobspmgut4rnu42gi6cv77o4em",
     "openreasoning-nemotron-32b": "bafkreidrdplo7mcfhrvocaa26yge6kmxmuwrexm5rffnzo5lbe6fkhjuvq",
+    "dolphin-3.0-llama3.1-8b": "bafkreibokz6tdke7k3eozsro3hh3luyqbub7tzdawpswtt7q6bzfg36fw4",
     "flux-dev": "bafkreiaha3sjfmv4affmi5kbu6bnayenf2avwafp3cthhar3latmfi632u",
     "flux-schnell": "bafkreibks5pmc777snbo7dwk26sympe2o24tpqfedjq6gmgghwwu7iio34",
     "flux-dev-nsfw": "bafkreidbaksrogxispjejczfj36vtf5uzsbjt7irspl6kckynz5u2ugzke",
@@ -88,6 +89,10 @@ MODELS = {
     "bafkreih4xgr5t7yc3yooz6i6usgpwhggaobspmgut4rnu42gi6cv77o4em": {
         "repo": "mistralai/Devstral-Small-2507_gguf",
         "model": "Devstral-Small-2507-Q8_0.gguf"
+    },
+    "bafkreibokz6tdke7k3eozsro3hh3luyqbub7tzdawpswtt7q6bzfg36fw4": {
+        "repo": "dphn/Dolphin3.0-Llama3.1-8B-GGUF",
+        "model": "Dolphin3.0-Llama3.1-8B-Q8_0.gguf",
     },
     "bafkreiaha3sjfmv4affmi5kbu6bnayenf2avwafp3cthhar3latmfi632u":{
         "repo": "NikolaSigmoid/FLUX.1-dev"

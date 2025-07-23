@@ -158,6 +158,13 @@ We've prepared several models for you to test with. Each model is listed with it
 | qwen3-32b | 34.8 GB | 45.3 GB | `eai model run qwen3-32b` |
 | qwen3-235b-a22b | 132 GB | 155.61 GB | `eai model run qwen3-235b-a22b` |
 
+#### 🔤 Dolphin-3.0 Series
+[Learn more about Dolphin-3.0](https://huggingface.co/dphn/Dolphin3.0-Llama3.1-8B)
+
+| Model | Size | RAM | Command |
+|-------|------|-----|---------|
+| dolphin-3.0-llama3.1-8b | 8.54 GB | 13.29 GB | `eai model run dolphin-3.0-llama3.1-8b` |
+
 #### 👁️ Gemma-3 Series (Vision Support)
 [Learn more about Gemma3](https://deepmind.google/models/gemma/gemma-3/)
 
