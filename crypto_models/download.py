@@ -1151,10 +1151,10 @@ snapshot_download(repo_id="{repo_id}", local_dir="{local_dir}")
                         else:  # Bar format
                             percent = float(match.group(5))
                             speed = float(match.group(8))
-                        logger.info(f"[HF-PTY] {line.strip()}")
+                        logger.info(f"[HF-PTY] {line}")
                         logger.info(f"[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL] --progress {percent:.1f}% --speed {speed:.2f} MB/s")
                     else:
-                        logger.info(f"[HF-PTY] {line.strip()}")
+                        logger.info(f"[HF-PTY] {line}")
         except OSError:
             break
     process.wait()
@@ -1163,7 +1163,7 @@ snapshot_download(repo_id="{repo_id}", local_dir="{local_dir}")
         raise Exception(f"HuggingFace download failed with return code {process.returncode}")
 
 if __name__ == "__main__":
-    model_hash = "bafkreihq4usl2t3i6pqoilvorp4up263yieuxcqs6xznlmrig365bvww5i"
-    # model_hash = "bafkreiclwlxc56ppozipczuwkmgnlrxrerrvaubc5uhvfs3g2hp3lftrwm"
+    # model_hash = "bafkreihq4usl2t3i6pqoilvorp4up263yieuxcqs6xznlmrig365bvww5i"
+    model_hash = "bafkreiclwlxc56ppozipczuwkmgnlrxrerrvaubc5uhvfs3g2hp3lftrwm"
     data = asyncio.run(download_model_async(model_hash))
     print(data)
