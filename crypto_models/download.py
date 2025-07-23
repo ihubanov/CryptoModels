@@ -968,12 +968,11 @@ class HuggingFaceProgressTracker:
                         # Simulate progress based on estimated speed
                         if elapsed_time > 0:
                             percentage, current_speed_mbps = self.estimate_download(elapsed_time)
-                            # logger.info("[HuggingFaceProgressTracker]")
-                            # logger.info(
-                            #     f"{PREFIX_DOWNLOAD_LOG} "
-                            #     f"--progress {percentage:.1f}% "
-                            #     f"--speed {current_speed_mbps:.2f} MB/s "
-                            # )
+                            logger.info(
+                                f"{PREFIX_DOWNLOAD_LOG} "
+                                f"--progress {percentage:.1f}% "
+                                f"--speed {current_speed_mbps:.2f} MB/s "
+                            )
                 
             except asyncio.CancelledError:
                 break
