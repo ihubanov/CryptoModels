@@ -8,6 +8,7 @@ MODEL_TO_HASH = {
     "qwen3-32b": "bafkreihq4usl2t3i6pqoilvorp4up263yieuxcqs6xznlmrig365bvww5i",
     "qwen3-30b-a3b": "bafkreieroiopteqmtbjadlnpq3qkakdu7omvtuavs2l2qbu46ijnfdo2ly",
     "qwen3-235b-a22b": "bafkreie4uj3gluik5ob2ib3cm2pt6ww7n4vqpmjnq6pas4gkkor42yuysa",
+    "qwen3-coder-480b-a35b": "bafkreib6thkvzddxkxtgkeslioreae66uef42gtxzy4wh7cyzf6fmlq3rm",
     "gemma-3-4b": "bafkreiaevddz5ssjnbkmdrl6dzw5sugwirzi7wput7z2ttcwnvj2wiiw5q",
     "gemma-3-12b": "bafkreic2bkjuu3fvdoxnvusdt4in6fa6lubzhtjtmcp2zvokvfjpyndakq",
     "gemma-3-27b": "bafkreihi2cbsgja5dwa5nsuixicx2x3gbcnh7gsocxbmjxegtewoq2syve",
@@ -57,6 +58,10 @@ MODELS = {
     },
     "bafkreie4uj3gluik5ob2ib3cm2pt6ww7n4vqpmjnq6pas4gkkor42yuysa": {
         "repo": "unsloth/Qwen3-235B-A22B-Instruct-2507-GGUF",
+        "pattern": "Q4_K_M"
+    },
+    "bafkreib6thkvzddxkxtgkeslioreae66uef42gtxzy4wh7cyzf6fmlq3rm": {
+        "repo": "unsloth/Qwen3-Coder-480B-A35B-Instruct-GGUF",
         "pattern": "Q4_K_M"
     },
     "bafkreiaevddz5ssjnbkmdrl6dzw5sugwirzi7wput7z2ttcwnvj2wiiw5q": {
