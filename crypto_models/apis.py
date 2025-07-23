@@ -18,6 +18,7 @@ from typing import Dict, Any, Optional
 from crypto_models.core import CryptoModelsManager, CryptoAgentsServiceError
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 # Import schemas from schema.py
 from crypto_models.schema import (
@@ -44,6 +45,15 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 app = FastAPI()
+
+# Add CORS middleware to allow all origins
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
+)
 
 # Initialize CryptoModels Manager for service management
 crypto_models_manager = CryptoModelsManager()
