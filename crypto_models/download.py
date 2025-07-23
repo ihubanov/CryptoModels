@@ -1049,6 +1049,7 @@ async def download_model_from_hf(data: dict) -> tuple[bool, str | None]:
                         lambda: run_hf_download_with_pty(repo_id, None, tmp_model_dir, pattern=pattern)
                     )
                     await async_move(os.path.join(tmp_model_dir, pattern), local_path_str)
+                    await async_rmtree(tmp_model_dir)
                 else:
                     await loop.run_in_executor(
                         None,
