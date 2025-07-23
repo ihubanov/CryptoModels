@@ -11,8 +11,12 @@ from pathlib import Path
 from loguru import logger
 from crypto_models.models import MODELS
 from huggingface_hub import hf_hub_download, snapshot_download
-from crypto_models.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH, GATEWAY_URLS, ETERNAL_AI_METADATA_GW
+from crypto_models.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH, GATEWAY_URLS, ETERNAL_AI_METADATA_GW, PREFIX_DOWNLOAD_LOG
 from crypto_models.utils import compute_file_hash, async_extract_zip, async_move, async_rmtree
+import subprocess
+import sys
+import pty
+import re
 
 SLEEP_TIME = 5
 # Set MAX_ATTEMPTS: if only one gateway, try at least 6 times; otherwise, try 3 times per gateway
@@ -392,9 +396,10 @@ class ProgressTracker:
             else:
                 # Fall back to file-based progress if no total size available
                 percentage = (self.completed_files / self.total_files) * 100
-
-            logger.info(
-                f"[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL] --progress {percentage:.1f}% ({self.completed_files}/{self.total_files} files) --speed {speed_mbps:.2f} MB/s")
+            logger.info("[ProgressTracker]")
+            logger.info(f"{PREFIX_DOWNLOAD_LOG} "
+                        f"--progress {percentage:.1f}% ({self.completed_files}/{self.total_files} files) "
+                        f"--speed {speed_mbps:.2f} MB/s")
 
     async def cleanup(self):
         """Clean up background tasks"""
@@ -934,7 +939,19 @@ class HuggingFaceProgressTracker:
         """Start the background progress tracking task"""
         if self.progress_task is None:
             self.progress_task = asyncio.create_task(self._periodic_progress_update())
-        
+
+    def estimate_download(self, elapsed_time):
+        simulated_downloaded = self.estimated_speed_mbps * elapsed_time * 1024 * 1024
+        self.downloaded_bytes = int(simulated_downloaded)
+
+        # Calculate percentage but cap at 95% until download is actually complete
+        percentage = (self.downloaded_bytes / self.total_size_bytes) * 100
+        percentage = min(percentage, 95.0)  # Cap at 95% during download
+
+        # Calculate current speed
+        current_speed_mbps = (self.downloaded_bytes / (1024 * 1024)) / elapsed_time
+        return percentage, current_speed_mbps
+
     async def _periodic_progress_update(self):
         """Background task to log progress periodically every 5 seconds"""
         while self.is_running:
@@ -950,21 +967,13 @@ class HuggingFaceProgressTracker:
                         
                         # Simulate progress based on estimated speed
                         if elapsed_time > 0:
-                            simulated_downloaded = self.estimated_speed_mbps * elapsed_time * 1024 * 1024
-                            self.downloaded_bytes = int(simulated_downloaded)
-                            
-                            # Calculate percentage but cap at 95% until download is actually complete
-                            percentage = (self.downloaded_bytes / self.total_size_bytes) * 100
-                            percentage = min(percentage, 95.0)  # Cap at 95% during download
-                            
-                            # Calculate current speed
-                            current_speed_mbps = (self.downloaded_bytes / (1024 * 1024)) / elapsed_time
-                            
-                            logger.info(
-                                f"[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL] "
-                                f"--progress {percentage:.1f}% "
-                                f"--speed {current_speed_mbps:.2f} MB/s "
-                            )
+                            percentage, current_speed_mbps = self.estimate_download(elapsed_time)
+                            # logger.info("[HuggingFaceProgressTracker]")
+                            # logger.info(
+                            #     f"{PREFIX_DOWNLOAD_LOG} "
+                            #     f"--progress {percentage:.1f}% "
+                            #     f"--speed {current_speed_mbps:.2f} MB/s "
+                            # )
                 
             except asyncio.CancelledError:
                 break
@@ -978,9 +987,9 @@ class HuggingFaceProgressTracker:
             self.is_running = False
             elapsed_time = time.time() - self.start_time
             actual_speed_mbps = (self.total_size_bytes / (1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
-            
+            logger.info("[HuggingFaceProgressTracker]")
             logger.info(
-                f"[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL] "
+                f"{PREFIX_DOWNLOAD_LOG} "
                 f"--progress 100.0% "
                 f"--speed {actual_speed_mbps:.2f} MB/s "
             )
@@ -1037,32 +1046,19 @@ async def download_model_from_hf(data: dict) -> tuple[bool, str | None]:
                     # Download only the files that match the allow_patterns
                     await loop.run_in_executor(
                         None,
-                        lambda: snapshot_download(
-                            repo_id=repo_id,
-                            local_dir=tmp_model_dir,
-                            allow_patterns=[f"*{pattern}*"]
-                        )
+                        lambda: run_hf_download_with_pty(repo_id, None, tmp_model_dir, pattern=pattern)
                     )
                     await async_move(os.path.join(tmp_model_dir, pattern), local_path_str)
                 else:
-
                     await loop.run_in_executor(
                         None,
-                        lambda: snapshot_download(
-                            repo_id=repo_id,
-                            local_dir=tmp_model_dir
-                        )
+                        lambda: run_hf_download_with_pty(repo_id, None, tmp_model_dir)
                     )
-            
                     await async_move(tmp_model_dir, local_path_str)
             else:
                 await loop.run_in_executor(
                     None,
-                    lambda: hf_hub_download(
-                        repo_id=repo_id,
-                        filename=model,
-                        local_dir=DEFAULT_MODEL_DIR
-                    )
+                    lambda: run_hf_download_with_pty(repo_id, model, DEFAULT_MODEL_DIR)
                 )
                 await async_move(str(DEFAULT_MODEL_DIR / model), local_path_str)
                 
@@ -1071,11 +1067,7 @@ async def download_model_from_hf(data: dict) -> tuple[bool, str | None]:
                     projector_path = local_path_str + "-projector"
                     await loop.run_in_executor(
                         None,
-                        lambda: hf_hub_download(
-                            repo_id=repo_id,
-                            filename=projector,
-                            local_dir=DEFAULT_MODEL_DIR
-                        )
+                        lambda: run_hf_download_with_pty(repo_id, projector, DEFAULT_MODEL_DIR)
                     )
                     await async_move(str(DEFAULT_MODEL_DIR / projector), projector_path)
             
@@ -1085,12 +1077,10 @@ async def download_model_from_hf(data: dict) -> tuple[bool, str | None]:
             
             logger.info(f"Successfully downloaded model: {local_path_str}")
             return True, local_path_str
-            
         except KeyboardInterrupt:
             logger.info("Download canceled by user")
             await progress_tracker.cleanup()
             return False, None
-            
         except Exception as e:
             logger.warning(f"Download attempt {attempt} failed: {e}")
             
@@ -1106,8 +1096,74 @@ async def download_model_from_hf(data: dict) -> tuple[bool, str | None]:
             progress_tracker = HuggingFaceProgressTracker(total_size_mb, repo_id)
             attempt += 1
 
-if __name__ == "__main__":
-    model_hash = "bafkreihq4usl2t3i6pqoilvorp4up263yieuxcqs6xznlmrig365bvww5i"
+def run_hf_download_with_pty(repo_id, model, local_dir, pattern=None):
+    """
+    Run HuggingFace download in a subprocess with PTY, capturing and logging all output (including progress bar).
+    Only works on Linux/macOS.
+    """
+    if model:
+        script = f'''
+from huggingface_hub import hf_hub_download
+hf_hub_download(repo_id="{repo_id}", filename="{model}", local_dir="{local_dir}")
+'''
+    else:
+        if pattern:
+            script = f'''
+from huggingface_hub import snapshot_download
+snapshot_download(repo_id="{repo_id}", local_dir="{local_dir}", allow_patterns=["*{pattern}*"])
+'''
+        else:
+            script = f'''
+from huggingface_hub import snapshot_download
+snapshot_download(repo_id="{repo_id}", local_dir="{local_dir}")
+'''
+    master_fd, slave_fd = pty.openpty()
+    process = subprocess.Popen(
+        [sys.executable, "-u", "-c", script],
+        stdin=slave_fd,
+        stdout=slave_fd,
+        stderr=slave_fd,
+        universal_newlines=True
+    )
+    os.close(slave_fd)
+    buffer = ""
+    progress_re = re.compile(
+        r"([0-9]+)%\s+([0-9.]+[GMK]?)/([0-9.]+[GMK]?)\s*\[.*?([0-9.]+)MB/s\]"  # Simple format
+        r"|([0-9]+)%\|.*?\|\s*([0-9.]+[GMK]?)/([0-9.]+[GMK]?)\s*\[.*?([0-9.]+)MB/s\]"  # Bar format
+    )
+    while True:
+        try:
+            data = os.read(master_fd, 1024).decode()
+            if not data:
+                break
+            buffer += data
+            while '\r' in buffer or '\n' in buffer:
+                if '\r' in buffer:
+                    line, buffer = buffer.split('\r', 1)
+                else:
+                    line, buffer = buffer.split('\n', 1)
+                if line.strip():
+                    match = progress_re.search(line)
+                    if match:
+                        if match.group(1):  # Simple format
+                            percent = float(match.group(1))
+                            speed = float(match.group(4))
+                        else:  # Bar format
+                            percent = float(match.group(5))
+                            speed = float(match.group(8))
+                        logger.info(f"[HF-PTY] {line}")
+                        logger.info(f"{PREFIX_DOWNLOAD_LOG} --progress {percent:.1f}% --speed {speed:.2f} MB/s")
+                    else:
+                        logger.info(f"[HF-PTY] {line}")
+        except OSError:
+            break
+    process.wait()
+    os.close(master_fd)
+    if process.returncode != 0:
+        raise Exception(f"HuggingFace download failed with return code {process.returncode}")
 
+if __name__ == "__main__":
+    # model_hash = "bafkreihq4usl2t3i6pqoilvorp4up263yieuxcqs6xznlmrig365bvww5i"
+    model_hash = "bafkreiclwlxc56ppozipczuwkmgnlrxrerrvaubc5uhvfs3g2hp3lftrwm"
     data = asyncio.run(download_model_async(model_hash))
     print(data)

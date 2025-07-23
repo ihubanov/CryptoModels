@@ -22,3 +22,5 @@ GATEWAY_URLS = [
 ]
 
 ETERNAL_AI_METADATA_GW = "https://agent.api.eternalai.org/api/vibe/model/"
+
+PREFIX_DOWNLOAD_LOG = "[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL]"
