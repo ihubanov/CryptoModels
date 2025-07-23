@@ -97,6 +97,9 @@ MODELS = {
     "bafkreiaha3sjfmv4affmi5kbu6bnayenf2avwafp3cthhar3latmfi632u":{
         "repo": "NikolaSigmoid/FLUX.1-dev"
     },
+    "bafkreibks5pmc777snbo7dwk26sympe2o24tpqfedjq6gmgghwwu7iio34": {
+        "repo": "black-forest-labs/FLUX.1-schnell",
+    },
     "bafkreidbaksrogxispjejczfj36vtf5uzsbjt7irspl6kckynz5u2ugzke": {
         "repo": "NikolaSigmoid/FLUX.1-dev-NSFW-Master"
     },
