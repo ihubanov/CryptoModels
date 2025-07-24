@@ -288,6 +288,7 @@ def parse_args():
         "--config-name",
         type=str,
         default=None,
+        choices=["flux-dev", "flux-schnell"],
         help="🔍 Model config name (default: None), need for image-generation and image-edit models",
         metavar="CONFIG"
     )
