@@ -934,6 +934,7 @@ class HuggingFaceProgressTracker:
 
         # Start background task for periodic progress updates
         self.progress_task = None
+        self.log = True
         
     def start_progress_tracking(self):
         """Start the background progress tracking task"""
@@ -952,6 +953,9 @@ class HuggingFaceProgressTracker:
         current_speed_mbps = (self.downloaded_bytes / (1024 * 1024)) / elapsed_time
         return percentage, current_speed_mbps
 
+    def set_log(self, log: bool):
+        self.log = log
+
     async def _periodic_progress_update(self):
         """Background task to log progress periodically every 5 seconds"""
         while self.is_running:
@@ -968,11 +972,12 @@ class HuggingFaceProgressTracker:
                         # Simulate progress based on estimated speed
                         if elapsed_time > 0:
                             percentage, current_speed_mbps = self.estimate_download(elapsed_time)
-                            logger.info(
-                                f"{PREFIX_DOWNLOAD_LOG} "
-                                f"--progress {percentage:.1f}% "
-                                f"--speed {current_speed_mbps:.2f} MB/s "
-                            )
+                            if self.log:
+                                logger.info(
+                                    f"{PREFIX_DOWNLOAD_LOG} "
+                                    f"--progress {percentage:.1f}% "
+                                    f"--speed {current_speed_mbps:.2f} MB/s "
+                                )
                 
             except asyncio.CancelledError:
                 break
@@ -1066,6 +1071,7 @@ async def download_model_from_hf(data: dict) -> tuple[bool, str | None]:
             
                     await async_move(tmp_model_dir, local_path_str)
             else:
+                progress_tracker.set_log(False)
                 await loop.run_in_executor(
                     None,
                     lambda: run_hf_download_with_pty(repo_id, model, DEFAULT_MODEL_DIR)
