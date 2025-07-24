@@ -1767,6 +1767,7 @@ class CryptoModelsManager:
                 msgpack.dump(service_info, f)
             return True
         except Exception as e:
+            logger.error(f"Error updating LoRA: {str(e)}")
             return False
 
     def _build_image_generation_command(self, model_path: str, port: int, host: str, config_name: str, 
