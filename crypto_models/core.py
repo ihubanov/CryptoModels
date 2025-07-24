@@ -167,9 +167,20 @@ class CryptoModelsManager:
         main_hash = hashes_list[0]
         on_demand_hashes = hashes_list[1:] if len(hashes_list) > 1 else []
 
-        # Acquire process lock to prevent concurrent starts
+        # Check if there's already a start process running
+        existing_process = self.get_start_process_info()
+        if existing_process:
+            logger.info(f"Found existing start process (PID: {existing_process['pid']}) for model {existing_process['hash']}")
+            logger.info("Attempting to acquire lock with force takeover capability...")
+        else:
+            logger.info("No existing start process found, acquiring lock...")
+        
+        # Acquire process lock to prevent concurrent starts (with force takeover)
         if not self._acquire_start_lock(main_hash, host, port):
+            logger.error("Failed to acquire start lock")
             return False
+        
+        logger.info("Successfully acquired start lock, proceeding with service startup...")
         
         # Track processes for cleanup on interruption
         ai_process = None
@@ -1159,10 +1170,18 @@ class CryptoModelsManager:
             
         return True, ""
     
-    def _acquire_start_lock(self, hash: str, host: str, port: int) -> bool:
+    def _acquire_start_lock(self, hash: str, host: str, port: int, force_takeover: bool = True) -> bool:
         """
-        Acquire the start lock efficiently with atomic operations and minimal race conditions.
-        Returns True if lock acquired, False otherwise.
+        Acquire the start lock with support for force takeover of stuck processes.
+        
+        Args:
+            hash: Model hash for the service
+            host: Host address
+            port: Port number
+            force_takeover: If True, kill any existing start process and take over
+            
+        Returns:
+            bool: True if lock acquired, False otherwise
         """
         current_pid = os.getpid()
         current_time = time.time()
@@ -1177,7 +1196,7 @@ class CryptoModelsManager:
             "port": port
         }
         
-        # Attempt to acquire lock with atomic operations
+        # Attempt to acquire lock with force takeover capability
         max_attempts = 3
         for attempt in range(max_attempts):
             try:
@@ -1199,20 +1218,53 @@ class CryptoModelsManager:
                             # Same process already has the lock
                             logger.info(f"Lock already acquired by current process (PID: {current_pid})")
                             return True
-                        elif existing_lock_data.get("pid") and not psutil.pid_exists(existing_lock_data["pid"]):
-                            logger.warning(f"Removing lock file for dead process (PID: {existing_lock_data['pid']})")
-                            try:
-                                self.start_lock_file.unlink()
-                            except OSError:
-                                pass  # May have been removed by another process
                         else:
-                            # Check if it's actually the same process (edge case)
-                            if existing_lock_data.get("pid") and psutil.pid_exists(existing_lock_data["pid"]):
-                                logger.error(f"Another process (PID: {existing_lock_data['pid']}) is already starting service")
-                                return False
+                            # Different process has the lock
+                            existing_pid = existing_lock_data.get("pid")
+                            
+                            if existing_pid and psutil.pid_exists(existing_pid):
+                                # Process exists - check if we should force takeover
+                                if force_takeover:
+                                    logger.warning(f"Force takeover: killing existing start process (PID: {existing_pid})")
+                                    
+                                    # Try to gracefully terminate the process first
+                                    try:
+                                        process = psutil.Process(existing_pid)
+                                        process.terminate()
+                                        
+                                        # Wait for graceful termination
+                                        try:
+                                            process.wait(timeout=5)
+                                            logger.info(f"Gracefully terminated existing start process (PID: {existing_pid})")
+                                        except psutil.TimeoutExpired:
+                                            # Force kill if graceful termination fails
+                                            logger.warning(f"Force killing stuck start process (PID: {existing_pid})")
+                                            process.kill()
+                                            process.wait(timeout=3)
+                                            logger.info(f"Force killed existing start process (PID: {existing_pid})")
+                                    except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                                        logger.info(f"Process {existing_pid} already terminated: {e}")
+                                    except Exception as e:
+                                        logger.error(f"Error terminating process {existing_pid}: {e}")
+                                        if attempt < max_attempts - 1:
+                                            time.sleep(0.5 * (attempt + 1))
+                                            continue
+                                        else:
+                                            return False
+                                    
+                                    # Remove the lock file after killing the process
+                                    try:
+                                        self.start_lock_file.unlink()
+                                        logger.info(f"Removed lock file after killing process {existing_pid}")
+                                    except OSError:
+                                        pass  # May have been removed by another process
+                                else:
+                                    # No force takeover allowed
+                                    logger.error(f"Another process (PID: {existing_pid}) is already starting service")
+                                    return False
                             else:
                                 # Process doesn't exist, remove stale lock
-                                logger.warning(f"Removing lock file for non-existent process (PID: {existing_lock_data['pid']})")
+                                logger.warning(f"Removing lock file for dead/non-existent process (PID: {existing_pid})")
                                 try:
                                     self.start_lock_file.unlink()
                                 except OSError:
@@ -1363,6 +1415,166 @@ class CryptoModelsManager:
                     continue
                 else:
                     return
+
+    def get_start_process_info(self) -> Optional[Dict[str, Any]]:
+        """
+        Get information about the currently running start process, if any.
+        
+        Returns:
+            Optional[Dict[str, Any]]: Start process information or None if no start process is running
+        """
+        if not self.start_lock_file.exists():
+            return None
+            
+        try:
+            with open(self.start_lock_file, "r") as f:
+                lock_data = json.load(f)
+            
+            # Validate lock data
+            is_valid, error_msg = self._validate_lock_data(lock_data)
+            if not is_valid:
+                logger.warning(f"Corrupted lock file: {error_msg}")
+                return None
+            
+            pid = lock_data.get("pid")
+            if not pid:
+                return None
+            
+            # Check if process is still running
+            if not psutil.pid_exists(pid):
+                logger.debug(f"Start process {pid} no longer exists")
+                return None
+            
+            # Get additional process information
+            try:
+                process = psutil.Process(pid)
+                process_info = {
+                    "pid": pid,
+                    "hash": lock_data.get("hash"),
+                    "host": lock_data.get("host"),
+                    "port": lock_data.get("port"),
+                    "timestamp": lock_data.get("timestamp"),
+                    "version": lock_data.get("version"),
+                    "status": process.status(),
+                    "create_time": process.create_time(),
+                    "cpu_percent": process.cpu_percent(),
+                    "memory_info": process.memory_info()._asdict(),
+                    "cmdline": process.cmdline(),
+                    "username": process.username()
+                }
+                return process_info
+            except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                logger.debug(f"Could not get process info for PID {pid}: {e}")
+                # Return basic info without process details
+                return {
+                    "pid": pid,
+                    "hash": lock_data.get("hash"),
+                    "host": lock_data.get("host"),
+                    "port": lock_data.get("port"),
+                    "timestamp": lock_data.get("timestamp"),
+                    "version": lock_data.get("version"),
+                    "status": "unknown"
+                }
+                
+        except (json.JSONDecodeError, KeyError, OSError) as e:
+            logger.warning(f"Error reading start lock file: {e}")
+            return None
+
+    def force_kill_start_process(self) -> bool:
+        """
+        Force kill any currently running start process and clean up the lock.
+        
+        Returns:
+            bool: True if process was killed or no process was running, False on error
+        """
+        process_info = self.get_start_process_info()
+        if not process_info:
+            logger.info("No start process currently running")
+            return True
+        
+        pid = process_info["pid"]
+        logger.warning(f"Force killing start process (PID: {pid})")
+        
+        try:
+            process = psutil.Process(pid)
+            
+            # Try graceful termination first
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+                logger.info(f"Gracefully terminated start process (PID: {pid})")
+            except psutil.TimeoutExpired:
+                # Force kill if graceful termination fails
+                logger.warning(f"Force killing start process (PID: {pid})")
+                process.kill()
+                process.wait(timeout=3)
+                logger.info(f"Force killed start process (PID: {pid})")
+            
+            # Clean up lock file
+            try:
+                if self.start_lock_file.exists():
+                    self.start_lock_file.unlink()
+                    logger.info("Removed start lock file after force kill")
+            except OSError as e:
+                logger.warning(f"Failed to remove lock file: {e}")
+            
+            return True
+            
+        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+            logger.info(f"Process {pid} already terminated: {e}")
+            # Clean up lock file anyway
+            try:
+                if self.start_lock_file.exists():
+                    self.start_lock_file.unlink()
+                    logger.info("Removed start lock file for already terminated process")
+            except OSError:
+                pass
+            return True
+        except Exception as e:
+            logger.error(f"Error force killing start process {pid}: {e}")
+            return False
+
+    def get_lock_status_summary(self) -> Dict[str, Any]:
+        """
+        Get a comprehensive summary of the current lock status and any running processes.
+        
+        Returns:
+            Dict[str, Any]: Summary of lock status, running processes, and system state
+        """
+        summary = {
+            "lock_file_exists": self.start_lock_file.exists(),
+            "start_process_info": None,
+            "running_service_info": None,
+            "lock_status": "no_lock"
+        }
+        
+        # Check start process
+        start_process = self.get_start_process_info()
+        if start_process:
+            summary["start_process_info"] = start_process
+            summary["lock_status"] = "start_process_running"
+        elif self.start_lock_file.exists():
+            summary["lock_status"] = "stale_lock"
+        
+        # Check running service
+        try:
+            if os.path.exists(self.msgpack_file):
+                with open(self.msgpack_file, "rb") as f:
+                    service_info = msgpack.load(f)
+                summary["running_service_info"] = {
+                    "hash": service_info.get("hash"),
+                    "port": service_info.get("port"),
+                    "app_port": service_info.get("app_port"),
+                    "task": service_info.get("task"),
+                    "pid": service_info.get("pid"),
+                    "app_pid": service_info.get("app_pid"),
+                    "last_activity": service_info.get("last_activity"),
+                    "models_count": len(service_info.get("models", {}))
+                }
+        except Exception as e:
+            summary["running_service_info"] = {"error": str(e)}
+        
+        return summary
 
     def _check_port_availability(self, host: str, port: int, timeout: int = 2) -> bool:
         """
