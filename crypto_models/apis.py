@@ -1176,8 +1176,7 @@ async def update(request: Dict[str, Any]):
 @app.post("/update/lora")
 async def update_lora(request: LoraConfigRequest):
     """Update the LoRA for a given model hash."""
-    request_dict = convert_request_to_dict(request)
-    if crypto_models_manager.update_lora(request_dict):
+    if crypto_models_manager.update_lora(request):
         return {"status": "ok", "message": "LoRA updated successfully"}
     else:
         return {"status": "error", "message": "Failed to update LoRA"}

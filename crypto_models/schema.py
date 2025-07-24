@@ -358,7 +358,7 @@ class LoraItem(BaseModel):
 
 class LoraConfigRequest(BaseModel):
     model_hash: str
-    lora_items: List[LoraItem]
+    lora_config: Dict[str, LoraItem]
 
 
 class ImageSize(str, Enum):
