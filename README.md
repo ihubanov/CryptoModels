@@ -1,4 +1,4 @@
-# 🚀 CryptoModels: Sovereign Weights
+# 🚀 Eternal Zoo: Sovereign Weights
 ![Sovereign Weights](./images/crypto_models.jpg)
 
 ## The Easiest Way to Run Your Own AI Models with Complete Sovereignty
@@ -21,10 +21,10 @@ This guide will help you deploy your AI models using decentralized infrastructur
 
 ## 🌟 Key Features
 
-### 🚀 What Makes CryptoModels Different from Ollama & LMStudio
+### 🚀 What Makes Eternal Zoo Different from Ollama & LMStudio
 
 **🌐 TRUE Decentralized Model Storage**
-- Unlike Ollama/LMStudio that rely on centralized repositories (Hugging Face, GitHub), CryptoAgents uses **IPFS/Filecoin** for permanent, censorship-resistant model distribution
+- Unlike Ollama/LMStudio that rely on centralized repositories (Hugging Face, GitHub), Eternal Zoo uses **IPFS/Filecoin** for permanent, censorship-resistant model distribution
 - Models are stored across a distributed network - **no single point of failure or control**
 - Access your models even if traditional platforms go down or restrict access
 
@@ -45,7 +45,7 @@ This guide will help you deploy your AI models using decentralized infrastructur
 
 ### Why Sovereign Weights Matter
 
-In an era of increasing AI centralization, CryptoModels puts you back in control:
+In an era of increasing AI centralization, Eternal Zoo puts you back in control:
 
 - **Own Your Models**: Models are stored on decentralized infrastructure, not controlled by any single entity
 - **Private by Design**: All inference happens locally on your hardware - no external API calls, no data collection
@@ -93,7 +93,7 @@ eai --version
 
 ## 📖 CLI Overview
 
-CryptoModels uses a structured command hierarchy for better organization. All model operations are grouped under the `model` subcommand:
+Eternal Zoo uses a structured command hierarchy for better organization. All model operations are grouped under the `model` subcommand:
 
 ```bash
 # Model operations
@@ -298,7 +298,7 @@ curl -X POST http://localhost:8080/v1/images/generations \
 
 ## 🔄 Multi-Model Support
 
-CryptoModels supports running multiple models simultaneously with intelligent request-based switching. This allows you to serve several models from a single server instance with optimized resource usage.
+Eternal Zoo supports running multiple models simultaneously with intelligent request-based switching. This allows you to serve several models from a single server instance with optimized resource usage.
 
 ### How Multi-Model Works
 
