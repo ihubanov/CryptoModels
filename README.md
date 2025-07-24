@@ -157,7 +157,7 @@ We've prepared several models for you to test with. Each model is listed with it
 | qwen3-30b-a3b | 31 GB | 37.35 GB | `eai model run qwen3-30b-a3b` |
 | qwen3-32b | 34.8 GB | 45.3 GB | `eai model run qwen3-32b` |
 | qwen3-235b-a22b | 132 GB | 155.61 GB | `eai model run qwen3-235b-a22b` |
-| qwen3-coder-480b-a35b | 180 GB | 305.66 GB | `eai model run qwen3-coder-480b-a35b` |
+| qwen3-coder-480b-a35b | 260 GB | 305.66 GB | `eai model run qwen3-coder-480b-a35b` |
 
 #### 🔤 Dolphin-3.0 Series
 [Learn more about Dolphin-3.0](https://huggingface.co/dphn/Dolphin3.0-Llama3.1-8B)
