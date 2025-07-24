@@ -388,7 +388,8 @@ class CryptoModelsManager:
                         "lora_config": model_info.get("lora_config", None),
                         "base_model_path": model_info.get("base_model_path", None),
                         "context_length": model_info.get("context_length", 32768),
-                        "created": created
+                        "created": created,
+                        "multimodal": model_info.get("multimodal", False)
                     }
             
                 logger.info(f"Starting main model process: {' '.join(running_ai_command)}")
