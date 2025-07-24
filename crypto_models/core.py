@@ -1928,9 +1928,9 @@ class CryptoModelsManager:
                     effective_model_path = base_model_path
                     lora_paths = []
                     lora_scales = []
-                    for i in range(len(lora_config)):
-                        lora_paths.append(lora_config[str(i)]["path"])
-                        lora_scales.append(lora_config[str(i)]["scale"])
+                    for key, value in lora_config.items():
+                        lora_paths.append(value["path"])
+                        lora_scales.append(value["scale"])
                 
                 running_ai_command = self._build_image_generation_command(
                     effective_model_path, local_ai_port, host, config_name, lora_paths, lora_scales
