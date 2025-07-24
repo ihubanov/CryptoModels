@@ -16,7 +16,7 @@ download:
 
 # Package versions
 MLX_FLUX_TAG=1.0.5
-CRYPTOMODELS_TAG=1.1.31
+CRYPTOMODELS_TAG=1.1.40
 
 # Default target
 .PHONY: install

@@ -291,7 +291,7 @@ show_package_status() {
 
 # Uncomment the lines below to see available tags before installation
 # list_available_tags "https://github.com/0x9334/mlx-flux.git" "mlx-flux"
-# list_available_tags "https://github.com/eternalai-org/CryptoModels.git" "cryptomodels"
+# list_available_tags "https://github.com/eternalai-org/EternalZoo.git" "cryptomodels"
 
 # Display current configuration
 if [ -n "$MLX_FLUX_TAG" ]; then
@@ -462,7 +462,7 @@ fi
 
 # Step 8: Install cryptomodels toolkit
 log_message "Setting up cryptomodels toolkit..."
-update_package "cryptomodels" "https://github.com/eternalai-org/CryptoModels.git" "https://raw.githubusercontent.com/eternalai-org/CryptoModels/main/crypto_models/__init__.py" "__version__ = \"[0-9.]*\"" "pip install -q git+https://github.com/eternalai-org/CryptoModels.git" "$CRYPTOMODELS_TAG"
+update_package "cryptomodels" "https://github.com/eternalai-org/EternalZoo.git" "https://raw.githubusercontent.com/eternalai-org/EternalZoo/main/crypto_models/__init__.py" "__version__ = \"[0-9.]*\"" "pip install -q git+https://github.com/eternalai-org/EternalZoo.git" "$CRYPTOMODELS_TAG"
 
 log_message "Setup completed successfully."
 log_message "Setup completed successfully."
