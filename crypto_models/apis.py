@@ -1168,7 +1168,8 @@ async def health():
 @app.post("/update")
 async def update(request: Dict[str, Any]):
     """Update the service information in the CryptoModelsManager."""
-    if crypto_models_manager.update_service_info(request):
+    request_dict = convert_request_to_dict(request)
+    if crypto_models_manager.update_service_info(request_dict):
         return {"status": "ok", "message": "Service info updated successfully"}
     else:
         return {"status": "error", "message": "Failed to update service info"}
@@ -1176,7 +1177,8 @@ async def update(request: Dict[str, Any]):
 @app.post("/update/lora")
 async def update_lora(request: LoraConfigRequest):
     """Update the LoRA for a given model hash."""
-    if crypto_models_manager.update_lora(request):
+    request_dict = convert_request_to_dict(request)
+    if crypto_models_manager.update_lora(request_dict):
         return {"status": "ok", "message": "LoRA updated successfully"}
     else:
         return {"status": "error", "message": "Failed to update LoRA"}
