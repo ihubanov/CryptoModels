@@ -1239,6 +1239,7 @@ async def list_models():
             permission = model_info.get("permission", None)
             created = metadata.get("created", int(time.time()))
             owned_by = metadata.get("owned_by", "user")
+            multimodal = metadata.get("multimodal", False)
 
             model_id = folder_name if folder_name else model_hash
             raw_ram_value = metadata.get("ram")
@@ -1266,6 +1267,7 @@ async def list_models():
                 lora_config=lora_config,
                 on_demand=is_on_demand,
                 task=task,
+                multimodal=multimodal,
                 context_length=context_length,
                 base_model_path=base_model_path,
                 local_model_path=local_model_path,
@@ -1287,6 +1289,7 @@ async def list_models():
         permission = service_info.get("permission", None)
         created = service_info.get("created", int(time.time()))
         owned_by = service_info.get("owned_by", "user")
+        multimodal = service_info.get("multimodal", False)
         if not model_hash:
             logger.warning("/v1/models: No model hash found in service_info, though service_info itself was present. Returning empty list.")
             return ModelList(data=[])
@@ -1317,7 +1320,8 @@ async def list_models():
             base_model_path=base_model_path,
             local_model_path=local_model_path,
             local_projector_path=local_projector_path,
-            active = True
+            active = True,
+            multimodal=multimodal
         )
         model_cards.append(model_card)
         logger.info(f"/v1/models: Single-model service - returning model {model_id}")
