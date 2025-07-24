@@ -20,7 +20,8 @@ MODEL_TO_HASH = {
     "flux-dev": "bafkreiaha3sjfmv4affmi5kbu6bnayenf2avwafp3cthhar3latmfi632u",
     "flux-schnell": "bafkreibks5pmc777snbo7dwk26sympe2o24tpqfedjq6gmgghwwu7iio34",
     "flux-dev-nsfw": "bafkreidbaksrogxispjejczfj36vtf5uzsbjt7irspl6kckynz5u2ugzke",
-    "flux-dev-18-loras": "bafkreihiaeosw2jlyvzo7od46ihe4iwutgmppqj5d7z74g25qljlcmcikq"
+    "flux-dev-18-loras": "bafkreihiaeosw2jlyvzo7od46ihe4iwutgmppqj5d7z74g25qljlcmcikq",
+    "nsfw-lab": "bafkreidnd2n2sp3gw6c4iutvgdtupqa4qlpsznpjnwqmsna2ko3uhv4fce"
 }
 
 MODELS = {
@@ -110,5 +111,8 @@ MODELS = {
     },
     "bafkreihiaeosw2jlyvzo7od46ihe4iwutgmppqj5d7z74g25qljlcmcikq": {
         "repo": "NikolaSigmoid/FLUX.1-dev-18-loras"
+    },
+    "bafkreidnd2n2sp3gw6c4iutvgdtupqa4qlpsznpjnwqmsna2ko3uhv4fce": {
+        "repo": "NikolaSigmoid/NSFW-Lab"
     }
 }
