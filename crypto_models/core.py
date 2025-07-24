@@ -1761,7 +1761,7 @@ class CryptoModelsManager:
             if model_info.get("lora_config", None) is None:
                 return False
             model_info["lora_config"] = {}
-            for key, value in request["lora_items"].items():
+            for key, value in request["lora_config"].items():
                 model_info["lora_config"][key] = {
                     "path": value["path"],
                     "scale": value["scale"]
