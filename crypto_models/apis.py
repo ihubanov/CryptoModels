@@ -1168,8 +1168,7 @@ async def health():
 @app.post("/update")
 async def update(request: Dict[str, Any]):
     """Update the service information in the CryptoModelsManager."""
-    request_dict = convert_request_to_dict(request)
-    if crypto_models_manager.update_service_info(request_dict):
+    if crypto_models_manager.update_service_info(request):
         return {"status": "ok", "message": "Service info updated successfully"}
     else:
         return {"status": "error", "message": "Failed to update service info"}
