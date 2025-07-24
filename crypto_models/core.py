@@ -261,7 +261,8 @@ class CryptoModelsManager:
                             continue
                         for i, lora_path in enumerate(lora_metadata["lora_paths"]):
                             absolute_lora_path = os.path.join(local_model_path, lora_path)
-                            lora_config[str(i)] = {
+                            lora_name = os.path.splitext(lora_path)[0]
+                            lora_config[lora_name] = {
                                 "path": absolute_lora_path,
                                 "scale": lora_scales[i]
                             }
@@ -315,9 +316,9 @@ class CryptoModelsManager:
 
                         lora_paths = []
                         lora_scales = []
-                        for i in range(len(lora_config)):
-                            lora_paths.append(lora_config[str(i)]["path"])
-                            lora_scales.append(lora_config[str(i)]["scale"])
+                        for key, value in lora_config.items():
+                            lora_paths.append(value["path"])
+                            lora_scales.append(value["scale"])
                         
                         effective_model_path = base_model_path
                         
