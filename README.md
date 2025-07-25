@@ -82,9 +82,9 @@ bash jetson.sh
 
 1. Activate the virtual environment:
 ```bash
-source cryptomodels/bin/activate
+source activate.sh
 ```
-> **Remember**: Activate this environment each time you use the CryptoModels (`eai`) tools
+> **Remember**: Activate this environment each time you use the Eternal Zoo (`eai`) tools
 
 2. Verify your installation:
 ```bash
