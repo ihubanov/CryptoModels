@@ -46,10 +46,12 @@ logger.setLevel(logging.INFO)
 
 app = FastAPI()
 
-# Add CORS middleware to allow all origins
+
+
+# Add CORS middleware to allow localhost only
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins
+    allow_origins=["http://localhost", "http://localhost:*", "http://127.0.0.1", "http://127.0.0.1:*"],  # Allow localhost only
     allow_credentials=True,
     allow_methods=["*"],  # Allow all methods
     allow_headers=["*"],  # Allow all headers
@@ -1043,7 +1045,7 @@ async def startup_event():
         timeout=HTTP_TIMEOUT,
         transport=httpx.AsyncHTTPTransport(
             retries=MAX_RETRIES,
-            verify=False  # Disable SSL verification for local connections
+            verify = True # SSL verification for local connections
         )
     )
     
