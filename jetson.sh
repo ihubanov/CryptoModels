@@ -269,9 +269,9 @@ mkdir -p "$LLAMA_WRAPPER_DIR"
 # Prepare variables for template and model paths.
 PYTHON_VERSION=$($PYTHON_CMD -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')")
 MODELS_DIR="$(pwd)/llms-storage"
-TEMPLATES_DIR="$(pwd)/cryptomodels/examples/templates"
+TEMPLATES_DIR="$(pwd)/eternalzoo/examples/templates"
 USER_HOME="$HOME"
-ABS_TEMPLATE_PATH="$(pwd)/cryptomodels/lib/$PYTHON_VERSION/site-packages/crypto_models/examples/templates"
+ABS_TEMPLATE_PATH="$(pwd)/eternalzoo/lib/$PYTHON_VERSION/site-packages/eternal_zoo/examples/templates"
 
 # Determine which container to use in the wrapper
 if [ "${NEED_CUSTOM_LLAMA_BUILD:-0}" = "1" ]; then
@@ -338,16 +338,16 @@ if [[ ":$PATH:" != *":$LLAMA_WRAPPER_DIR:"* ]]; then
     log_message "PATH updated for current session and future sessions."
 fi
 
-# Step 6: Python venv and cryptomodels setup
-log_message "Creating virtual environment 'cryptomodels'..."
-"$PYTHON_CMD" -m venv cryptomodels || handle_error $? "Failed to create virtual environment."
+# Step 6: Python venv and eternalzoo setup
+log_message "Creating virtual environment 'eternalzoo'..."
+"$PYTHON_CMD" -m venv eternalzoo || handle_error $? "Failed to create virtual environment."
 
 log_message "Activating virtual environment..."
-source cryptomodels/bin/activate || handle_error $? "Failed to activate virtual environment."
+source eternalzoo/bin/activate || handle_error $? "Failed to activate virtual environment."
 log_message "Virtual environment activated."
 
 # Function: install_or_update_local_ai
-# Uninstalls and reinstalls the cryptomodels toolkit from the GitHub repository.
+# Uninstalls and reinstalls the eternalzoo toolkit from the GitHub repository.
 install_or_update_local_ai() {
     # Get the current branch
     BRANCH=$(git rev-parse --abbrev-ref HEAD)
@@ -367,38 +367,38 @@ install_or_update_local_ai() {
         REMOTE="https://${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
     fi
 
-    pip uninstall cryptomodels -y || handle_error $? "Failed to uninstall cryptomodels."
-    pip install -q "git+${REMOTE}@${BRANCH}" || handle_error $? "Failed to install/update cryptomodels toolkit."
-    log_message "cryptomodels toolkit installed/updated from ${REMOTE}@${BRANCH}."
+    pip uninstall eternalzoo -y || handle_error $? "Failed to uninstall eternalzoo."
+pip install -q "git+${REMOTE}@${BRANCH}" || handle_error $? "Failed to install/update eternalzoo toolkit."
+log_message "eternalzoo toolkit installed/updated from ${REMOTE}@${BRANCH}."
 }
 
-log_message "Setting up cryptomodels toolkit..."
-if pip show cryptomodels &>/dev/null; then
-    log_message "cryptomodels is installed. Checking for updates..."
-    INSTALLED_VERSION=$(pip show cryptomodels | grep Version | awk '{print $2}')
+log_message "Setting up eternalzoo toolkit..."
+if pip show eternalzoo &>/dev/null; then
+    log_message "eternalzoo is installed. Checking for updates..."
+    INSTALLED_VERSION=$(pip show eternalzoo | grep Version | awk '{print $2}')
     log_message "Current version: $INSTALLED_VERSION"
     log_message "Checking latest version from repository..."
     TEMP_VERSION_FILE=$(mktemp)
-    if curl -s https://raw.githubusercontent.com/eternalai-org/CryptoModels/main/crypto_models/__init__.py | grep -o "__version__ = \"[0-9.]*\"" | cut -d'"' -f2 > "$TEMP_VERSION_FILE"; then
+    if curl -s https://raw.githubusercontent.com/eternalai-org/EternalZoo/main/eternal_zoo/__init__.py | grep -o "__version__ = \"[0-9.]*\"" | cut -d'"' -f2 > "$TEMP_VERSION_FILE"; then
         REMOTE_VERSION=$(cat "$TEMP_VERSION_FILE")
         rm "$TEMP_VERSION_FILE"
         log_message "Latest version: $REMOTE_VERSION"
         if [ "$(printf '%s\n' "$INSTALLED_VERSION" "$REMOTE_VERSION" | sort -V | head -n1)" = "$INSTALLED_VERSION" ] && [ "$INSTALLED_VERSION" != "$REMOTE_VERSION" ]; then
             log_message "New version available. Updating..."
             install_or_update_local_ai
-            log_message "cryptomodels toolkit updated to version $REMOTE_VERSION."
+            log_message "eternalzoo toolkit updated to version $REMOTE_VERSION."
         else
             log_message "Already running the latest version. No update needed."
         fi
     else
         log_message "Could not check latest version. Proceeding with update to be safe..."
         install_or_update_local_ai
-        log_message "cryptomodels toolkit updated."
+        log_message "eternalzoo toolkit updated."
     fi
 else
-    log_message "Installing cryptomodels toolkit..."
+    log_message "Installing eternalzoo toolkit..."
     install_or_update_local_ai
-    log_message "cryptomodels toolkit installed."
+    log_message "eternalzoo toolkit installed."
 fi
 
 log_message "Setup complete. You can now use 'llama-server' and your Python virtual environment."

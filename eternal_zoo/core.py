@@ -18,23 +18,23 @@ from typing import Optional, Dict, Any, List
 from eternal_zoo.download import download_model_async, fetch_model_metadata_async
 
 
-class CryptoAgentsServiceError(Exception):
-    """Base exception for CryptoModels service errors."""
+class EternalZooServiceError(Exception):
+    """Base exception for EternalZoo service errors."""
     pass
 
-class ServiceStartError(CryptoAgentsServiceError):
+class ServiceStartError(EternalZooServiceError):
     """Exception raised when service fails to start."""
     pass
 
-class ModelNotFoundError(CryptoAgentsServiceError):
+class ModelNotFoundError(EternalZooServiceError):
     """Exception raised when model file is not found."""
     pass
 
-class CryptoModelsManager:
-    """Manages a CryptoModels service with optimized performance."""
+class EternalZooManager:
+    """Manages an EternalZoo service with optimized performance."""
     
     def __init__(self):
-        """Initialize the CryptoModelsManager with optimized defaults."""
+        """Initialize the EternalZooManager with optimized defaults.""" 
         # Performance constants from config
         self.LOCK_TIMEOUT = config.core.LOCK_TIMEOUT
         self.PORT_CHECK_TIMEOUT = config.core.PORT_CHECK_TIMEOUT
@@ -131,13 +131,13 @@ class CryptoModelsManager:
 
     def start(self, hashes: str, port: int = None, host: str = None, context_length: int = None) -> bool:
         """
-        Start the CryptoModels service with multi-model support and on-demand loading.
+        Start the EternalZoo service with multi-model support and on-demand loading.
 
         Args:
             hashes (str): Comma-separated string of model hashes. First hash is main model (loaded immediately),
                          subsequent hashes are stored for on-demand loading. Single hash also supported.
-            port (int): Port number for the CryptoModels service (default from config).
-            host (str): Host address for the CryptoModels service (default from config).
+            port (int): Port number for the EternalZoo service (default from config).
+            host (str): Host address for the EternalZoo service (default from config).
             context_length (int): Context length for the model (default from config).
 
         Returns:
@@ -225,7 +225,7 @@ class CryptoModelsManager:
                 raise ServiceStartError(f"Port {port} is already in use on {host}")
 
             try:
-                logger.info(f"Starting CryptoModels service with {len(hashes_list)} models")
+                logger.info(f"Starting EternalZoo service with {len(hashes_list)} models")
                 logger.info(f"Main model hash: {main_hash}")
                 if on_demand_hashes:
                     logger.info(f"On-demand models: {on_demand_hashes}")
@@ -405,7 +405,7 @@ class CryptoModelsManager:
                         )
                     logger.info(f"AI logs written to {ai_log_stderr}")
                 except Exception as e:
-                    logger.error(f"Error starting CryptoModels service: {str(e)}", exc_info=True)
+                    logger.error(f"Error starting EternalZoo service: {str(e)}", exc_info=True)
                     cleanup_processes()
                     return False
         
@@ -414,12 +414,12 @@ class CryptoModelsManager:
                     cleanup_processes()
                     return False
                 
-                logger.info(f"[CRYPTOMODELS] Main model service started on port {local_ai_port}")
+                logger.info(f"[ETERNALZOO] Main model service started on port {local_ai_port}")
 
                 # Start the FastAPI app
                 uvicorn_command = [
                     "uvicorn",
-                    "crypto_models.apis:app",
+                    "eternal_zoo.apis:app",
                     "--host", host,
                     "--port", str(port),
                     "--log-level", "info"
@@ -469,7 +469,7 @@ class CryptoModelsManager:
                 return True
 
             except Exception as e:
-                logger.error(f"Error starting CryptoModels service: {str(e)}", exc_info=True)
+                logger.error(f"Error starting EternalZoo service: {str(e)}", exc_info=True)
                 cleanup_processes()
                 return False
                 
@@ -513,7 +513,7 @@ class CryptoModelsManager:
     
     def stop(self, force: bool = False) -> bool:
         """
-        Stop the running CryptoModels service with optimized process termination.
+        Stop the running EternalZoo service with optimized process termination.
 
         Args:
             force (bool): If True, force kill processes immediately without graceful termination.
@@ -522,7 +522,7 @@ class CryptoModelsManager:
             bool: True if the service stopped successfully, False otherwise.
         """
         if not os.path.exists(self.msgpack_file):
-            logger.warning("No running CryptoModels service to stop.")
+            logger.warning("No running EternalZoo service to stop.")
             return False
 
         try:
@@ -537,13 +537,13 @@ class CryptoModelsManager:
             local_ai_port = service_info.get("port")
 
             if force:
-                logger.info(f"Force stopping CryptoModels service '{hash_val}' running on port {app_port} (AI PID: {pid}, API PID: {app_pid})...")
+                logger.info(f"Force stopping EternalZoo service '{hash_val}' running on port {app_port} (AI PID: {pid}, API PID: {app_pid})...")
             else:
-                logger.info(f"Stopping CryptoModels service '{hash_val}' running on port {app_port} (AI PID: {pid}, API PID: {app_pid})...")
+                logger.info(f"Stopping EternalZoo service '{hash_val}' running on port {app_port} (AI PID: {pid}, API PID: {app_pid})...")
             
             # Use the optimized termination methods with force parameter
             timeout = 0 if force else 15
-            ai_stopped = self._terminate_process_safely(pid, "CryptoModels service", timeout=timeout, force=force)
+            ai_stopped = self._terminate_process_safely(pid, "EternalZoo service", timeout=timeout, force=force)
             api_stopped = self._terminate_process_safely(app_pid, "API service", timeout=timeout, force=force)
             
             # Brief pause to allow system cleanup
@@ -610,17 +610,17 @@ class CryptoModelsManager:
             success = ai_stopped and api_stopped and metadata_cleaned
             
             if success:
-                logger.info("CryptoModels service stopped successfully.")
+                logger.info("EternalZoo service stopped successfully.")
                 if not ports_freed:
                     logger.warning("Service stopped but some ports may still be in use temporarily")
             else:
-                logger.error("CryptoModels service stop completed with some failures")
-                logger.error(f"CryptoModels stopped: {ai_stopped}, API stopped: {api_stopped}, metadata cleaned: {metadata_cleaned}")
+                logger.error("EternalZoo service stop completed with some failures")
+                logger.error(f"EternalZoo stopped: {ai_stopped}, API stopped: {api_stopped}, metadata cleaned: {metadata_cleaned}")
             
             return success
 
         except Exception as e:
-            logger.error(f"Error stopping CryptoModels service: {str(e)}", exc_info=True)
+            logger.error(f"Error stopping EternalZoo service: {str(e)}", exc_info=True)
             return False
 
     def _terminate_process_safely(self, pid: int, process_name: str, timeout: int = 15, use_process_group: bool = True, force: bool = False) -> bool:
@@ -1044,7 +1044,7 @@ class CryptoModelsManager:
 
     def _get_model_template_path(self, model_family: str) -> str:
         """Get the template path for a specific model family."""
-        chat_template_path = pkg_resources.resource_filename("crypto_models", f"examples/templates/{model_family}.jinja")
+        chat_template_path = pkg_resources.resource_filename("eternal_zoo", f"examples/templates/{model_family}.jinja")
         # check if the template file exists
         if not os.path.exists(chat_template_path):
             return None
@@ -1052,7 +1052,7 @@ class CryptoModelsManager:
 
     def _get_model_best_practice_path(self, model_family: str) -> str:
         """Get the best practices for a specific model family."""
-        best_practice_path = pkg_resources.resource_filename("crypto_models", f"examples/best_practices/{model_family}.json")
+        best_practice_path = pkg_resources.resource_filename("eternal_zoo", f"examples/best_practices/{model_family}.json")
         # check if the best practices file exists
         if not os.path.exists(best_practice_path):
             return None
@@ -1696,7 +1696,7 @@ class CryptoModelsManager:
                     )
                 logger.info(f"AI logs written to {ai_log_stderr}")
             except Exception as e:
-                logger.error(f"Error starting CryptoModels service: {str(e)}", exc_info=True)
+                logger.error(f"Error starting EternalZoo service: {str(e)}", exc_info=True)
                 return False
             
             # Wait for the process to start by checking the health endpoint

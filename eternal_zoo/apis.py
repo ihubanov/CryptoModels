@@ -18,7 +18,7 @@ from typing import Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from eternal_zoo.core import CryptoModelsManager, CryptoAgentsServiceError
+from eternal_zoo.core import EternalZooManager, CryptoAgentsServiceError
 
 # Import schemas from schema.py
 from eternal_zoo.schema import (
@@ -57,8 +57,8 @@ app.add_middleware(
     allow_headers=["*"],  # Allow all headers
 )
 
-# Initialize CryptoModels Manager for service management
-crypto_models_manager = CryptoModelsManager()
+# Initialize EternalZoo Manager for service management
+eternal_zoo_manager = EternalZooManager()
 
 
 # Performance constants from config
@@ -91,9 +91,9 @@ STREAM_CHUNK_SIZE = config.performance.STREAM_CHUNK_SIZE
 
 # Utility functions
 def get_service_info() -> Dict[str, Any]:
-    """Get service info from CryptoModelsManager with error handling."""
+    """Get service info from EternalZooManager with error handling."""
     try:
-        return crypto_models_manager.get_service_info()
+        return eternal_zoo_manager.get_service_info()
     except CryptoAgentsServiceError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
@@ -565,7 +565,7 @@ class RequestProcessor:
             try:
                 await asyncio.sleep(MODEL_SWITCH_VERIFICATION_DELAY)
                 
-                updated_service_info = crypto_models_manager.get_service_info()
+                updated_service_info = eternal_zoo_manager.get_service_info()
                 updated_models = updated_service_info.get("models", {})
                 
                 if model_requested in updated_models and updated_models[model_requested].get("active", False):
@@ -642,10 +642,10 @@ class RequestProcessor:
             switch_start_time = time.time()
             
             # Get current active model for logging
-            active_model = crypto_models_manager.get_active_model()
+            active_model = eternal_zoo_manager.get_active_model()
             
             # Perform the model switch
-            success = await crypto_models_manager.switch_model(model_requested)
+            success = await eternal_zoo_manager.switch_model(model_requested)
             
             switch_duration = time.time() - switch_start_time
             
@@ -658,7 +658,7 @@ class RequestProcessor:
                     # Use the new verification method with retry logic
                     if await RequestProcessor._verify_model_switch(model_requested, request_id):
                         # Update app state with new service info after successful verification
-                        updated_service_info = crypto_models_manager.get_service_info()
+                        updated_service_info = eternal_zoo_manager.get_service_info()
                         app.state.service_info = updated_service_info
                         return True
                     else:
@@ -678,61 +678,6 @@ class RequestProcessor:
             return False
     
     @staticmethod
-    async def _ensure_server_running(request_id: str) -> bool:
-        """
-        Optimized server state checking and reloading with better error handling.
-        """
-        try:
-            service_info = get_service_info()
-            pid = service_info.get("pid")
-            
-            # Quick validation checks
-            if not pid:
-                logger.info(f"[{request_id}] No PID found, reloading CryptoModels server...")
-                return await crypto_models_manager.reload_ai_server()
-        
-            # Efficient process existence and status check
-            if not psutil.pid_exists(pid):
-                logger.info(f"[{request_id}] PID {pid} not found, reloading CryptoModels server...")
-                return await crypto_models_manager.reload_ai_server()
-            
-            # Check process status in a single call
-            try:
-                process = psutil.Process(pid)
-                status = process.status()
-                
-                # Check for non-running states
-                if status in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
-                    logger.info(f"[{request_id}] Process {pid} status is {status}, reloading CryptoModels server...")
-                    return await crypto_models_manager.reload_ai_server()
-                
-                # Additional check for processes that might be hung
-                try:
-                    # Quick responsiveness check - verify process is actually doing something
-                    cpu_percent = process.cpu_percent(interval=PROCESS_CHECK_INTERVAL)
-                    memory_info = process.memory_info()
-                    
-                    logger.debug(f"[{request_id}] CryptoModels server PID {pid} is healthy "
-                               f"(status: {status}, memory: {memory_info.rss // 1024 // 1024}MB)")
-                    
-                except psutil.AccessDenied:
-                    # Process exists but we can't get detailed info - assume it's running
-                    logger.debug(f"[{request_id}] CryptoModels server PID {pid} running (limited access)")
-                    
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                logger.info(f"[{request_id}] Process {pid} not accessible, reloading CryptoModels server...")
-                return await crypto_models_manager.reload_ai_server()
-            
-            return True
-            
-        except HTTPException:
-            logger.info(f"[{request_id}] Service info not available, attempting reload...")
-            return await crypto_models_manager.reload_ai_server()
-        except Exception as e:
-            logger.error(f"[{request_id}] Unexpected error in _ensure_server_running: {str(e)}")
-            return False
-    
-    @staticmethod
     async def process_request(endpoint: str, request_data: Dict[str, Any]):
         """Process a request by adding it to the queue and waiting for the result."""
         request_id = generate_request_id()
@@ -743,12 +688,6 @@ class RequestProcessor:
         request_data["model"] = validated_model
         
         logger.info(f"[{request_id}] Adding request to queue for endpoint {endpoint} (queue size: {queue_size})")
-        
-        # Update the last request time
-        app.state.last_request_time = time.time()
-        
-        # Check if we need to reload the CryptoModels server
-        await RequestProcessor._ensure_server_running(request_id)
         
         start_wait_time = time.time()
         future = asyncio.Future()
@@ -773,9 +712,6 @@ class RequestProcessor:
         # Validate that model field is present and get service info
         service_info, validated_model = validate_model_field(request_data)
         request_data["model"] = validated_model
-        
-        app.state.last_request_time = time.time()
-        await RequestProcessor._ensure_server_running(request_id)
         
         start_time = time.time()
         if endpoint in RequestProcessor.MODEL_ENDPOINTS:
@@ -911,96 +847,6 @@ class RequestProcessor:
                     # task_done() called more times than items in queue
                     pass
 
-# Background Tasks
-# TEMPORARILY DISABLED: Dynamic unload functionality
-# async def unload_checker():
-#     """
-#     Optimized unload checker that periodically checks if the CryptoModels server has been idle 
-#     for too long and unloads it if needed.
-#     """
-#     logger.info("Unload checker task started")
-#     consecutive_errors = 0
-#     max_consecutive_errors = UNLOAD_MAX_CONSECUTIVE_ERRORS
-#     last_log_time = 0  # Track when we last logged idle status
-#     
-#     while True:
-#         try:
-#             await asyncio.sleep(UNLOAD_CHECK_INTERVAL)
-#             
-#             try:
-#                 service_info = get_service_info()
-#                 
-#                 # Check if we have both PID and last request time
-#                 if "pid" not in service_info:
-#                     logger.debug("No PID found in service info, skipping unload check")
-#                     consecutive_errors = 0  # Reset error counter
-#                     continue
-#                 
-#                 if not hasattr(app.state, "last_request_time"):
-#                     logger.debug("No last request time available, skipping unload check")
-#                     consecutive_errors = 0
-#                     continue
-#                 
-#                 # Calculate idle time
-#                 current_time = time.time()
-#                 idle_time = current_time - app.state.last_request_time
-#                 
-#                 # Log idle status periodically - Fixed timing logic
-#                 if current_time - last_log_time >= UNLOAD_LOG_INTERVAL:
-#                     logger.info(f"CryptoModels server idle time: {idle_time:.1f}s (threshold: {IDLE_TIMEOUT}s)")
-#                     last_log_time = current_time
-#                 
-#                 # Check if server should be unloaded
-#                 if idle_time > IDLE_TIMEOUT:
-#                     pid = service_info.get("pid")
-#                     logger.info(f"CryptoModels server (PID: {pid}) has been idle for {idle_time:.2f}s, initiating unload...")
-#                     
-#                     # Check for active streams before unloading
-#                     if await RequestProcessor.has_active_streams():
-#                         active_stream_count = len(RequestProcessor.active_streams)
-#                         logger.info(f"Skipping unload due to {active_stream_count} active streams")
-#                         # Reset last request time to prevent immediate retries
-#                         app.state.last_request_time = current_time
-#                         continue
-#                     
-#                     # Use the optimized kill method from CryptoModelsManager
-#                     unload_success = await crypto_models_manager.kill_ai_server()
-#                     
-#                     if unload_success:
-#                         logger.info("CryptoModels server unloaded successfully due to inactivity")
-#                         # Don't update last_request_time here to avoid race conditions
-#                         # The next request will naturally update it when it arrives
-#                     else:
-#                         logger.warning("Failed to unload CryptoModels server")
-#                         # Update last request time to prevent immediate retries
-#                         app.state.last_request_time = current_time
-#                 
-#                 # Reset error counter on successful check
-#                 consecutive_errors = 0
-#                 
-#             except HTTPException as e:
-#                 # Service info not available - this is expected when no service is running
-#                 consecutive_errors = 0  # Don't count this as an error
-#                 logger.debug(f"Service info not available (expected when no service running): {e}")
-#                 
-#             except Exception as e:
-#                 consecutive_errors += 1
-#                 logger.error(f"Error in unload checker (attempt {consecutive_errors}/{max_consecutive_errors}): {str(e)}")
-#                 
-#                 # If we have too many consecutive errors, wait longer before next attempt
-#                 if consecutive_errors >= max_consecutive_errors:
-#                     logger.error(f"Too many consecutive errors in unload checker, extending sleep interval")
-#                     await asyncio.sleep(UNLOAD_CHECK_INTERVAL * UNLOAD_ERROR_SLEEP_MULTIPLIER)
-#                     consecutive_errors = 0  # Reset counter after extended wait
-#             
-#         except asyncio.CancelledError:
-#             logger.info("Unload checker task cancelled")
-#             break
-#         except Exception as e:
-#             logger.error(f"Critical error in unload checker task: {str(e)}", exc_info=True)
-#             # Wait a bit longer before retrying on critical errors
-#             await asyncio.sleep(UNLOAD_CHECK_INTERVAL * UNLOAD_ERROR_SLEEP_MULTIPLIER)
-
 async def stream_cleanup_task():
     """Periodic cleanup of stale streams."""
     logger.info("Stream cleanup task started")
@@ -1094,32 +940,32 @@ async def shutdown_event():
         except Exception as e:
             logger.error(f"Error during background task cancellation: {str(e)}")
     
-    # Phase 2: Clean up CryptoModels server
+    # Phase 2: Clean up EternalZoo server
     try:
         service_info = get_service_info()
         if "pid" in service_info:
             pid = service_info.get("pid")
-            logger.info(f"Terminating CryptoModels server (PID: {pid}) during shutdown...")
+            logger.info(f"Terminating EternalZoo server (PID: {pid}) during shutdown...")
             
             # Use the optimized kill method with timeout
             kill_success = await asyncio.wait_for(
-                crypto_models_manager.kill_ai_server(),
+                eternal_zoo_manager.kill_ai_server(),
                 timeout=SHUTDOWN_SERVER_TIMEOUT
             )
             
             if kill_success:
-                logger.info("CryptoModels server terminated successfully during shutdown")
+                logger.info("EternalZoo server terminated successfully during shutdown")
             else:
-                logger.warning("CryptoModels server termination failed during shutdown")
+                logger.warning("EternalZoo server termination failed during shutdown")
         else:
-            logger.debug("No CryptoModels server PID found, skipping termination")
+            logger.debug("No EternalZoo server PID found, skipping termination")
             
     except HTTPException:
         logger.debug("Service info not available during shutdown (expected)")
     except asyncio.TimeoutError:
-        logger.error("CryptoModels server termination timed out during shutdown")
+        logger.error("EternalZoo server termination timed out during shutdown")
     except Exception as e:
-        logger.error(f"Error terminating CryptoModels server during shutdown: {str(e)}")
+        logger.error(f"Error terminating EternalZoo server during shutdown: {str(e)}")
     
     # Phase 3: Close HTTP client connections
     if hasattr(app.state, "client"):
@@ -1169,8 +1015,8 @@ async def health():
 
 @app.post("/update")
 async def update(request: Dict[str, Any]):
-    """Update the service information in the CryptoModelsManager."""
-    if crypto_models_manager.update_service_info(request):
+    """Update the service information in the EternalZooManager."""
+    if eternal_zoo_manager.update_service_info(request):
         return {"status": "ok", "message": "Service info updated successfully"}
     else:
         return {"status": "error", "message": "Failed to update service info"}
@@ -1179,7 +1025,7 @@ async def update(request: Dict[str, Any]):
 async def update_lora(request: LoraConfigRequest):
     """Update the LoRA for a given model hash."""
     request_dict = convert_request_to_dict(request)
-    if crypto_models_manager.update_lora(request_dict):
+    if eternal_zoo_manager.update_lora(request_dict):
         return {"status": "ok", "message": "LoRA updated successfully"}
     else:
         return {"status": "error", "message": "Failed to update LoRA"}

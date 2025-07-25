@@ -13,13 +13,13 @@ from rich import print as rprint
 
 from eternal_zoo.config import config
 from eternal_zoo.version import __version__
-from eternal_zoo.core import CryptoModelsManager
+from eternal_zoo.core import EternalZooManager
 from eternal_zoo.download import download_model_async
 from eternal_zoo.upload import upload_folder_to_lighthouse
 from eternal_zoo.models import MODEL_TO_HASH
 from eternal_zoo.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH
 
-manager = CryptoModelsManager()
+manager = EternalZooManager()
 
 def get_all_downloaded_models() -> list:
     """

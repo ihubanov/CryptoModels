@@ -1,5 +1,5 @@
 """
-Configuration management for CryptoModels.
+Configuration management for EternalZoo.
 
 This module provides centralized configuration management with support for:
 - Environment variables
@@ -166,7 +166,7 @@ class Config:
     def print_config(cls) -> None:
         """Print current configuration for debugging."""
         import json
-        print("Current CryptoModels Configuration:")
+        print("Current EternalZoo Configuration:")
         print(json.dumps(cls.get_env_summary(), indent=2, default=str))
 
 
