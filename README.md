@@ -1,10 +1,10 @@
 # 🚀 Eternal Zoo: Sovereign Weights
-![Sovereign Weights](./images/crypto_models.jpg)
+![Sovereign Weights](./images/eternal_zoo.jpg)
 
 ## The Easiest Way to Run Your Own AI Models with Complete Sovereignty
 
 
-This guide will help you deploy your AI models using decentralized infrastructure. Whether you're a developer or AI enthusiast, you'll learn how to run your models with complete sovereignty - maintaining full control over your AI weights through decentralized storage.
+This guide will help you deploy your AI models using peer-to-peer infrastructure. Whether you're a developer or AI enthusiast, you'll learn how to run your models with complete sovereignty - maintaining full control over your AI weights through peer-to-peer storage.
 
 ## 📑 Table of Contents
 - [Key Features](#-key-features)
@@ -23,7 +23,7 @@ This guide will help you deploy your AI models using decentralized infrastructur
 
 ### 🚀 What Makes Eternal Zoo Different from Ollama & LMStudio
 
-**🌐 TRUE Decentralized Model Storage**
+**🌐 TRUE Peer-to-Peer Model Storage**
 - Unlike Ollama/LMStudio that rely on centralized repositories (Hugging Face, GitHub), Eternal Zoo uses **IPFS/Filecoin** for permanent, censorship-resistant model distribution
 - Models are stored across a distributed network - **no single point of failure or control**
 - Access your models even if traditional platforms go down or restrict access
@@ -47,9 +47,9 @@ This guide will help you deploy your AI models using decentralized infrastructur
 
 In an era of increasing AI centralization, Eternal Zoo puts you back in control:
 
-- **Own Your Models**: Models are stored on decentralized infrastructure, not controlled by any single entity
+- **Own Your Models**: Models are stored on peer-to-peer infrastructure, not controlled by any single entity
 - **Private by Design**: All inference happens locally on your hardware - no external API calls, no data collection
-- **Censorship Resistant**: Decentralized storage ensures your models remain accessible regardless of platform policies
+- **Censorship Resistant**: peer-to-peer storage ensures your models remain accessible regardless of platform policies
 - **Vendor Independence**: Break free from proprietary AI services and their limitations
 
 ##  Before You Start

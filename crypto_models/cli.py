@@ -63,8 +63,8 @@ def print_banner():
         
     panel = Panel(
         Text(banner_text, style="bold cyan", justify="center"),
-        title=f"[bold green]CryptoModels CLI v{__version__}[/bold green]",
-        subtitle="[italic]Decentralized AI Model Management[/italic]",
+        title=f"[bold green]Eternal Zoo CLI v{__version__}[/bold green]",
+        subtitle="[italic]Peer-to-Peer AI Model Management[/italic]",
         border_style="bright_blue",
         padding=(1, 2)
     )
@@ -109,15 +109,15 @@ class CustomHelpFormatter(argparse.HelpFormatter):
 def parse_args():
     """Parse command line arguments with beautiful help formatting"""
     parser = argparse.ArgumentParser(
-        description="🚀 CryptoModels - Decentralized AI Model Management Tool",
+        description="🚀 Eternal Zoo - Peer-to-Peer AI Model Management Tool",
         formatter_class=CustomHelpFormatter,
-        epilog="💡 For more information, visit: https://github.com/eternalai-org/CryptoModels"
+        epilog="💡 For more information, visit: https://github.com/eternalai-org/eternal-zoo"
     )
     
     parser.add_argument(
         "--version", 
         action="version", 
-        version=f"cryptomodels v{__version__} 🎉"
+        version=f"eternal-zoo v{__version__} 🎉"
     )
     
     subparsers = parser.add_subparsers(
@@ -374,9 +374,9 @@ def handle_run(args):
     if args.hash and args.model_name:
         print_error("Please specify either model name(s) OR --hash, not both")
         print_info("Usage examples:")
-        print("  • cryptomodels model run qwen3-1.7b")
-        print("  • cryptomodels model run qwen3-14b,qwen3-4b")
-        print("  • cryptomodels model run --hash QmHash1,QmHash2")
+        print("  • eternal-zoo model run qwen3-1.7b")
+        print("  • eternal-zoo model run qwen3-14b,qwen3-4b")
+        print("  • eternal-zoo model run --hash QmHash1,QmHash2")
         sys.exit(1)
     elif args.hash:
         model_hashes_str = args.hash
@@ -400,7 +400,7 @@ def handle_run(args):
                 print_error(f"Model '{model_name}' not found in preserved models")
                 print_warning("Here are the available models:")
                 show_available_models()
-                print_info("For custom models, use: cryptomodels model run --hash <your_hash>")
+                print_info("For custom models, use: eternal-zoo model run --hash <your_hash>")
                 sys.exit(1)
         
         # Join hashes into comma-separated string
@@ -415,9 +415,9 @@ def handle_run(args):
     else:
         print_error("Either model name(s) or --hash must be provided")
         print_info("Usage examples:")
-        print("  • cryptomodels model run qwen3-1.7b")
-        print("  • cryptomodels model run qwen3-14b,qwen3-4b")
-        print("  • cryptomodels model run --hash <hash1,hash2>")
+        print("  • eternal-zoo model run qwen3-1.7b")
+        print("  • eternal-zoo model run qwen3-14b,qwen3-4b")
+        print("  • eternal-zoo model run --hash <hash1,hash2>")
         print_warning("Available models:")
         show_available_models()
         sys.exit(1)
