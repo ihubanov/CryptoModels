@@ -12,10 +12,10 @@ import pkg_resources
 import shutil
 from pathlib import Path
 from loguru import logger
-from crypto_models.config import config
-from crypto_models.utils import wait_for_health
+from eternal_zoo.config import config
+from eternal_zoo.utils import wait_for_health
 from typing import Optional, Dict, Any, List
-from crypto_models.download import download_model_async, fetch_model_metadata_async
+from eternal_zoo.download import download_model_async, fetch_model_metadata_async
 
 
 class CryptoAgentsServiceError(Exception):
@@ -1080,6 +1080,7 @@ class CryptoModelsManager:
             "--port", str(port),
             "--host", host,
             "-c", str(context_length),
+            "--no-context-shift",
             "-fa",
             "--pooling", "mean",
             "--embeddings",

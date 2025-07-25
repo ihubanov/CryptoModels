@@ -241,7 +241,7 @@ mkdir -p "$LLAMA_WRAPPER_DIR"
 # Prepare variables for template and model paths.
 PYTHON_VERSION=$($PYTHON_CMD -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')")
 MODELS_DIR="$(pwd)/llms-storage"
-TEMPLATES_DIR="$(pwd)/crypto_models/examples/templates"
+TEMPLATES_DIR="$(pwd)/eternal_zoo/examples/templates"
 USER_HOME="$HOME"
 
 cat > "$LLAMA_WRAPPER_DIR/llama-server" << EOF
@@ -312,33 +312,33 @@ fi
 # -----------------------------------------------------------------------------
 # Step 6: Create and activate Python virtual environment
 # -----------------------------------------------------------------------------
-log_message "Creating virtual environment ' '..."
-"$PYTHON_CMD" -m venv cryptomodels || handle_error $? "Failed to create virtual environment."
+log_message "Creating virtual environment 'eternal-zoo'..."
+"$PYTHON_CMD" -m venv eternal-zoo || handle_error $? "Failed to create virtual environment."
 
 log_message "Activating virtual environment..."
-source cryptomodels/bin/activate || handle_error $? "Failed to activate virtual environment."
+source eternal-zoo/bin/activate || handle_error $? "Failed to activate virtual environment."
 log_message "Virtual environment activated."
 
 # -----------------------------------------------------------------------------
-# Step 7: Install or update cryptomodels toolkit in the virtual environment
+# Step 7: Install or update eternal-zoo toolkit in the virtual environment
 # -----------------------------------------------------------------------------
 # Function: install_or_update_local_ai
-# Uninstalls and reinstalls the cryptomodels toolkit from the current directory.
+# Uninstalls and reinstalls the eternal-zoo toolkit from the current directory.
 install_or_update_local_ai() {
-    pip uninstall cryptomodels -y || handle_error $? "Failed to uninstall cryptomodels."
-    pip install -e . || handle_error $? "Failed to install/update cryptomodels toolkit."
-    log_message "cryptomodels toolkit installed/updated."
+    pip uninstall eternal-zoo -y || handle_error $? "Failed to uninstall eternal-zoo."
+    pip install -e . || handle_error $? "Failed to install/update eternal-zoo toolkit."
+    log_message "eternal-zoo toolkit installed/updated."
 }
 
-log_message "Setting up cryptomodels toolkit..."
-if pip show cryptomodels &>/dev/null; then
-    log_message "cryptomodels is installed. Reinstalling in development mode..."
+log_message "Setting up eternal-zoo toolkit..."
+if pip show eternal-zoo &>/dev/null; then
+    log_message "eternal-zoo is installed. Reinstalling in development mode..."
     install_or_update_local_ai
-    log_message "cryptomodels toolkit reinstalled in development mode."
+    log_message "eternal-zoo toolkit reinstalled in development mode."
 else
-    log_message "Installing cryptomodels toolkit in development mode..."
+    log_message "Installing eternal-zoo toolkit in development mode..."
     install_or_update_local_ai
-    log_message "cryptomodels toolkit installed in development mode."
+    log_message "eternal-zoo toolkit installed in development mode."
 fi
 
 log_message "Setup completed successfully."
