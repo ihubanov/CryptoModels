@@ -108,24 +108,61 @@ check_sudo() {
 }
 
 # Function: check_python_installable
-# Checks if a suitable Python 3 is present (uses system python3, installs if missing).
+# Checks if a suitable Python 3 is present (prefers Python >= 3.11, falls back to system python3).
 check_python_installable() {
     log_section "Checking Python Installation"
-    log_message "Searching for system python3..."
-    if command_exists python3; then
-        PYTHON_CMD="python3"
+    log_message "Searching for Python installations >= 3.11..."
+    
+    # Find all python3.x installations in /usr/bin
+    PYTHON_VERSIONS=()
+    for py_exec in /usr/bin/python3.*; do
+        if [[ -x "$py_exec" && "$py_exec" =~ python3\.[0-9]+$ ]]; then
+            version_output=$("$py_exec" --version 2>&1)
+            if [[ $version_output =~ Python\ ([0-9]+\.[0-9]+) ]]; then
+                version="${BASH_REMATCH[1]}"
+                PYTHON_VERSIONS+=("$version:$py_exec")
+            fi
+        fi
+    done
+    
+    # Sort versions and find the highest >= 3.11
+    HIGHEST_VERSION=""
+    HIGHEST_PATH=""
+    
+    for version_path in "${PYTHON_VERSIONS[@]}"; do
+        version="${version_path%%:*}"
+        path="${version_path##*:}"
+        
+        # Check if version >= 3.11
+        if [[ $(printf '%s\n' "3.11" "$version" | sort -V | head -n1) == "3.11" ]] || [[ "$version" == "3.11" ]]; then
+            if [[ -z "$HIGHEST_VERSION" ]] || [[ $(printf '%s\n' "$HIGHEST_VERSION" "$version" | sort -V | tail -n1) == "$version" ]]; then
+                HIGHEST_VERSION="$version"
+                HIGHEST_PATH="$path"
+            fi
+        fi
+    done
+    
+    if [[ -n "$HIGHEST_PATH" ]]; then
+        PYTHON_CMD="$HIGHEST_PATH"
         PYTHON_VERSION=$($PYTHON_CMD --version 2>&1)
-        log_success "Found system python3: $PYTHON_CMD ($PYTHON_VERSION)"
+        log_success "Found Python >= 3.11: $PYTHON_CMD ($PYTHON_VERSION)"
     else
-        log_warning "python3 not found. Attempting to install python3..."
-        log_message "Updating package lists and installing python3..."
-        sudo apt-get update && sudo apt-get install -y python3 python3-venv python3-pip || handle_error $? "Failed to install python3."
+        log_warning "No Python >= 3.11 found. Checking for system python3..."
         if command_exists python3; then
             PYTHON_CMD="python3"
             PYTHON_VERSION=$($PYTHON_CMD --version 2>&1)
-            log_success "Successfully installed python3: $PYTHON_CMD ($PYTHON_VERSION)"
+            log_success "Found system python3: $PYTHON_CMD ($PYTHON_VERSION)"
         else
-            handle_error 1 "python3 installation failed. Please install python3 manually."
+            log_warning "python3 not found. Attempting to install python3..."
+            log_message "Updating package lists and installing python3..."
+            sudo apt-get update && sudo apt-get install -y python3 python3-venv python3-pip || handle_error $? "Failed to install python3."
+            if command_exists python3; then
+                PYTHON_CMD="python3"
+                PYTHON_VERSION=$($PYTHON_CMD --version 2>&1)
+                log_success "Successfully installed python3: $PYTHON_CMD ($PYTHON_VERSION)"
+            else
+                handle_error 1 "python3 installation failed. Please install python3 manually."
+            fi
         fi
     fi
 }
@@ -146,11 +183,7 @@ preflight_checks() {
     echo "- Docker: OK"
     echo "- apt-get: OK"
     echo "- Sudo: OK"
-    if [ "$PYTHON_INSTALL_NEEDED" = "1" ]; then
-        echo "- Python: Will install $PYTHON_PKG_TO_INSTALL via apt."
-    else
-        echo "- Python: Using $PYTHON_CMD ($HIGHEST_VERSION)"
-    fi
+    echo "- Python: Using $PYTHON_CMD ($PYTHON_VERSION)"
     echo "========================================="
     echo
 }
@@ -158,15 +191,7 @@ preflight_checks() {
 # Run all preflight checks before proceeding.
 preflight_checks
 
-# If Python needs to be installed, do it now.
-if [ "$PYTHON_INSTALL_NEEDED" = "1" ]; then
-    log_message "Installing $PYTHON_PKG_TO_INSTALL..."
-    sudo apt-get update && sudo apt-get install -y $PYTHON_PKG_TO_INSTALL python3-venv python3-pip || handle_error $? "Failed to install $PYTHON_PKG_TO_INSTALL."
-    if [ ! -x "$PYTHON_CMD" ]; then
-        PYTHON_CMD="$PYTHON_PKG_TO_INSTALL"
-    fi
-    log_message "Installed and selected $PYTHON_CMD."
-fi
+# Python selection is now handled in check_python_installable function
 
 log_message "Using Python at: $(which $PYTHON_CMD)"
 log_message "Python setup complete."
@@ -196,36 +221,18 @@ else
 fi
 log_message "All required packages installed successfully."
 
-# -----------------------------------------------------------------------------
-# Step 3: Detect GPU offloading setup (prime-run, optirun, primusrun)
-# -----------------------------------------------------------------------------
-log_message "Checking for GPU offloading setup..."
-if command_exists prime-run; then
-    log_message "NVIDIA Prime setup detected (prime-run available)"
-    PRIME_RUN_AVAILABLE=true
-elif command_exists optirun; then
-    log_message "Optimus setup detected (optirun available)"
-    OPTIRUN_AVAILABLE=true
-elif command_exists primusrun; then
-    log_message "Optimus setup detected (primusrun available)"
-    PRIMUSRUN_AVAILABLE=true
-else
-    log_message "No GPU offloading setup detected, using direct GPU access."
-    PRIME_RUN_AVAILABLE=false
-    OPTIRUN_AVAILABLE=false
-    PRIMUSRUN_AVAILABLE=false
-fi
 
 # -----------------------------------------------------------------------------
-# Step 4: Pull llama-server CUDA Docker image
+# Step 3: Pull llama-server CUDA Docker image
 # -----------------------------------------------------------------------------
+LLAMA_IMAGE="ghcr.io/ggml-org/llama.cpp:server-cuda-b5974"
 log_message "Pulling llama-server cuda image..."
-if ! docker pull ghcr.io/ggerganov/llama.cpp:server-cuda; then
+if ! docker pull $LLAMA_IMAGE; then
     handle_error 1 "Failed to pull llama.cpp server Docker image."
 fi
 
 # -----------------------------------------------------------------------------
-# Step 5: Create llama-server wrapper script for Docker usage
+# Step 4: Create llama-server wrapper script for Docker usage
 # -----------------------------------------------------------------------------
 log_message "Creating llama-server wrapper script..."
 LLAMA_WRAPPER_DIR="$HOME/.local/bin"
@@ -233,47 +240,21 @@ mkdir -p "$LLAMA_WRAPPER_DIR"
 
 # Prepare variables for template and model paths.
 PYTHON_VERSION=$($PYTHON_CMD -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')")
-VENV_SITE_PACKAGES="$(pwd)/cryptomodels/lib/${PYTHON_VERSION}/site-packages"
-TEMPLATES_DIR="$VENV_SITE_PACKAGES/crypto_models/examples/templates"
+MODELS_DIR="$(pwd)/llms-storage"
+TEMPLATES_DIR="$(pwd)/crypto_models/examples/templates"
 USER_HOME="$HOME"
-ABS_TEMPLATE_PATH="$USER_HOME/.local/lib/${PYTHON_VERSION}/site-packages/crypto_models/examples/templates"
 
 cat > "$LLAMA_WRAPPER_DIR/llama-server" << EOF
 #!/bin/bash
-# Wrapper script to run llama-server using Docker.
 
-MODELS_DIR="$(pwd)/llms-storage"
+MODELS_DIR="$MODELS_DIR"
 TEMPLATES_DIR="$TEMPLATES_DIR"
-
-# Default port for the server.
-PORT=11434
-prev=""
-for arg in "\$@"; do
-    if [[ "\$prev" == "--port" ]]; then
-        PORT="\$arg"
-    fi
-    prev="\$arg"
-done
-
-# Detect GPU offloading method if available.
-if command -v prime-run >/dev/null 2>&1; then
-    echo "Info: NVIDIA Prime setup detected, using prime-run for GPU access."
-    GPU_ACCESS="prime-run"
-elif command -v optirun >/dev/null 2>&1; then
-    echo "Info: Optimus setup detected, using optirun for GPU access."
-    GPU_ACCESS="optirun"
-elif command -v primusrun >/dev/null 2>&1; then
-    echo "Info: Optimus setup detected, using primusrun for GPU access."
-    GPU_ACCESS="primusrun"
-else
-    GPU_ACCESS="direct"
-fi
 
 # Mount model and template directories for Docker.
 MODEL_MOUNT="-v \$MODELS_DIR:\$MODELS_DIR"
 TEMPLATE_MOUNT="-v \$TEMPLATES_DIR:\$TEMPLATES_DIR"
 
-DOCKER_RUN="docker run --rm -it --gpus all -p \$PORT:\$PORT \$MODEL_MOUNT \$TEMPLATE_MOUNT ghcr.io/ggerganov/llama.cpp:server-cuda \$@"
+docker run --runtime nvidia -it --rm --network=host \$MODEL_MOUNT \$TEMPLATE_MOUNT $LLAMA_IMAGE "\$@"
 
 if [ "\$GPU_ACCESS" = "prime-run" ]; then
     prime-run \$DOCKER_RUN
@@ -290,7 +271,7 @@ chmod +x "$LLAMA_WRAPPER_DIR/llama-server"
 log_message "Created llama-server wrapper at $LLAMA_WRAPPER_DIR/llama-server."
 
 # -----------------------------------------------------------------------------
-# Step 6: Add llama-server wrapper directory to PATH in shell rc file
+# Step 5: Add llama-server wrapper directory to PATH in shell rc file
 # -----------------------------------------------------------------------------
 # Function: update_shell_rc_path
 # Updates the specified shell rc file to include the wrapper directory in PATH.
@@ -329,9 +310,9 @@ if [[ ":$PATH:" != *":$LLAMA_WRAPPER_DIR:"* ]]; then
 fi
 
 # -----------------------------------------------------------------------------
-# Step 7: Create and activate Python virtual environment
+# Step 6: Create and activate Python virtual environment
 # -----------------------------------------------------------------------------
-log_message "Creating virtual environment 'cryptomodels'..."
+log_message "Creating virtual environment ' '..."
 "$PYTHON_CMD" -m venv cryptomodels || handle_error $? "Failed to create virtual environment."
 
 log_message "Activating virtual environment..."
@@ -339,43 +320,25 @@ source cryptomodels/bin/activate || handle_error $? "Failed to activate virtual 
 log_message "Virtual environment activated."
 
 # -----------------------------------------------------------------------------
-# Step 8: Install or update cryptomodels toolkit in the virtual environment
+# Step 7: Install or update cryptomodels toolkit in the virtual environment
 # -----------------------------------------------------------------------------
 # Function: install_or_update_local_ai
-# Uninstalls and reinstalls the cryptomodels toolkit from the GitHub repository.
+# Uninstalls and reinstalls the cryptomodels toolkit from the current directory.
 install_or_update_local_ai() {
     pip uninstall cryptomodels -y || handle_error $? "Failed to uninstall cryptomodels."
-    pip install -q git+https://github.com/eternalai-org/CryptoModels.git || handle_error $? "Failed to install/update cryptomodels toolkit."
+    pip install -e . || handle_error $? "Failed to install/update cryptomodels toolkit."
     log_message "cryptomodels toolkit installed/updated."
 }
 
 log_message "Setting up cryptomodels toolkit..."
 if pip show cryptomodels &>/dev/null; then
-    log_message "cryptomodels is installed. Checking for updates..."
-    INSTALLED_VERSION=$(pip show cryptomodels | grep Version | awk '{print $2}')
-    log_message "Current version: $INSTALLED_VERSION"
-    log_message "Checking latest version from repository..."
-    TEMP_VERSION_FILE=$(mktemp)
-    if curl -s https://raw.githubusercontent.com/eternalai-org/CryptoModels/main/crypto_models/__init__.py | grep -o "__version__ = \"[0-9.]*\"" | cut -d'"' -f2 > "$TEMP_VERSION_FILE"; then
-        REMOTE_VERSION=$(cat "$TEMP_VERSION_FILE")
-        rm "$TEMP_VERSION_FILE"
-        log_message "Latest version: $REMOTE_VERSION"
-        if [ "$(printf '%s\n' "$INSTALLED_VERSION" "$REMOTE_VERSION" | sort -V | head -n1)" = "$INSTALLED_VERSION" ] && [ "$INSTALLED_VERSION" != "$REMOTE_VERSION" ]; then
-            log_message "New version available. Updating..."
-            install_or_update_local_ai
-            log_message "cryptomodels toolkit updated to version $REMOTE_VERSION."
-        else
-            log_message "Already running the latest version. No update needed."
-        fi
-    else
-        log_message "Could not check latest version. Proceeding with update to be safe..."
-        install_or_update_local_ai
-        log_message "cryptomodels toolkit updated."
-    fi
-else
-    log_message "Installing cryptomodels toolkit..."
+    log_message "cryptomodels is installed. Reinstalling in development mode..."
     install_or_update_local_ai
-    log_message "cryptomodels toolkit installed."
+    log_message "cryptomodels toolkit reinstalled in development mode."
+else
+    log_message "Installing cryptomodels toolkit in development mode..."
+    install_or_update_local_ai
+    log_message "cryptomodels toolkit installed in development mode."
 fi
 
 log_message "Setup completed successfully."
