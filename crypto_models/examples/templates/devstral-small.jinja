@@ -62,9 +62,6 @@
         {%- if message.get('tool_calls') %}
             {%- for tool_call in message.tool_calls %}
                 {{- '[TOOL_CALLS]' + tool_call.function.name }}
-                {%- if not tool_call.id is defined or tool_call.id is not string or tool_call.id|length != 9 %}
-                    {{- raise_exception("Tool call IDs should be alphanumeric strings with length 9!") }}
-                {%- endif %}
                 {{- '[CALL_ID]' + tool_call.id }}
                 {{- '[ARGS]' + tool_call['function']['arguments']|tojson }}
             {%- endfor %}
@@ -88,9 +85,6 @@
             {%- set content = message.content.content %}
         {%- else %}
             {%- set content = message.content %}
-        {%- endif %}
-        {%- if not message.tool_call_id is defined or message.tool_call_id is not string or message['tool_call_id']|length != 9 %}
-            {{- raise_exception("Tool call IDs should be alphanumeric strings with length 9!") }}
         {%- endif %}
         {{- '[TOOL_RESULTS]' + message.tool_call_id + '[TOOL_CONTENT]' + content|string + '[/TOOL_RESULTS]' }}
     {%- else %}
