@@ -2,7 +2,6 @@ import os
 import shutil
 import warnings
 from loguru import logger
-from crypto_models._version import __version__
 from dotenv import load_dotenv
 
 load_dotenv()

@@ -3,15 +3,15 @@ import os
 
 # Read version from _version.py
 version = {}
-with open(os.path.join(os.path.dirname(__file__), 'crypto_models', '_version.py')) as f:
+with open(os.path.join(os.path.dirname(__file__), 'eternal_zoo', 'version.py')) as f:
     exec(f.read(), version)
 
 setup(
-    name="CryptoModels",
+    name="eternal-zoo",
     version=version['__version__'],
     packages=find_packages(),
     package_data={
-        "crypto_models": [
+        "eternal_zoo": [
             "examples/templates/*.jinja",
             "examples/best_practices/*.json",
         ],
@@ -38,11 +38,11 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "eai = crypto_models.cli:main",
+            "eai = eternal_zoo.cli:main",
         ],
     },
     author="EternalAI",
-    description="A library to manage local language models",
+    description="A library to deploy and manage models on your local machine",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     classifiers=[

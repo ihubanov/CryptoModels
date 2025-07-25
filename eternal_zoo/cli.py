@@ -11,13 +11,13 @@ from rich.text import Text
 from rich.table import Table
 from rich import print as rprint
 
-from crypto_models import __version__
-from crypto_models.config import config
-from crypto_models.core import CryptoModelsManager
-from crypto_models.download import download_model_async
-from crypto_models.upload import upload_folder_to_lighthouse
-from crypto_models.models import MODEL_TO_HASH
-from crypto_models.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH
+from eternal_zoo.config import config
+from eternal_zoo.version import __version__
+from eternal_zoo.core import CryptoModelsManager
+from eternal_zoo.download import download_model_async
+from eternal_zoo.upload import upload_folder_to_lighthouse
+from eternal_zoo.models import MODEL_TO_HASH
+from eternal_zoo.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH
 
 manager = CryptoModelsManager()
 

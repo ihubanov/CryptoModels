@@ -12,16 +12,16 @@ import json
 import uuid
 import psutil
 # Import configuration settings
-from crypto_models.config import config
+from eternal_zoo.config import config
 from json_repair import repair_json
 from typing import Dict, Any, Optional
-from crypto_models.core import CryptoModelsManager, CryptoAgentsServiceError
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from eternal_zoo.core import CryptoModelsManager, CryptoAgentsServiceError
 
 # Import schemas from schema.py
-from crypto_models.schema import (
+from eternal_zoo.schema import (
     Choice,
     Message,
     ModelCard,
