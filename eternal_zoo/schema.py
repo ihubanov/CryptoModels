@@ -11,7 +11,7 @@ import time
 import uuid
 from enum import Enum
 # Import configuration settings
-from crypto_models.config import config
+from eternal_zoo.config import config
 
 # Precompile regex patterns for better performance
 UNICODE_BOX_PATTERN = re.compile(r'\\u25[0-9a-fA-F]{2}')
