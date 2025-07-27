@@ -428,6 +428,7 @@ def handle_download(args) -> bool:
         sys.exit(1)
 
 def handle_run(args):
+    projector_path = None
     
     if args.hash:
         if args.hash not in HASH_TO_MODEL:
@@ -479,8 +480,10 @@ def handle_run(args):
         if not success:
             print_error(f"Failed to fetch model metadata for {args.hash}")
             sys.exit(1)
+
         if os.path.exists(local_path + "-projector"):
-            projector = local_path + "-projector"
+            projector_path = local_path + "-projector"
+            
         configs = [{
             "hash": args.hash,
             "model": local_path,
@@ -490,8 +493,8 @@ def handle_run(args):
             "model_name": metadata["folder_name"],
             "task": metadata.get("task", "chat"),
             "is_lora": metadata.get("is_lora", False),
-            "projector": projector,
-            "multimodal": False if projector is None else True,
+            "projector": projector_path,
+            "multimodal": False if projector_path is None else True,
             "on_demand": False,
             "lora": metadata.get("lora", False),
         }]
@@ -503,20 +506,23 @@ def handle_run(args):
             "model": args.hf_file,
             "projector": args.mmproj,
         }
-        success, local_model_path = asyncio.run(download_model_async(hf_data))
+        success, local_path = asyncio.run(download_model_async(hf_data))
         if not success:
             print_error(f"Failed to download model {args.hf_repo}")
             sys.exit(1)
 
         folder_name = os.path.basename(local_path)
         if args.model is not None:
-            local_model_path = os.path.join(local_path, args.model)
+            local_path = os.path.join(local_path, args.model)
 
         if args.mmproj is not None:
-            projector = os.path.join(local_model_path, args.mmproj)
+            mmproj_path = os.path.join(local_path, args.mmproj)
+            if os.path.exists(mmproj_path):
+                projector_path = mmproj_path
+            
         
         configs = [{
-            "model": local_model_path,
+            "model": local_path,
             "port": args.port,
             "host": args.host,
             "context_length": args.context_length,
@@ -524,11 +530,11 @@ def handle_run(args):
             "task": args.task,
             "config_name": args.config_name,
             "context_length": args.context_length,
-            "multimodal": True if args.mmproj else False,
             "on_demand": False,
             "lora": False,
             "is_lora": False,
-            "projector": projector,
+            "projector": projector_path,
+            "multimodal": True if projector_path is not None else False,
         }]
         return manager.start(configs)
 
