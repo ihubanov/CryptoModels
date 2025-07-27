@@ -294,6 +294,12 @@ def parse_args():
         help="🌐 URL to a multimodal projector file",
         metavar="URL"
     )
+    download_command.add_argument(
+        "--lora-config-path",
+        type=str,
+        help="🔍 Path to a lora config file",
+        metavar="PATH"
+    )
     # Model check command
     check_command = model_subparsers.add_parser(
         "check",
@@ -429,6 +435,8 @@ def handle_download(args) -> bool:
 
 def handle_run(args):
     projector_path = None
+    lora_config = None
+    model_name = None
     
     if args.hash:
         if args.hash not in HASH_TO_MODEL:
@@ -446,22 +454,48 @@ def handle_run(args):
         if not success:
             print_error(f"Failed to fetch model metadata for {args.hash}")
             sys.exit(1)
+        is_lora = metadata.get("is_lora", False)
+
+        if is_lora:
+            lora_config = {}
+            metadata_path = os.path.join(local_path, "metadata.json")
+            if not os.path.exists(metadata_path):
+                print_error(f"Lora model found but metadata.json is missing")
+                sys.exit(1)
+            with open(metadata_path, "r") as f:
+                lora_metadata = json.load(f)
+            lora_paths = lora_metadata.get("lora_paths", [])
+            lora_scales = lora_metadata.get("lora_scales", [])
+            base_model_hash = lora_metadata.get("base_model", None)
+            base_model_name = HASH_TO_MODEL[base_model_hash]
+            base_model_hf_data = FEATURED_MODELS[base_model_name]
+            model_name = base_model_name
+            success, base_model_local_path = asyncio.run(download_model_async(base_model_hf_data, base_model_hash))
+            if not success:
+                print_error(f"Failed to download base model {base_model_hash}")
+                sys.exit(1)
+            local_path = base_model_local_path
+            for lora_path, lora_scale in zip(lora_paths, lora_scales):
+                lora_config[lora_path] = lora_scale
+            
         if os.path.exists(local_path + "-projector"):
             projector = local_path + "-projector"
+
         configs = [{
             "hash": args.hash,
             "model": local_path,
             "port": args.port,
             "host": args.host,
             "context_length": args.context_length,
-            "model_name": metadata["folder_name"],
+            "model_name": model_name,
             "task": metadata.get("task", "chat"),
-            "is_lora": metadata.get("is_lora", False),
             "projector": projector,
             "multimodal": False if projector is None else True,
             "on_demand": False,
-            "lora": metadata.get("lora", False),
+            "lora_config": lora_config,
+            "is_lora": True if lora_config is not None else False,
         }]
+
         return manager.start(configs)
     
     if args.model_name:

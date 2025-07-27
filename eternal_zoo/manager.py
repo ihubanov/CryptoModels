@@ -108,15 +108,13 @@ class EternalZooManager:
         elif task == "chat":
             logger.info(f"Starting chat model: {config}")
             running_ai_command = self._build_chat_command(config, local_model_port)
-        # elif task == "image-generation":
-        #     logger.info(f"Starting image generation model: {config}")
-        #     if not shutil.which("mlx-flux"):
-        #         raise EternalZooServiceError("mlx-flux command not found in PATH")
-            
-        #     running_ai_command = self._build_image_generation_command(config, local_model_port)
-        #     service_metadata = self._create_service_metadata(
-        #         config, local_model_port
-        #     )
+        elif task == "image-generation":
+            logger.info(f"Starting image generation model: {config}")
+            if not shutil.which("mlx-flux"):
+                raise EternalZooServiceError("mlx-flux command not found in PATH")
+            running_ai_command = self._build_image_generation_command(config, local_model_port)
+        elif task == "image-edit":
+            raise NotImplementedError("Image edit is not implemented yet")
         else:
             raise ValueError(f"Invalid task: {task}")
 
@@ -1321,60 +1319,7 @@ class EternalZooManager:
         except Exception as e:
             logger.error(f"Error killing AI server: {str(e)}", exc_info=True)
             return False
-    
-    async def reload_ai_server(self, service_start_timeout: int = 120) -> bool:
-        """Reload the AI server process (async version for API usage)."""
-        try:
-            if not os.path.exists(self.msgpack_file):
-                logger.error("No service info found, cannot reload AI server")
-                return False
-                
-            # Load service details from the msgpack file
-            with open(self.msgpack_file, "rb") as f:
-                service_info = msgpack.load(f)
-                
-            running_ai_command = service_info.get("running_ai_command")
-            if not running_ai_command:
-                logger.error("No running_ai_command found in service info, cannot reload AI server")
-                return False
-                
-            logger.info(f"Reloading AI server with command: {running_ai_command}")
 
-            ai_log_stderr = self.logs_dir / "ai.log"
-            
-            try:
-                with open(ai_log_stderr, 'w') as stderr_log:
-                    ai_process = subprocess.Popen(
-                        running_ai_command,
-                        stderr=stderr_log,
-                        preexec_fn=os.setsid
-                    )
-                logger.info(f"AI logs written to {ai_log_stderr}")
-            except Exception as e:
-                logger.error(f"Error starting EternalZoo service: {str(e)}", exc_info=True)
-                return False
-            
-            # Wait for the process to start by checking the health endpoint
-            port = service_info["port"]
-            if not wait_for_health(port, timeout=service_start_timeout):
-                logger.error(f"AI server failed to start within {service_start_timeout} seconds")
-                return False
-            
-            # Check if the process is running
-            if ai_process.poll() is None:
-                # Update the service info with new PID
-                service_info["pid"] = ai_process.pid
-                with open(self.msgpack_file, "wb") as f:
-                    msgpack.dump(service_info, f)
-                logger.info(f"Successfully reloaded AI server with PID {ai_process.pid}")
-                return True
-            else:
-                logger.error(f"Failed to reload AI server: Process exited with code {ai_process.returncode}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error reloading AI server: {str(e)}", exc_info=True)
-            return False
     
     def get_service_info(self, path: str) -> Dict[str, Any]:
         """Get service info from msgpack file with error handling."""
@@ -1427,232 +1372,193 @@ class EternalZooManager:
             logger.error(f"Error updating LoRA: {str(e)}")
             return False
 
-    # def _build_image_generation_command(self, config: dict, port: int) -> list:
-    #     """Build the image-generation command with MLX Flux parameters and optional LoRA support."""
-    #     command = [
-    #         "mlx-flux",
-    #         "serve",
-    #         "--model-path", str(model_path),
-    #         "--config-name", config_name,
-    #         "--port", str(port),
-    #         "--host", host
-    #     ]
+    def _build_image_generation_command(self, config: dict, port: int) -> list:
+        """Build the image-generation command with MLX Flux parameters and optional LoRA support."""
+
+        model_path = config["model"]
+        config_name = config["model_name"]
+        lora_config = config.get("lora_config", None)
+        is_lora = config.get("is_lora", False)
+
+        if is_lora:
+            lora_paths = []
+            lora_scales = []
+            for key, value in lora_config.items():
+                lora_paths.append(value["path"])
+                lora_scales.append(value["scale"])
+
+        command = [
+            "mlx-flux",
+            "serve",
+            "--model-path", str(model_path),
+            "--config-name", config_name,
+            "--port", str(port),
+            "--host", "0.0.0.0"
+        ]
         
-    #     # Validate LoRA parameters
-    #     if lora_paths and lora_scales and len(lora_paths) != len(lora_scales):
-    #         raise ValueError(f"LoRA paths count ({len(lora_paths)}) must match scales count ({len(lora_scales)})")
+        # Validate LoRA parameters
+        if lora_paths and lora_scales and len(lora_paths) != len(lora_scales):
+            raise ValueError(f"LoRA paths count ({len(lora_paths)}) must match scales count ({len(lora_scales)})")
         
-    #     # Add LoRA paths if provided
-    #     if lora_paths:
-    #         lora_path_str = ",".join(lora_paths)
-    #         command.extend(["--lora-paths", lora_path_str])
+        # Add LoRA paths if provided
+        if lora_paths:
+            lora_path_str = ",".join(lora_paths)
+            command.extend(["--lora-paths", lora_path_str])
         
-    #     # Add LoRA scales if provided
-    #     if lora_scales:
-    #         lora_scale_str = ",".join(str(scale) for scale in lora_scales)
-    #         command.extend(["--lora-scales", lora_scale_str])
+        # Add LoRA scales if provided
+        if lora_scales:
+            lora_scale_str = ",".join(str(scale) for scale in lora_scales)
+            command.extend(["--lora-scales", lora_scale_str])
         
-    #     return command
+        return command
 
-    def _build_model_command(self, folder_name: str, local_model_path: str, local_ai_port: int, host: str, context_length: int) -> list:
-        """Build the appropriate command for a model based on its family."""
-        if "gemma-3n" in folder_name.lower():
-            template_path, best_practice_path = self._get_family_template_and_practice("gemma-3n")
-            return self._build_ai_command(
-                local_model_path, local_ai_port, host, context_length, template_path
-            )
-        elif "gemma-3" in folder_name.lower():
-            context_length = context_length // 2
-            template_path, best_practice_path = self._get_family_template_and_practice("gemma-3")
-            return self._build_ai_command(
-                local_model_path, local_ai_port, host, context_length, template_path
-            )
-        elif "lfm2" in folder_name.lower():
-            template_path, best_practice_path = self._get_family_template_and_practice("lfm2")
-            return self._build_ai_command(
-                local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
-            )
-        elif "devstral-small" in folder_name.lower():
-            template_path, best_practice_path = self._get_family_template_and_practice("devstral-small")
-            return self._build_ai_command(
-                local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
-            )
-        elif "openreasoning-nemotron" in folder_name.lower():
-            template_path, best_practice_path = self._get_family_template_and_practice("openreasoning-nemotron")
-            return self._build_ai_command(
-                local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
-            )
-        elif "qwen25" in folder_name.lower():
-            template_path, best_practice_path = self._get_family_template_and_practice("qwen25")
-            return self._build_ai_command(
-                local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
-            )
-        elif "dolphin-3.0" in folder_name.lower():
-            template_path, best_practice_path = self._get_family_template_and_practice("dolphin-3.0")
-            return self._build_ai_command(
-                local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
-            )
-        elif "qwen3" in folder_name.lower():
-            template_path, best_practice_path = self._get_family_template_and_practice("qwen3")
-            return self._build_ai_command(
-                local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
-            )
-        elif "llama" in folder_name.lower():
-            template_path, best_practice_path = self._get_family_template_and_practice("llama")
-            return self._build_ai_command(
-                local_model_path, local_ai_port, host, context_length, template_path, best_practice_path
-            )
-        else:
-            return self._build_ai_command(
-                local_model_path, local_ai_port, host, context_length
-            )
 
-    async def switch_model(self, target_hash: str, service_start_timeout: int = 120) -> bool:
-        """
-        Switch to a different model that was registered during multi-model start.
-        This will offload the currently active model and load the requested model.
+    # async def switch_model(self, target_hash: str, service_start_timeout: int = 120) -> bool:
+    #     """
+    #     Switch to a different model that was registered during multi-model start.
+    #     This will offload the currently active model and load the requested model.
 
-        Args:
-            target_hash (str): Hash of the model to switch to.
-            service_start_timeout (int): Timeout for service startup in seconds.
+    #     Args:
+    #         target_hash (str): Hash of the model to switch to.
+    #         service_start_timeout (int): Timeout for service startup in seconds.
 
-        Returns:
-            bool: True if model switch was successful, False otherwise.
-        """
-        try:
-            if not os.path.exists(self.msgpack_file):
-                logger.error("No service info found, cannot switch model")
-                return False
+    #     Returns:
+    #         bool: True if model switch was successful, False otherwise.
+    #     """
+    #     try:
+    #         if not os.path.exists(self.msgpack_file):
+    #             logger.error("No service info found, cannot switch model")
+    #             return False
 
-            # Load service details
-            with open(self.msgpack_file, "rb") as f:
-                service_info = msgpack.load(f)
+    #         # Load service details
+    #         with open(self.msgpack_file, "rb") as f:
+    #             service_info = msgpack.load(f)
 
-            # Check if target model is available
-            models = service_info.get("models", {})
-            if target_hash not in models:
-                logger.error(f"Model {target_hash} not found in available models")
-                return False
+    #         # Check if target model is available
+    #         models = service_info.get("models", {})
+    #         if target_hash not in models:
+    #             logger.error(f"Model {target_hash} not found in available models")
+    #             return False
 
-            # Check if model is already active
-            if models[target_hash].get("active", False):
-                logger.info(f"Model {target_hash} is already active")
-                return True
+    #         # Check if model is already active
+    #         if models[target_hash].get("active", False):
+    #             logger.info(f"Model {target_hash} is already active")
+    #             return True
 
-            target_model = models[target_hash]
-            logger.info(f"Switching to model: {target_hash}")
+    #         target_model = models[target_hash]
+    #         logger.info(f"Switching to model: {target_hash}")
 
-            # Kill current AI server process
-            if not await self.kill_ai_server():
-                logger.error("Failed to stop current AI server")
-                return False
+    #         # Kill current AI server process
+    #         if not await self.kill_ai_server():
+    #             logger.error("Failed to stop current AI server")
+    #             return False
 
-            # Build command for target model
-            local_model_path = target_model["local_model_path"]
-            metadata = target_model["metadata"]
-            folder_name = metadata.get("folder_name", "")
-            task = metadata.get("task", "chat")
-            config_name = metadata.get("config_name", "flux-dev")
-            is_lora = metadata.get("lora", False)
-            gguf_folder = metadata.get("gguf_folder", False)
+    #         # Build command for target model
+    #         local_model_path = target_model["local_model_path"]
+    #         metadata = target_model["metadata"]
+    #         folder_name = metadata.get("folder_name", "")
+    #         task = metadata.get("task", "chat")
+    #         config_name = metadata.get("config_name", "flux-dev")
+    #         is_lora = metadata.get("lora", False)
+    #         gguf_folder = metadata.get("gguf_folder", False)
             
-            # Get current service configuration
-            local_ai_port = service_info["port"]
-            host = service_info.get("host", "localhost")
-            context_length = service_info.get("context_length", 32768)
+    #         # Get current service configuration
+    #         local_ai_port = service_info["port"]
+    #         host = service_info.get("host", "localhost")
+    #         context_length = service_info.get("context_length", 32768)
 
-            # Build appropriate command based on task
-            if task == "embed":
-                running_ai_command = self._build_embed_command(local_model_path, local_ai_port, host)
-            elif task == "image-generation":
-                if not shutil.which("mlx-flux"):
-                    raise EternalZooServiceError("mlx-flux command not found in PATH")
+    #         # Build appropriate command based on task
+    #         if task == "embed":
+    #             running_ai_command = self._build_embed_command(local_model_path, local_ai_port, host)
+    #         elif task == "image-generation":
+    #             if not shutil.which("mlx-flux"):
+    #                 raise EternalZooServiceError("mlx-flux command not found in PATH")
                 
-                # Initialize LoRA variables
-                lora_paths = None
-                lora_scales = None
-                effective_model_path = local_model_path
+    #             # Initialize LoRA variables
+    #             lora_paths = None
+    #             lora_scales = None
+    #             effective_model_path = local_model_path
                 
-                if is_lora:
-                    base_model_path = target_model["base_model_path"]
-                    lora_config = target_model["lora_config"]       
-                    effective_model_path = base_model_path
-                    lora_paths = []
-                    lora_scales = []
-                    for key, value in lora_config.items():
-                        lora_paths.append(value["path"])
-                        lora_scales.append(value["scale"])
+    #             if is_lora:
+    #                 base_model_path = target_model["base_model_path"]
+    #                 lora_config = target_model["lora_config"]       
+    #                 effective_model_path = base_model_path
+    #                 lora_paths = []
+    #                 lora_scales = []
+    #                 for key, value in lora_config.items():
+    #                     lora_paths.append(value["path"])
+    #                     lora_scales.append(value["scale"])
                 
-                running_ai_command = self._build_image_generation_command(
-                    effective_model_path, local_ai_port, host, config_name, lora_paths, lora_scales
-                )
-            else:
-                is_multimodal = target_model["multimodal"]
-                projector_path = target_model["local_projector_path"]
+    #             running_ai_command = self._build_image_generation_command(
+    #                 effective_model_path, local_ai_port, host, config_name, lora_paths, lora_scales
+    #             )
+    #         else:
+    #             is_multimodal = target_model["multimodal"]
+    #             projector_path = target_model["local_projector_path"]
                 
-                if gguf_folder:
-                    # list all files in the folder
-                    files = os.listdir(local_model_path)
-                    # filter files that end with .gguf
-                    files = [f for f in files if f.endswith(".gguf")]
-                    # sort files by name
-                    files.sort()
-                    local_model_path = os.path.join(local_model_path, files[0])
+    #             if gguf_folder:
+    #                 # list all files in the folder
+    #                 files = os.listdir(local_model_path)
+    #                 # filter files that end with .gguf
+    #                 files = [f for f in files if f.endswith(".gguf")]
+    #                 # sort files by name
+    #                 files.sort()
+    #                 local_model_path = os.path.join(local_model_path, files[0])
                 
-                running_ai_command = self._build_model_command(folder_name, local_model_path, local_ai_port, host, context_length)
+    #             running_ai_command = self._build_model_command(folder_name, local_model_path, local_ai_port, host, context_length)
 
-                if is_multimodal:
-                    running_ai_command.extend([
-                        "--mmproj", str(projector_path)
-                    ])
+    #             if is_multimodal:
+    #                 running_ai_command.extend([
+    #                     "--mmproj", str(projector_path)
+    #                 ])
 
-            logger.info(f"Starting new model with command: {running_ai_command}")
+    #         logger.info(f"Starting new model with command: {running_ai_command}")
 
-            # Start new AI server process
-            ai_log_stderr = self.logs_dir / "ai.log"
-            try:
-                with open(ai_log_stderr, 'w') as stderr_log:
-                    ai_process = subprocess.Popen(
-                        running_ai_command,
-                        stderr=stderr_log,
-                        preexec_fn=os.setsid
-                    )
-                logger.info(f"AI logs written to {ai_log_stderr}")
-            except Exception as e:
-                logger.error(f"Error starting new model: {str(e)}", exc_info=True)
-                return False
+    #         # Start new AI server process
+    #         ai_log_stderr = self.logs_dir / "ai.log"
+    #         try:
+    #             with open(ai_log_stderr, 'w') as stderr_log:
+    #                 ai_process = subprocess.Popen(
+    #                     running_ai_command,
+    #                     stderr=stderr_log,
+    #                     preexec_fn=os.setsid
+    #                 )
+    #             logger.info(f"AI logs written to {ai_log_stderr}")
+    #         except Exception as e:
+    #             logger.error(f"Error starting new model: {str(e)}", exc_info=True)
+    #             return False
 
-            # Wait for the new process to start
-            if not wait_for_health(local_ai_port, timeout=service_start_timeout):
-                logger.error(f"New model failed to start within {service_start_timeout} seconds")
-                return False
+    #         # Wait for the new process to start
+    #         if not wait_for_health(local_ai_port, timeout=service_start_timeout):
+    #             logger.error(f"New model failed to start within {service_start_timeout} seconds")
+    #             return False
 
-            # Update service metadata
-            service_info["hash"] = target_hash
-            service_info["pid"] = ai_process.pid
-            service_info["running_ai_command"] = running_ai_command
-            service_info["local_text_path"] = local_model_path
-            service_info["family"] = metadata.get("family", None)
-            service_info["folder_name"] = folder_name
-            service_info["ram"] = metadata.get("ram", None)
-            service_info["task"] = task
-            service_info["multimodal"] = target_model.get("multimodal", False)
-            service_info["local_projector_path"] = target_model.get("local_projector_path")
+    #         # Update service metadata
+    #         service_info["hash"] = target_hash
+    #         service_info["pid"] = ai_process.pid
+    #         service_info["running_ai_command"] = running_ai_command
+    #         service_info["local_text_path"] = local_model_path
+    #         service_info["family"] = metadata.get("family", None)
+    #         service_info["folder_name"] = folder_name
+    #         service_info["ram"] = metadata.get("ram", None)
+    #         service_info["task"] = task
+    #         service_info["multimodal"] = target_model.get("multimodal", False)
+    #         service_info["local_projector_path"] = target_model.get("local_projector_path")
 
-            # Update active model flags
-            for hash_val in models:
-                models[hash_val]["active"] = (hash_val == target_hash)
+    #         # Update active model flags
+    #         for hash_val in models:
+    #             models[hash_val]["active"] = (hash_val == target_hash)
 
-            # Save updated service info
-            with open(self.msgpack_file, "wb") as f:
-                msgpack.dump(service_info, f)
+    #         # Save updated service info
+    #         with open(self.msgpack_file, "wb") as f:
+    #             msgpack.dump(service_info, f)
 
-            logger.info(f"Successfully switched to model {target_hash} with PID {ai_process.pid}")
-            return True
+    #         logger.info(f"Successfully switched to model {target_hash} with PID {ai_process.pid}")
+    #         return True
 
-        except Exception as e:
-            logger.error(f"Error switching model: {str(e)}", exc_info=True)
-            return False
+    #     except Exception as e:
+    #         logger.error(f"Error switching model: {str(e)}", exc_info=True)
+    #         return False
 
     def get_available_models(self) -> Dict[str, Dict[str, Any]]:
         """
@@ -1668,22 +1574,31 @@ class EternalZooManager:
             logger.error(f"Error getting available models: {str(e)}")
             return {}
 
-    def get_active_model(self) -> Optional[str]:
+    def get_active_model(self) -> List[Dict[str, Any]]:
         """
-        Get the hash of the currently active model.
+        Get the list of active models.
+        """
+        service_info = self.get_service_info()
+        ai_services = service_info.get("ai_services", [])
+        active_models = []
+        for ai_service in ai_services:
+            if ai_service["active"]:
+                active_models.append(ai_service)
+        return active_models
+        
 
-        Returns:
-            Optional[str]: Hash of the active model, or None if no model is active.
+    def get_models_by_task(self, task: str) -> List[Dict[str, Any]]:
         """
-        try:
-            models = self.get_available_models()
-            for hash_val, model_info in models.items():
-                if model_info.get("active", False):
-                    return hash_val
-            return None
-        except Exception as e:
-            logger.error(f"Error getting active model: {str(e)}")
-            return None
+        Get the list of models by task.
+        """
+        models = []
+        service_info = self.get_service_info()
+        ai_services = service_info.get("ai_services", [])
+        for ai_service in ai_services:
+            if ai_service["task"] == task:
+                models.append(ai_service)
+        return models
+        
 
     def _validate_lora_metadata(self, lora_metadata: dict) -> tuple[bool, str]:
         """Validate LoRA metadata structure and return validation result."""

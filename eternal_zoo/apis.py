@@ -10,7 +10,6 @@ import asyncio
 import time
 import json
 import uuid
-import psutil
 # Import configuration settings
 from json_repair import repair_json
 from typing import Dict, Any, Optional
@@ -97,13 +96,6 @@ def get_service_info() -> Dict[str, Any]:
     except EternalZooServiceError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
-def get_service_port() -> int:
-    """Get service port with caching and error handling."""
-    service_info = get_service_info()
-    if "port" not in service_info:
-        raise HTTPException(status_code=503, detail="Service port not configured")
-    return service_info["port"]
-
 def convert_request_to_dict(request) -> Dict[str, Any]:
     """Convert request object to dictionary, supporting both Pydantic v1 and v2."""
     return request.model_dump() if hasattr(request, "model_dump") else request.dict()
@@ -182,13 +174,25 @@ class ServiceHandler:
             )
     
     @staticmethod
-    async def generate_text_response(request: ChatCompletionRequest, service_info: Optional[Dict[str, Any]] = None):
+    async def generate_text_response(request: ChatCompletionRequest):
         """Generate a response for chat completion requests, supporting both streaming and non-streaming."""
-        # Use provided service_info or get it if not provided
-        if service_info is None:
-            service_info = get_service_info()
+        service_info = get_service_info()
+        ai_services = service_info.get("ai_services", [])
+        model_id = request.model
+        chat_models = []
+
+        for ai_service in ai_services:
+            task = ai_service["task"]
+            if task == "chat":
+                chat_models.append(ai_service)
+
+        if len(chat_models) == 0:
+            raise HTTPException(status_code=404, detail=f"No chat models found")
         
-        port = get_service_port()
+        if len(chat_models) > 1:
+            raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
+        else:
+            raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
         
         if request.is_vision_request():
             if not service_info.get("multimodal", False):
