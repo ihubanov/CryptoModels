@@ -11,7 +11,7 @@ from rich import print as rprint
 
 from eternal_zoo.version import __version__
 from eternal_zoo.config import DEFAULT_CONFIG
-from eternal_zoo.core import EternalZooManager
+from eternal_zoo.manager import EternalZooManager
 from eternal_zoo.upload import upload_folder_to_lighthouse
 from eternal_zoo.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH
 from eternal_zoo.models import HASH_TO_MODEL, FEATURED_MODELS, MODEL_TO_HASH
