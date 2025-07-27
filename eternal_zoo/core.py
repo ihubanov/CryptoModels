@@ -84,19 +84,8 @@ class EternalZooManager:
             self._get_model_best_practice_path(model_family)
         )
 
-    def start_multi_model(self, configs: List[dict]) -> bool:
-        """
-        Start the EternalZoo service with a given config.
-
-        Args:
-            config (dict): The config to start the service with.
-
-        Returns:
-            bool: True if service started successfully, False otherwise.
-        """
-
         
-    def start(self, config: dict, port: int = 8080) -> bool:
+    def start(self, configs: List[dict], port: int = 8080) -> bool:
         """
         Start the EternalZoo service with a given config.
 
@@ -106,34 +95,35 @@ class EternalZooManager:
         Returns:
             bool: True if service started successfully, False otherwise.
         """
+
+        config = configs[0]
 
         if not self._check_port_availability(config.get("host", "0.0.0.0"), port):
             raise ServiceStartError(f"Port {port} is already in use on {config.get('host', '0.0.0.0')}")
         
         if self.ai_service_file.exists():
-            with open(self.ai_service_file, 'rb') as f:
-                ai_services = msgpack.unpack(f)
-        else:
-            ai_services = []
+            self.stop()
+
+        ai_services = []
+        api_service = {
+            "host": config.get("host", "0.0.0.0"),
+            "port": port,
+        }
 
         task = config.get("task", "chat")
         running_ai_command = None
-        ai_service = {}
+        ai_service = {
+            "config": config,
+        }
 
         local_model_port = self._get_free_port()
 
         if task == "embed":
             logger.info(f"Starting embed model: {config}")
             running_ai_command = self._build_embed_command(config, local_model_port)
-            service_metadata = self._create_service_metadata(
-                config, local_model_port
-            )
         elif task == "chat":
             logger.info(f"Starting chat model: {config}")
             running_ai_command = self._build_chat_command(config, local_model_port)
-            service_metadata = self._create_service_metadata(
-                config, local_model_port
-            )
         # elif task == "image-generation":
         #     logger.info(f"Starting image generation model: {config}")
         #     if not shutil.which("mlx-flux"):
@@ -189,11 +179,6 @@ class EternalZooManager:
             "--log-level", "info"
         ]
 
-        api_data = {
-            "host": config.get("host", "0.0.0.0"),
-            "port": port,
-        }
-
         api_log_stderr = self.logs_dir / "api.log"
 
         logger.info(f"Starting API process: {' '.join(uvicorn_command)}")
@@ -206,12 +191,12 @@ class EternalZooManager:
                     preexec_fn=os.setsid
                 )
 
-                api_data["pid"] = api_process.pid
+                api_service["pid"] = api_process.pid
 
                 logger.info(f"API logs written to {api_log_stderr}")
 
             with open(self.api_service_file, 'wb') as f:
-                msgpack.pack(api_data, f)
+                msgpack.pack(api_service, f)
 
             logger.info(f"API service metadata written to {self.api_service_file}")
         except Exception as e:
@@ -219,336 +204,13 @@ class EternalZooManager:
             logger.error(f"Error writing proxy service metadata: {str(e)}", exc_info=True)
             return False
         
+        self.update_service_info({
+            "api_service": api_service,
+            "ai_services": ai_services,
+        })
 
         return True
         
-        # Split by comma and clean whitespace
-        hashes_list = [h.strip() for h in hashes.split(',') if h.strip()]
-        
-        if not hashes_list:
-            raise ValueError("At least one model hash is required to start the service")
-        
-        # Use config defaults if not provided
-        port = port or config.network.DEFAULT_PORT
-        host = host or config.network.DEFAULT_HOST
-        context_length = context_length or config.model.DEFAULT_CONTEXT_LENGTH
-
-        # Main model is the first hash (on_demand: false)
-        main_hash = hashes_list[0]
-        on_demand_hashes = hashes_list[1:] if len(hashes_list) > 1 else []
-
-        # Check if there's already a start process running
-        existing_process = self.get_start_process_info()
-        if existing_process:
-            logger.info(f"Found existing start process (PID: {existing_process['pid']}) for model {existing_process['hash']}")
-            logger.info("Attempting to acquire lock with force takeover capability...")
-        else:
-            logger.info("No existing start process found, acquiring lock...")
-        
-        # Acquire process lock to prevent concurrent starts (with force takeover)
-        if not self._acquire_start_lock(main_hash, host, port):
-            logger.error("Failed to acquire start lock")
-            return False
-        
-        logger.info("Successfully acquired start lock, proceeding with service startup...")
-        
-        # Track processes for cleanup on interruption
-        ai_process = None
-        apis_process = None
-        
-        def cleanup_processes():
-            """Clean up any running processes."""
-            if ai_process and ai_process.poll() is None:
-                logger.info("Cleaning up AI process due to interruption...")
-                try:
-                    ai_process.terminate()
-                    ai_process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    ai_process.kill()
-                except Exception as e:
-                    logger.error(f"Error cleaning up AI process: {e}")
-            
-            if apis_process and apis_process.poll() is None:
-                logger.info("Cleaning up API process due to interruption...")
-                try:
-                    apis_process.terminate()
-                    apis_process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    apis_process.kill()
-                except Exception as e:
-                    logger.error(f"Error cleaning up API process: {e}")
-        
-        def signal_handler(signum, frame):
-            """Handle interruption signals."""
-            logger.info(f"Received signal {signum}, cleaning up processes...")
-            cleanup_processes()
-            self._release_start_lock()
-            exit(1)
-        
-        # Set up signal handlers for graceful cleanup
-        original_sigint = signal.signal(signal.SIGINT, signal_handler)
-        original_sigterm = signal.signal(signal.SIGTERM, signal_handler)
-        
-        try:
-            # Check if the requested port is available before doing expensive operations
-            if not self._check_port_availability(host, port):
-                raise ServiceStartError(f"Port {port} is already in use on {host}")
-
-            try:
-                logger.info(f"Starting EternalZoo service with {len(hashes_list)} models")
-                logger.info(f"Main model hash: {main_hash}")
-                if on_demand_hashes:
-                    logger.info(f"On-demand models: {on_demand_hashes}")
-                
-                # Download and prepare all models
-                models_info = {}
-                for i, hash_val in enumerate(hashes_list):
-                    
-                    logger.info(f"Downloading model {i+1}/{len(hashes_list)}: {hash_val}")
-                    success, local_model_path = asyncio.run(download_model_async(hash_val))
-                    if not success:
-                        raise ModelNotFoundError(f"Model file not found for hash: {hash_val}")
-                    
-                    success, metadata = asyncio.run(fetch_model_metadata_async(hash_val))
-                    
-                    if not success:
-                        raise ModelNotFoundError(f"Model metadata not found for hash: {hash_val}")
-                    
-                    metadata.pop("files")
-                    
-                    models_info[hash_val] = {
-                        "local_model_path": local_model_path,
-                        "metadata": metadata,
-                        "on_demand": i > 0,  # First model is not on-demand
-                        "context_length": context_length,
-                    }
-                    
-                    is_lora = metadata.get("lora", False)
-                    lora_config = None
-                    if is_lora:
-                        lora_config = {}
-                        lora_metadata_path = os.path.join(local_model_path, "metadata.json")
-                        lora_metadata, error_msg = self._load_lora_metadata(lora_metadata_path)
-                        if lora_metadata is None:
-                            logger.warning(f"Error loading LoRA metadata: {error_msg}")
-                            continue
-                        base_model_hash = lora_metadata["base_model"]
-                        success, base_model_path = asyncio.run(download_model_async(base_model_hash))
-                        if not success:
-                            raise ModelNotFoundError(f"Base model file not found for hash: {base_model_hash}")
-                        lora_scales = lora_metadata["lora_scales"]
-                        if len(lora_metadata["lora_paths"]) == 0:
-                            logger.warning(f"No LoRA paths found in metadata for hash: {hash_val}")
-                            continue
-                        for i, lora_path in enumerate(lora_metadata["lora_paths"]):
-                            absolute_lora_path = os.path.join(local_model_path, lora_path)
-                            lora_name = os.path.splitext(lora_path)[0]
-                            lora_config[lora_name] = {
-                                "path": absolute_lora_path,
-                                "scale": lora_scales[i]
-                            }
-                        models_info[hash_val]["lora_config"] = lora_config
-                        models_info[hash_val]["base_model_path"] = base_model_path
-
-                    is_multimodal, projector_path = self._check_multimodal_support(local_model_path) 
-                    models_info[hash_val]["multimodal"] = is_multimodal
-                    models_info[hash_val]["local_projector_path"] = projector_path
-
-                # Check if any existing model is running
-                model_running = self.get_running_model()
-                if model_running:
-                    if model_running == main_hash:
-                        logger.warning(f"Main model '{main_hash}' already running on port {port}")
-                        return True
-                    logger.info(f"Stopping existing model '{model_running}' on port {port}")
-                    self.stop(force=True)
-
-                # Start the main model
-                main_model_info = models_info[main_hash]
-                local_model_path = main_model_info["local_model_path"]
-                metadata = main_model_info["metadata"]
-                
-                folder_name = metadata.get("folder_name", "")
-                family = metadata.get("family", None)
-                ram = metadata.get("ram", None)
-                task = metadata.get("task", "chat")
-                gguf_folder = metadata.get("gguf_folder", False)
-                config_name = metadata.get("config_name", "flux-dev")
-                is_lora = metadata.get("lora", False)
-                local_ai_port = self._get_free_port()
-                
-                # Build command and service metadata for main model
-                if task == "embed":
-                    running_ai_command = self._build_embed_command(local_model_path, local_ai_port, host)
-                    service_metadata = self._create_service_metadata(
-                        main_hash, local_model_path, local_ai_port, port, context_length, task, False, None
-                    )
-                elif task == "image-generation":
-                    if not shutil.which("mlx-flux"):
-                        raise EternalZooServiceError("mlx-flux command not found in PATH")
-                    
-                    effective_model_path = local_model_path
-                    lora_paths = None
-                    lora_scales = None
-                    
-                    if is_lora:
-                        base_model_path = main_model_info["base_model_path"]
-                        lora_config = main_model_info["lora_config"]
-
-                        lora_paths = []
-                        lora_scales = []
-                        for key, value in lora_config.items():
-                            lora_paths.append(value["path"])
-                            lora_scales.append(value["scale"])
-                        
-                        effective_model_path = base_model_path
-                        
-                        logger.info(f"LoRA model detected - using base model: {base_model_path}")
-                        logger.info(f"LoRA paths: {lora_paths}")
-                        logger.info(f"LoRA scales: {lora_scales}")
-                                
-                    running_ai_command = self._build_image_generation_command(
-                        effective_model_path, local_ai_port, host, config_name, lora_paths, lora_scales
-                    )
-                    service_metadata = self._create_service_metadata(
-                        main_hash, local_model_path, local_ai_port, port, context_length, task, False, None
-                    )
-                else:
-                    is_multimodal = main_model_info["multimodal"]
-                    projector_path = main_model_info["local_projector_path"]
-                    
-                    if gguf_folder:
-                        # list all files in the folder
-                        files = os.listdir(local_model_path)
-                        # filter files that end with .gguf
-                        files = [f for f in files if f.endswith(".gguf")]
-                        # sort files by name
-                        files.sort()
-                        local_model_path = os.path.join(local_model_path, files[0])
-                    
-                    service_metadata = self._create_service_metadata(
-                        main_hash, local_model_path, local_ai_port, port, context_length, 
-                        task, is_multimodal, projector_path
-                    )
-
-                    # Build command based on model family
-                    running_ai_command = self._build_model_command(folder_name, local_model_path, local_ai_port, host, context_length)
-
-                    if service_metadata["multimodal"]:
-                        running_ai_command.extend([
-                            "--mmproj", str(projector_path)
-                        ])
-
-                # Add main model metadata
-                service_metadata["family"] = family
-                service_metadata["folder_name"] = folder_name
-                service_metadata["ram"] = ram
-                service_metadata["running_ai_command"] = running_ai_command
-                created = int(time.time())
-                
-                # Add multi-model information
-                service_metadata["models"] = {}
-                for hash_val, model_info in models_info.items():
-                    service_metadata["models"][hash_val] = {
-                        "local_model_path": model_info["local_model_path"],
-                        "local_projector_path": model_info["local_projector_path"],
-                        "metadata": model_info["metadata"],
-                        "on_demand": model_info["on_demand"],
-                        "active": hash_val == main_hash,
-                        "lora_config": model_info.get("lora_config", None),
-                        "base_model_path": model_info.get("base_model_path", None),
-                        "context_length": model_info.get("context_length", 32768),
-                        "created": created,
-                        "multimodal": model_info.get("multimodal", False)
-                    }
-            
-                logger.info(f"Starting main model process: {' '.join(running_ai_command)}")
-                
-                # Create log files for AI process
-                ai_log_stderr = self.logs_dir / "ai.log"
-                try:
-                    with open(ai_log_stderr, 'w') as stderr_log:
-                        ai_process = subprocess.Popen(
-                            running_ai_command,
-                            stderr=stderr_log,
-                            preexec_fn=os.setsid
-                        )
-                    logger.info(f"AI logs written to {ai_log_stderr}")
-                except Exception as e:
-                    logger.error(f"Error starting EternalZoo service: {str(e)}", exc_info=True)
-                    cleanup_processes()
-                    return False
-        
-                if not wait_for_health(local_ai_port):
-                    logger.error(f"Service failed to start within 600 seconds")
-                    cleanup_processes()
-                    return False
-                
-                logger.info(f"[ETERNALZOO] Main model service started on port {local_ai_port}")
-
-                # Start the FastAPI app
-                uvicorn_command = [
-                    "uvicorn",
-                    "eternal_zoo.apis:app",
-                    "--host", host,
-                    "--port", str(port),
-                    "--log-level", "info"
-                ]
-                logger.info(f"Starting API process: {' '.join(uvicorn_command)}")
-                
-                api_log_stderr = self.logs_dir / "api.log"
-                try:
-                    with open(api_log_stderr, 'w') as stderr_log:
-                        apis_process = subprocess.Popen(
-                            uvicorn_command,
-                            stderr=stderr_log,
-                            preexec_fn=os.setsid
-                        )
-                    logger.info(f"API logs written to {api_log_stderr}")
-                except Exception as e:
-                    logger.error(f"Error starting FastAPI app: {str(e)}", exc_info=True)
-                    cleanup_processes()
-                    return False
-                
-                if not wait_for_health(port):
-                    logger.error(f"API service failed to start within 600 seconds")
-                    cleanup_processes()
-                    return False
-
-                logger.info(f"Multi-model service started on port {port}")
-                if on_demand_hashes:
-                    logger.info(f"On-demand models ready: {on_demand_hashes}")
-
-                # Update service metadata with process IDs
-                service_metadata.update({
-                    "pid": ai_process.pid,
-                    "app_pid": apis_process.pid
-                })
-
-                self._dump_running_service(service_metadata)
-                # Update service metadata to the FastAPI app
-                try:
-                    update_url = f"http://localhost:{port}/update"
-                    response = requests.post(update_url, json=service_metadata, timeout=10)
-                    response.raise_for_status()
-                except requests.exceptions.RequestException as e:
-                    logger.error(f"Failed to update service metadata: {str(e)}")
-                    cleanup_processes()
-                    return False
-                
-                return True
-
-            except Exception as e:
-                logger.error(f"Error starting EternalZoo service: {str(e)}", exc_info=True)
-                cleanup_processes()
-                return False
-                
-        finally:
-            # Restore original signal handlers
-            signal.signal(signal.SIGINT, original_sigint)
-            signal.signal(signal.SIGTERM, original_sigterm)
-            # Always remove the lock when done (success or failure)
-            self._release_start_lock()
 
     def get_running_model(self) -> Optional[str]:
         """
@@ -1145,22 +807,6 @@ class EternalZooManager:
                 for key, value in best_practice.items():
                     command.extend([f"--{key}", str(value)])
         return command
-
-    
-    def _check_multimodal_support(self, local_model_path: str) -> tuple[bool, Optional[str]]:
-        """
-        Check if model supports multimodal with single file check.
-        Returns (is_multimodal, projector_path)
-        """
-        projector_path = f"{local_model_path}-projector"
-        is_multimodal = os.path.exists(projector_path)
-        return is_multimodal, projector_path if is_multimodal else None
-
-    def _create_service_metadata(self, config: dict, port: int) -> dict:
-        """Create service metadata dictionary with all required fields."""
-        metadata = config
-        metadata["port"] = port
-        return metadata
 
     def _validate_lock_data(self, lock_data: dict) -> tuple[bool, str]:
         """

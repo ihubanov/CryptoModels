@@ -12,13 +12,13 @@ import json
 import uuid
 import psutil
 # Import configuration settings
-from eternal_zoo.config import config
 from json_repair import repair_json
 from typing import Dict, Any, Optional
+from eternal_zoo.config import DEFAULT_CONFIG
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from eternal_zoo.core import EternalZooManager, CryptoAgentsServiceError
+from eternal_zoo.core import EternalZooManager, EternalZooServiceError
 
 # Import schemas from schema.py
 from eternal_zoo.schema import (
@@ -62,39 +62,39 @@ eternal_zoo_manager = EternalZooManager()
 
 
 # Performance constants from config
-IDLE_TIMEOUT = config.performance.IDLE_TIMEOUT
-UNLOAD_CHECK_INTERVAL = config.performance.UNLOAD_CHECK_INTERVAL
-UNLOAD_LOG_INTERVAL = config.performance.UNLOAD_LOG_INTERVAL
-UNLOAD_MAX_CONSECUTIVE_ERRORS = config.performance.UNLOAD_MAX_CONSECUTIVE_ERRORS
-UNLOAD_ERROR_SLEEP_MULTIPLIER = config.performance.UNLOAD_ERROR_SLEEP_MULTIPLIER
-STREAM_CLEANUP_INTERVAL = config.performance.STREAM_CLEANUP_INTERVAL
-STREAM_CLEANUP_ERROR_SLEEP = config.performance.STREAM_CLEANUP_ERROR_SLEEP
-STREAM_STALE_TIMEOUT = config.performance.STREAM_STALE_TIMEOUT
-MODEL_SWITCH_VERIFICATION_DELAY = config.performance.MODEL_SWITCH_VERIFICATION_DELAY
-MODEL_SWITCH_MAX_RETRIES = config.performance.MODEL_SWITCH_MAX_RETRIES
-MODEL_SWITCH_STREAM_TIMEOUT = config.performance.MODEL_SWITCH_STREAM_TIMEOUT
-QUEUE_BACKPRESSURE_TIMEOUT = config.performance.QUEUE_BACKPRESSURE_TIMEOUT
-PROCESS_CHECK_INTERVAL = config.performance.PROCESS_CHECK_INTERVAL
-SHUTDOWN_TASK_TIMEOUT = config.performance.SHUTDOWN_TASK_TIMEOUT
-SHUTDOWN_SERVER_TIMEOUT = config.performance.SHUTDOWN_SERVER_TIMEOUT
-SHUTDOWN_CLIENT_TIMEOUT = config.performance.SHUTDOWN_CLIENT_TIMEOUT
-SERVICE_START_TIMEOUT = config.performance.SERVICE_START_TIMEOUT
-POOL_CONNECTIONS = config.performance.POOL_CONNECTIONS
-POOL_KEEPALIVE = config.performance.POOL_KEEPALIVE
-HTTP_TIMEOUT = config.performance.HTTP_TIMEOUT
-STREAM_TIMEOUT = config.performance.STREAM_TIMEOUT
-MAX_RETRIES = config.performance.MAX_RETRIES
-RETRY_DELAY = config.performance.RETRY_DELAY
-MAX_QUEUE_SIZE = config.performance.MAX_QUEUE_SIZE
-HEALTH_CHECK_INTERVAL = config.performance.HEALTH_CHECK_INTERVAL
-STREAM_CHUNK_SIZE = config.performance.STREAM_CHUNK_SIZE
+IDLE_TIMEOUT = DEFAULT_CONFIG.performance.IDLE_TIMEOUT
+UNLOAD_CHECK_INTERVAL = DEFAULT_CONFIG.performance.UNLOAD_CHECK_INTERVAL
+UNLOAD_LOG_INTERVAL = DEFAULT_CONFIG.performance.UNLOAD_LOG_INTERVAL
+UNLOAD_MAX_CONSECUTIVE_ERRORS = DEFAULT_CONFIG.performance.UNLOAD_MAX_CONSECUTIVE_ERRORS
+UNLOAD_ERROR_SLEEP_MULTIPLIER = DEFAULT_CONFIG.performance.UNLOAD_ERROR_SLEEP_MULTIPLIER
+STREAM_CLEANUP_INTERVAL = DEFAULT_CONFIG.performance.STREAM_CLEANUP_INTERVAL
+STREAM_CLEANUP_ERROR_SLEEP = DEFAULT_CONFIG.performance.STREAM_CLEANUP_ERROR_SLEEP
+STREAM_STALE_TIMEOUT = DEFAULT_CONFIG.performance.STREAM_STALE_TIMEOUT
+MODEL_SWITCH_VERIFICATION_DELAY = DEFAULT_CONFIG.performance.MODEL_SWITCH_VERIFICATION_DELAY
+MODEL_SWITCH_MAX_RETRIES = DEFAULT_CONFIG.performance.MODEL_SWITCH_MAX_RETRIES
+MODEL_SWITCH_STREAM_TIMEOUT = DEFAULT_CONFIG.performance.MODEL_SWITCH_STREAM_TIMEOUT
+QUEUE_BACKPRESSURE_TIMEOUT = DEFAULT_CONFIG.performance.QUEUE_BACKPRESSURE_TIMEOUT
+PROCESS_CHECK_INTERVAL = DEFAULT_CONFIG.performance.PROCESS_CHECK_INTERVAL
+SHUTDOWN_TASK_TIMEOUT = DEFAULT_CONFIG.performance.SHUTDOWN_TASK_TIMEOUT
+SHUTDOWN_SERVER_TIMEOUT = DEFAULT_CONFIG.performance.SHUTDOWN_SERVER_TIMEOUT
+SHUTDOWN_CLIENT_TIMEOUT = DEFAULT_CONFIG.performance.SHUTDOWN_CLIENT_TIMEOUT
+SERVICE_START_TIMEOUT = DEFAULT_CONFIG.performance.SERVICE_START_TIMEOUT
+POOL_CONNECTIONS = DEFAULT_CONFIG.performance.POOL_CONNECTIONS
+POOL_KEEPALIVE = DEFAULT_CONFIG.performance.POOL_KEEPALIVE
+HTTP_TIMEOUT = DEFAULT_CONFIG.performance.HTTP_TIMEOUT
+STREAM_TIMEOUT = DEFAULT_CONFIG.performance.STREAM_TIMEOUT
+MAX_RETRIES = DEFAULT_CONFIG.performance.MAX_RETRIES
+RETRY_DELAY = DEFAULT_CONFIG.performance.RETRY_DELAY
+MAX_QUEUE_SIZE = DEFAULT_CONFIG.performance.MAX_QUEUE_SIZE
+HEALTH_CHECK_INTERVAL = DEFAULT_CONFIG.performance.HEALTH_CHECK_INTERVAL
+STREAM_CHUNK_SIZE = DEFAULT_CONFIG.performance.STREAM_CHUNK_SIZE
 
 # Utility functions
 def get_service_info() -> Dict[str, Any]:
     """Get service info from EternalZooManager with error handling."""
     try:
         return eternal_zoo_manager.get_service_info()
-    except CryptoAgentsServiceError as e:
+    except EternalZooServiceError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
 def get_service_port() -> int:
@@ -1012,14 +1012,6 @@ async def shutdown_event():
 async def health():
     """Health check endpoint that bypasses the request queue for immediate response."""
     return {"status": "ok"}
-
-@app.post("/update")
-async def update(request: Dict[str, Any]):
-    """Update the service information in the EternalZooManager."""
-    if eternal_zoo_manager.update_service_info(request):
-        return {"status": "ok", "message": "Service info updated successfully"}
-    else:
-        return {"status": "error", "message": "Failed to update service info"}
     
 @app.post("/update/lora")
 async def update_lora(request: LoraConfigRequest):

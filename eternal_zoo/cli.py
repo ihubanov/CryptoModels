@@ -431,8 +431,8 @@ def handle_run(args):
             print_error(f"Failed to fetch model metadata for {args.hash}")
             sys.exit(1)
         if os.path.exists(local_path + "-projector"):
-            projector = local_path + "-projector" + "-projector"
-        config = {
+            projector = local_path + "-projector"
+        configs = [{
             "model": local_path,
             "port": args.port,
             "host": args.host,
@@ -440,9 +440,12 @@ def handle_run(args):
             "task": metadata.get("task", "chat"),
             "is_lora": metadata.get("is_lora", False),
             "family": metadata["folder_name"],
-            "projector": projector
-        }
-        return manager.start(config)
+            "projector": projector,
+            "multimodal": False if projector is None else True,
+            "on_demand": False,
+            "lora": metadata.get("lora", False),
+        }]
+        return manager.start(configs)
 
 def handle_serve(args):
     """Handle model serve command - run all downloaded models with specified main model"""
