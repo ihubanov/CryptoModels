@@ -6,7 +6,6 @@ import msgpack
 import psutil
 import asyncio
 import socket
-import requests
 import subprocess
 import pkg_resources
 import shutil
@@ -15,6 +14,7 @@ from loguru import logger
 from eternal_zoo.config import DEFAULT_CONFIG
 from eternal_zoo.utils import wait_for_health
 from typing import Optional, Dict, Any, List
+
 
 class EternalZooServiceError(Exception):
     """Base exception for EternalZoo service errors."""
@@ -100,7 +100,7 @@ class EternalZooManager:
             "config": config,
         }
 
-        local_model_port = self._get_free_port()
+        local_model_port = self._get_free_port()    
 
         if task == "embed":
             logger.info(f"Starting embed model: {config}")
@@ -196,27 +196,6 @@ class EternalZooManager:
 
         return True
         
-
-    def get_running_model(self) -> Optional[str]:
-        """
-        Get currently running model hash if the service is healthy.
-
-        Returns:
-            Optional[str]: Running model hash or None if no healthy service exists.
-        """
-        if not self.msgpack_file.exists():
-            return None
-
-        try:
-            # Load service info from msgpack file
-            with open(self.msgpack_file, "rb") as f:
-                service_info = msgpack.load(f)   
-            model_hash = service_info.get("hash")      
-            return model_hash
-
-        except Exception as e:
-            logger.error(f"Error getting running model: {str(e)}")
-            return None
     
     def stop(self, port: int = 8080) -> bool:
         self._init_service_files(port)

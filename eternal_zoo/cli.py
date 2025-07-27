@@ -185,6 +185,22 @@ def parse_args():
         help=f"📏 Context length for the model (default: {DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH})",
         metavar="LENGTH"
     )
+    run_command.add_argument(
+        "--task",
+        type=str,
+        default="chat",
+        choices=["chat", "embed", "image-generation", "image-edit"],
+        help="🎯 Model task type (default: chat)",
+        metavar="TYPE"
+    )
+    run_command.add_argument(
+        "--config-name",
+        type=str,
+        default=None,
+        choices=["flux-dev", "flux-schnell"],
+        help="🔍 Model config name (default: None), need for image-generation and image-edit models",
+        metavar="CONFIG"
+    )
 
     # # Model serve command
     # serve_command = model_subparsers.add_parser(
@@ -289,13 +305,6 @@ def parse_args():
         required=True,
         help="🔗 IPFS hash of the model to check",
         metavar="HASH"
-    )
-
-    # Model status command
-    status_command = model_subparsers.add_parser(
-        "status",
-        help="📊 Check running model status",
-        description="Display information about the currently running model"
     )
 
     # Model preserve command
@@ -418,27 +427,28 @@ def handle_download(args) -> bool:
         print_error("Download failed")
         sys.exit(1)
 
-def handle_run(args):
-    """Handle model run with multi-model support and enhanced error handling"""
-    if args.hash:
-        if args.hash not in HASH_TO_MODEL:
-            print_error(f"Hash {args.hash} not found in HASH_TO_MODEL")
+def _download_and_validate_model(hf_data, hash_value=None):
+    """Helper function to download and validate a model"""
+    success, local_path = asyncio.run(download_model_async(hf_data, hash_value))
+    if not success:
+        print_error(f"Failed to download model {hash_value or 'from Hugging Face'}")
+        sys.exit(1)
+    
+    if hash_value:
+        success, metadata = asyncio.run(fetch_model_metadata_async(hash_value))
+        if not success:
+            print_error(f"Failed to fetch model metadata for {hash_value}")
             sys.exit(1)
-        model_name = HASH_TO_MODEL[args.hash]
-        hf_data = FEATURED_MODELS[model_name]
-        projector = None
+        return local_path, metadata
+    
+    return local_path, None
 
-        success, local_path = asyncio.run(download_model_async(hf_data, args.hash))
-        if not success:
-            print_error(f"Failed to download model {args.hash}")
-            sys.exit(1)
-        success, metadata = asyncio.run(fetch_model_metadata_async(args.hash))
-        if not success:
-            print_error(f"Failed to fetch model metadata for {args.hash}")
-            sys.exit(1)
-        if os.path.exists(local_path + "-projector"):
-            projector = local_path + "-projector"
-        configs = [{
+def _create_model_config(local_path, args, hash_value=None, metadata=None, projector=None):
+    """Helper function to create model configuration"""
+    if metadata:
+        # Use metadata for featured models
+        config = {
+            "hash": hash_value,
             "model": local_path,
             "port": args.port,
             "host": args.host,
@@ -450,8 +460,82 @@ def handle_run(args):
             "multimodal": False if projector is None else True,
             "on_demand": False,
             "lora": metadata.get("lora", False),
-        }]
+        }
+    else:
+        # Use args for Hugging Face models
+        folder_name = os.path.basename(local_path)
+        model_path = local_path
+        if args.hf_file is not None:
+            model_path = os.path.join(local_path, args.hf_file)
+        
+        config = {
+            "model": model_path,
+            "port": args.port,
+            "host": args.host,
+            "context_length": args.context_length,
+            "model_name": folder_name,
+            "task": args.task,
+            "config_name": args.config_name,
+            "multimodal": True if args.mmproj else False,
+            "on_demand": False,
+            "lora": False,
+            "is_lora": False,
+            "projector": projector,
+        }
+    
+    return config
+
+def handle_run(args):
+    """Handle model run command with optimized logic"""
+    
+    # Handle hash-based model loading
+    if args.hash:
+        if args.hash not in HASH_TO_MODEL:
+            print_error(f"Hash {args.hash} not found in HASH_TO_MODEL")
+            sys.exit(1)
+        
+        model_name = HASH_TO_MODEL[args.hash]
+        hf_data = FEATURED_MODELS[model_name]
+        
+        local_path, metadata = _download_and_validate_model(hf_data, args.hash)
+        projector = local_path + "-projector" if os.path.exists(local_path + "-projector") else None
+        
+        configs = [_create_model_config(local_path, args, args.hash, metadata, projector)]
         return manager.start(configs)
+    
+    # Handle model name-based loading
+    if args.model_name:
+        if args.model_name in MODEL_TO_HASH:
+            args.hash = MODEL_TO_HASH[args.model_name]
+        
+        if args.model_name not in FEATURED_MODELS:
+            print_error(f"Model name {args.model_name} not found in FEATURED_MODELS")
+            sys.exit(1)
+        
+        hf_data = FEATURED_MODELS[args.model_name]
+        local_path, metadata = _download_and_validate_model(hf_data, args.hash)
+        projector = local_path + "-projector" if os.path.exists(local_path + "-projector") else None
+        
+        configs = [_create_model_config(local_path, args, args.hash, metadata, projector)]
+        return manager.start(configs)
+    
+    # Handle Hugging Face repository loading
+    if args.hf_repo is not None:
+        hf_data = {
+            "repo": args.hf_repo,
+            "model": args.hf_file,
+            "projector": args.mmproj,
+        }
+        
+        local_path, _ = _download_and_validate_model(hf_data)
+        projector = os.path.join(local_path, args.mmproj) if args.mmproj else None
+        
+        configs = [_create_model_config(local_path, args, projector=projector)]
+        return manager.start(configs)
+    
+    # If no valid input provided
+    print_error("No model specified. Please provide --hash, model_name, or --hf-repo")
+    sys.exit(1)
 
 def handle_serve(args):
     """Handle model serve command - run all downloaded models with specified main model"""
@@ -513,26 +597,6 @@ def handle_stop(args):
         print_error("Failed to stop model server or no server running")
     else:
         print_success("Model server stopped successfully")
-
-def handle_status(args):
-    """Handle status check with beautiful formatting"""
-    running_model = manager.get_running_model()
-    console = Console()
-    if running_model:
-        panel = Panel(
-            f"[bold green]Status:[/bold green] Running\n"
-            f"[bold blue]Details:[/bold blue] {running_model}",
-            title="🤖 Model Server Status",
-            border_style="green"
-        )
-        console.print(panel)
-    else:
-        panel = Panel(
-            "[bold red]No model server is currently running[/bold red]",
-            title="🤖 Model Server Status",
-            border_style="red"
-        )
-        console.print(panel)
 
 def handle_preserve(args):
     """Handle model preservation with beautiful output"""
@@ -627,18 +691,16 @@ def main():
     if known_args.command == "model":
         if known_args.model_command == "run":
             handle_run(known_args)
-        elif known_args.model_command == "serve":
-            handle_serve(known_args)
+        # elif known_args.model_command == "serve":
+        #     handle_serve(known_args)
         elif known_args.model_command == "stop":
             handle_stop(known_args)
         elif known_args.model_command == "download":
             handle_download(known_args)
-        elif known_args.model_command == "status":
-            handle_status(known_args)
-        elif known_args.model_command == "preserve":
-            handle_preserve(known_args)
-        elif known_args.model_command == "check":
-            handle_check(known_args)
+        # elif known_args.model_command == "preserve":
+        #     handle_preserve(known_args)
+        # elif known_args.model_command == "check":
+        #     handle_check(known_args)
         else:
             print_error(f"Unknown model command: {known_args.model_command}")
             print_info("Available model commands: run, serve, stop, download, status, preserve, check")
