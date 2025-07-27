@@ -512,14 +512,14 @@ def handle_run(args):
             sys.exit(1)
 
         folder_name = os.path.basename(local_path)
-        if args.model is not None:
+        if args.hf_file is not None:
             local_path = os.path.join(local_path, args.model)
 
         if args.mmproj is not None:
             mmproj_path = os.path.join(local_path, args.mmproj)
             if os.path.exists(mmproj_path):
                 projector_path = mmproj_path   
-                  
+
         configs = [{
             "model": local_path,
             "port": args.port,
