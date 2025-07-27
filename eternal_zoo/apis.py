@@ -18,7 +18,7 @@ from eternal_zoo.config import DEFAULT_CONFIG
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from eternal_zoo.core import EternalZooManager, EternalZooServiceError
+from eternal_zoo.manager import EternalZooManager, EternalZooServiceError
 
 # Import schemas from schema.py
 from eternal_zoo.schema import (
