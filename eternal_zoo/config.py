@@ -171,4 +171,4 @@ class Config:
 
 
 # Create a global config instance
-config = Config() 
+DEFAULT_CONFIG = Config() 

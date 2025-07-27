@@ -1,24 +1,24 @@
 import os
 import json
-import random
+import sys
+import pty
+import re
 import aiohttp
 import asyncio
 import psutil
 import time
 import shutil
-import threading
+import random
+import subprocess
+import tempfile
 from pathlib import Path
 from loguru import logger
-from eternal_zoo.models import MODELS
+from huggingface_hub import HfApi
 from huggingface_hub import snapshot_download
-from eternal_zoo.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH, GATEWAY_URLS, ETERNAL_AI_METADATA_GW, PREFIX_DOWNLOAD_LOG
 from eternal_zoo.utils import compute_file_hash, async_extract_zip, async_move, async_rmtree
-import subprocess
-import sys
-import pty
-import re
+from eternal_zoo.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH, GATEWAY_URLS, ETERNAL_AI_METADATA_GW, PREFIX_DOWNLOAD_LOG
 
-SLEEP_TIME = 5
+SLEEP_TIME = 2
 # Set MAX_ATTEMPTS: if only one gateway, try at least 6 times; otherwise, try 3 times per gateway
 if len(GATEWAY_URLS) == 1:
     MAX_ATTEMPTS = 6
@@ -104,7 +104,6 @@ def _calculate_backoff(attempt: int, base_sleep: int = SLEEP_TIME, max_backoff: 
     Returns:
         int: Backoff time in seconds
     """
-    import random
     
     # Exponential backoff with jitter
     backoff = min(base_sleep * (2 ** (attempt - 1)), max_backoff)
@@ -662,7 +661,7 @@ async def fetch_model_metadata_async(filecoin_hash: str, max_attempts: int = 3) 
     return False, None
 
 
-async def download_model_async(filecoin_hash: str) -> tuple[bool, str | None]:
+async def download_model_async_by_hash(hf_data: dict, filecoin_hash: str | None = None) -> tuple[bool, str | None]:
     """
     Asynchronously download a model from Filecoin using its IPFS hash.
     This function will select the fastest gateway from a list of gateways by testing their response times,
@@ -688,7 +687,6 @@ async def download_model_async(filecoin_hash: str) -> tuple[bool, str | None]:
             
         data["filecoin_hash"] = filecoin_hash
         data["local_path"] = local_path_str
-        model_metadata = MODELS.get(filecoin_hash, None)
         is_lora = data.get("lora", False)
         lora_metadata = {}
 
@@ -712,7 +710,7 @@ async def download_model_async(filecoin_hash: str) -> tuple[bool, str | None]:
                 else:
                     logger.warning(f"LoRA model exists but base model not found at {lora_base_model_path_str}")
                     logger.info(f"Downloading missing base model: {base_model_hash}")
-                    success, base_model_path = await download_model_async(base_model_hash)
+                    success, base_model_path = await download_model_async_by_hash(base_model_hash)
                     if not success:
                         logger.error(f"Failed to download base model: {base_model_hash}")
                         return False, None
@@ -733,52 +731,56 @@ async def download_model_async(filecoin_hash: str) -> tuple[bool, str | None]:
             except Exception as e:
                 logger.error(f"Insufficient disk space for model extraction: {e}")
                 return False, None
-            
-        if model_metadata is not None:
 
-            data["repo"] = model_metadata["repo"]
-            data["model"] = model_metadata.get("model", None)
-            data["projector"] = model_metadata.get("projector", None)
-            data["pattern"] = model_metadata.get("pattern", None)
-
-            if is_lora:
-                success, hf_local_path = await download_model_from_hf(data)
-                if not success:
-                    logger.error("Failed to download LoRA model, falling back to Filecoin")
+        if is_lora:
+            success, hf_res = await download_model_from_hf(hf_data, DEFAULT_MODEL_DIR)
+            if success:
+                if hf_res["is_folder"]:
+                    await async_move(hf_res["model_path"], local_path_str)
+                    await async_rmtree(hf_res["model_path"])
                 else:
-                    # After successful LoRA download, load metadata to get base model hash
-                    if not lora_metadata:
-                        # Try to load metadata from the downloaded LoRA model
-                        lora_metadata_path = os.path.join(hf_local_path, "metadata.json")
-                        try:
-                            with open(lora_metadata_path, "r") as f:
-                                lora_metadata = json.load(f)
-                        except (FileNotFoundError, json.JSONDecodeError) as e:
-                            logger.error(f"Failed to load LoRA metadata from downloaded model: {e}")
-                            return False, None
-                    
-                    base_model_hash = lora_metadata.get("base_model", None)
-                    if base_model_hash is None:
-                        logger.error("No base_model found in LoRA metadata")
-                        return False, None
-                    
-                    success, base_model_path = await download_model_async(base_model_hash)
-                    if not success:
-                        logger.error(f"Failed to download base model: {base_model_hash}")
-                        return False, None
-                    logger.info(f"Successfully downloaded LoRA model and base model: {hf_local_path}")
-                    return True, hf_local_path
+                    await async_move(hf_res["model_path"], local_path_str)
+                return True, local_path_str
+            if not success:
+                logger.error("Failed to download LoRA model, falling back to Filecoin")
             else:
-                success, hf_local_path = await download_model_from_hf(data)
-                if success:
-                    logger.info(f"Successfully downloaded: {hf_local_path}")
-                    return True, hf_local_path
+                # After successful LoRA download, load metadata to get base model hash
+                if not lora_metadata:
+                    # Try to load metadata from the downloaded LoRA model
+                    lora_metadata_path = os.path.join(local_path_str, "metadata.json")
+                    try:
+                        with open(lora_metadata_path, "r") as f:
+                            lora_metadata = json.load(f)
+                    except (FileNotFoundError, json.JSONDecodeError) as e:
+                        logger.error(f"Failed to load LoRA metadata from downloaded model: {e}")
+                        return False, None
+                
+                base_model_hash = lora_metadata.get("base_model", None)
+                if base_model_hash is None:
+                    logger.error("No base_model found in LoRA metadata")
+                    return False, None
+                
+                success, base_model_path = await download_model_async_by_hash(base_model_hash)
+                if not success:
+                    logger.error(f"Failed to download base model: {base_model_hash}")
+                    return False, None
+                logger.info(f"Successfully downloaded LoRA model and base model: {local_path_str}")
+                return True, local_path_str
+        else:
+            success, hf_res = await download_model_from_hf(hf_data)
+            if success:
+                logger.info(f"Successfully downloaded: {hf_res}")
+                if hf_res["is_folder"]:
+                    await async_move(hf_res["model_path"], local_path_str)
+                    await async_rmtree(hf_res["model_path"])
                 else:
-                    logger.info("Download failed, falling back to Filecoin")
+                    await async_move(hf_res["model_path"], local_path_str)
+                return True, local_path_str
+            else:
+                logger.info("Download failed, falling back to Filecoin")
         
         # Prepare for Filecoin download
-        folder_path = Path.cwd() / data["folder_name"]
-        folder_path.mkdir(exist_ok=True, parents=True)
+        folder_path = Path(tempfile.mkdtemp(prefix=f"filecoin_download_{data['folder_name']}_"))
 
         # Download and process model with exponential backoff
         for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -917,67 +919,134 @@ async def _move_model_to_final_location(data: dict, folder_path: Path, local_pat
         logger.error(f"Failed to move model: {e}")
         return None
     
+# Cache for repository sizes to avoid repeated API calls
+_repo_size_cache = {}
+
+def get_repo_size(repo_id: str) -> int:
+    """Get repository size with caching to avoid repeated API calls"""
+    if repo_id in _repo_size_cache:
+        return _repo_size_cache[repo_id]
+    
+    try:
+        api = HfApi()
+        repo_info = api.model_info(repo_id=repo_id, files_metadata=True)
+        total_size_bytes = 0
+        for sibling in repo_info.siblings:
+            total_size_bytes += sibling.size or 0
+        _repo_size_cache[repo_id] = total_size_bytes
+        return total_size_bytes
+    except Exception as e:
+        logger.warning(f"Failed to get repo size for {repo_id}: {e}")
+        return 0
+
+def clear_repo_size_cache():
+    """Clear the repository size cache"""
+    global _repo_size_cache
+    _repo_size_cache.clear()
+    logger.debug("Repository size cache cleared")
+
+def calculate_folder_size_fast(folder_path: Path) -> int:
+    """Calculate folder size using os.walk for better performance, excluding .cache directories"""
+    total_size = 0
+    try:
+        if folder_path.exists() and folder_path.is_dir():
+            for dirpath, dirnames, filenames in os.walk(str(folder_path)):
+                for filename in filenames:
+                    try:
+                        file_path = Path(dirpath) / filename
+                        if file_path.is_file():
+                            total_size += file_path.stat().st_size
+                    except (OSError, PermissionError):
+                        # Skip files we can't access
+                        continue
+    except Exception as e:
+        logger.warning(f"Error calculating folder size for {folder_path}: {e}")
+    return total_size
+
+# Keep the original function for backward compatibility
+def calculate_folder_size(folder_path: Path) -> int:
+    """Calculate the total size of a folder and all its contents in bytes"""
+    return calculate_folder_size_fast(folder_path)
 
 class HuggingFaceProgressTracker:
-    """Track HuggingFace download progress with simulated progress updates"""
+    """Track HuggingFace download progress by monitoring actual folder size with optimizations"""
     
-    def __init__(self, total_size_mb: float, repo_id: str):
-        self.total_size_mb = total_size_mb
-        self.total_size_bytes = int(total_size_mb * 1024 * 1024)
+    def __init__(self, repo_id: str):
         self.repo_id = repo_id
-        self.downloaded_bytes = 0
         self.start_time = time.time()
-        self.last_log_time = 0
         self.is_running = True
-        self.lock = threading.Lock()
-        self.estimated_speed_mbps = self.total_size_mb / 2048
+        self.lock = asyncio.Lock()  # Use asyncio.Lock instead of threading.Lock
+        self.last_log_time = self.start_time
+        self.watch_dir = None
 
-        # Start background task for periodic progress updates
+        # Get total repository size with caching
+        self.total_size_bytes = get_repo_size(repo_id) * random.uniform(1.1, 1.5)
+
+        self.total_size_mb = self.total_size_bytes / (1024 * 1024)
+        print(self.total_size_mb)
+        
+        # Progress tracking with caching
         self.progress_task = None
-        self.log = True
+        self.last_folder_size = 0
+        self.last_size_check_time = 0
+        self.size_cache_duration = 2.0  # Cache folder size for 2 seconds
+        
+        # Batch progress updates to reduce logging overhead
+        self.pending_progress_updates = 0
+        self.last_progress_log_time = 0
+        self.progress_log_interval = 5.0  # Log progress every 5 seconds
+
+    def set_watch_dir(self, watch_dir: str):
+        self.watch_dir = watch_dir
         
     def start_progress_tracking(self):
         """Start the background progress tracking task"""
         if self.progress_task is None:
             self.progress_task = asyncio.create_task(self._periodic_progress_update())
 
-    def estimate_download(self, elapsed_time):
-        simulated_downloaded = self.estimated_speed_mbps * elapsed_time * 1024 * 1024
-        self.downloaded_bytes = int(simulated_downloaded)
-
-        # Calculate percentage but cap at 95% until download is actually complete
-        percentage = (self.downloaded_bytes / self.total_size_bytes) * 100
-        percentage = min(percentage, 95.0)  # Cap at 95% during download
-
-        # Calculate current speed
-        current_speed_mbps = (self.downloaded_bytes / (1024 * 1024)) / elapsed_time
+    def get_current_progress(self) -> tuple[float, float]:
+        """Get current download progress and speed with caching"""
+        if self.watch_dir is None:
+            return 0.0, 0.0
+        
+        current_time = time.time()
+        
+        # Cache folder size checks to avoid excessive filesystem operations
+        if current_time - self.last_size_check_time >= self.size_cache_duration:
+            try:
+                self.last_folder_size = calculate_folder_size_fast(Path(self.watch_dir))
+                print(self.last_folder_size)
+                self.last_size_check_time = current_time
+            except Exception as e:
+                logger.debug(f"Error calculating folder size: {e}")
+                # Use last known size if calculation fails
+                pass
+        
+        percentage = (self.last_folder_size / self.total_size_bytes * 100) if self.total_size_bytes > 0 else 0
+        percentage = min(percentage, 100.0)  # Cap at 100%
+        
+        elapsed_time = current_time - self.start_time
+        current_speed_mbps = (self.last_folder_size / (1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
+        
         return percentage, current_speed_mbps
 
-    def set_log(self, log: bool):
-        self.log = log
-
     async def _periodic_progress_update(self):
-        """Background task to log progress periodically every 5 seconds"""
+        """Background task to log progress periodically with optimized frequency"""
         while self.is_running:
             try:
                 await asyncio.sleep(1.0)  # Check every second
                 
                 current_time = time.time()
                 # Log progress every 5 seconds as requested
-                if current_time - self.last_log_time >= 5.0:
-                    with self.lock:
-                        self.last_log_time = current_time
-                        elapsed_time = current_time - self.start_time
-                        
-                        # Simulate progress based on estimated speed
-                        if elapsed_time > 0:
-                            percentage, current_speed_mbps = self.estimate_download(elapsed_time)
-                            if self.log:
-                                logger.info(
-                                    f"{PREFIX_DOWNLOAD_LOG} "
-                                    f"--progress {percentage:.1f}% "
-                                    f"--speed {current_speed_mbps:.2f} MB/s "
-                                )
+                if current_time - self.last_progress_log_time >= self.progress_log_interval:
+                    async with self.lock:
+                        self.last_progress_log_time = current_time
+                        percentage, current_speed_mbps = self.get_current_progress()
+                        logger.info(
+                            f"{PREFIX_DOWNLOAD_LOG} "
+                            f"--progress {percentage:.1f}% "
+                            f"--speed {current_speed_mbps:.2f} MB/s "
+                        )
                 
             except asyncio.CancelledError:
                 break
@@ -986,16 +1055,40 @@ class HuggingFaceProgressTracker:
                 
     def complete_download(self):
         """Mark download as completed"""
-        with self.lock:
-            self.downloaded_bytes = self.total_size_bytes
-            self.is_running = False
+        async def _complete():
+            async with self.lock:
+                self.is_running = False
+                elapsed_time = time.time() - self.start_time
+                final_folder_size = calculate_folder_size_fast(Path(self.watch_dir)) if self.watch_dir else 0
+                actual_speed_mbps = (final_folder_size / (1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
+                
+                logger.info("[HuggingFaceProgressTracker]")
+                logger.info(
+                    f"{PREFIX_DOWNLOAD_LOG} "
+                    f"--progress 100.0% "
+                    f"--speed {actual_speed_mbps:.2f} MB/s "
+                    f"--final_size {final_folder_size / (1024 * 1024):.2f} MB"
+                )
+        
+        # Run the async completion in the event loop
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(_complete())
+            else:
+                loop.run_until_complete(_complete())
+        except RuntimeError:
+            # If no event loop is running, just log without async
             elapsed_time = time.time() - self.start_time
-            actual_speed_mbps = (self.total_size_bytes / (1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
+            final_folder_size = calculate_folder_size_fast(Path(self.watch_dir)) if self.watch_dir else 0
+            actual_speed_mbps = (final_folder_size / (1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
+            
             logger.info("[HuggingFaceProgressTracker]")
             logger.info(
                 f"{PREFIX_DOWNLOAD_LOG} "
                 f"--progress 100.0% "
                 f"--speed {actual_speed_mbps:.2f} MB/s "
+                f"--final_size {final_folder_size / (1024 * 1024):.2f} MB"
             )
             
     async def cleanup(self):
@@ -1008,8 +1101,7 @@ class HuggingFaceProgressTracker:
             except asyncio.CancelledError:
                 pass
 
-
-async def download_model_from_hf(data: dict) -> tuple[bool, str | None]:
+async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> tuple[bool, dict | None]:
     """
     Download model from HuggingFace Hub with infinite retry logic and exponential backoff.
     Downloads forever until finished or canceled by user.
@@ -1020,88 +1112,84 @@ async def download_model_from_hf(data: dict) -> tuple[bool, str | None]:
     Returns:
         tuple[bool, str | None]: (success, local_path) - True and path if successful, False and None if failed
     """
-    
+
+    res = {}
     repo_id = data["repo"]
-    model = data["model"]
-    projector = data["projector"]
-    local_path_str = data["local_path"]
-    pattern = data["pattern"]
-    tmp_model_dir = str(DEFAULT_MODEL_DIR / f"tmp_{repo_id.replace('/', '_')}")
-    
-    # Get total size for progress tracking
-    total_size_mb = data.get("total_size_mb", 1000)  # Default to 1GB if not specified
-    
-    # Create progress tracker
-    progress_tracker = HuggingFaceProgressTracker(total_size_mb, repo_id)
-    
+    model = data.get("model", None)
+    projector = data.get("projector", None)
+    pattern = data.get("pattern", None)
+    model_dir = str(output_dir) if output_dir is not None else tempfile.mkdtemp(prefix=f"hf_download_{repo_id.replace('/', '_')}_")
+        
     attempt = 1
     while True:  # Infinite loop until success or user cancellation
         try:
             logger.info(f"Download attempt {attempt} for {repo_id}")
-            
-            # Start progress tracking
-            progress_tracker.start_progress_tracking()
-            
+                        
             # Run the synchronous download in a thread executor to avoid blocking
             loop = asyncio.get_event_loop()
             
             if model is None:
+                progress_tracker = HuggingFaceProgressTracker(repo_id)
+                progress_tracker.start_progress_tracking()
+
+                progress_tracker.set_watch_dir(model_dir)
+    
                 if pattern is not None:
                     # Download only the files that match the allow_patterns
-                    
                     await loop.run_in_executor(
                         None,
                         lambda: snapshot_download(
                             repo_id=repo_id,
-                            local_dir=tmp_model_dir,
-                            allow_patterns=[f"*{pattern}*"]
+                            local_dir=model_dir,
+                            allow_patterns=[f"*{pattern}*"],
+                            token=os.getenv("HF_TOKEN")                       
+                            
                         )
                     )
-            
-                    await async_move(os.path.join(tmp_model_dir, pattern), local_path_str)
-                    await async_rmtree(tmp_model_dir)
+                    res["is_folder"] = True
+                    res["model_path"] = os.path.join(model_dir, pattern)
+                
                 else:
+
                     await loop.run_in_executor(
                         None,
                         lambda: snapshot_download(
                             repo_id=repo_id,
-                            local_dir=tmp_model_dir
-                        )
+                            local_dir=model_dir,
+                            token=os.getenv("HF_TOKEN")  
+                        )                     
                     )
-            
-                    await async_move(tmp_model_dir, local_path_str)
+                    res["is_folder"] = True
+                    res["model_path"] = model_dir
             else:
-                progress_tracker.set_log(False)
+                # For single file downloads, we can't easily track progress by folder size
+                # since the file is downloaded directly to output_dir, not a temp folder
+                # The PTY-based download already provides progress output
+
                 await loop.run_in_executor(
                     None,
-                    lambda: run_hf_download_with_pty(repo_id, model, DEFAULT_MODEL_DIR)
+                    lambda: run_hf_download_with_pty(repo_id, model, model_dir, token= os.getenv("HF_TOKEN", None))
                 )
-                await async_move(str(DEFAULT_MODEL_DIR / model), local_path_str)
-                
+
+                res["is_folder"] = False
+                res["model_path"] = os.path.join(model_dir, model)
+
                 # Download projector if specified
                 if projector is not None:
-                    projector_path = local_path_str + "-projector"
                     await loop.run_in_executor(
                         None,
-                        lambda: run_hf_download_with_pty(repo_id, projector, DEFAULT_MODEL_DIR)
+                        lambda: run_hf_download_with_pty(repo_id, projector, model_dir, token= os.getenv("HF_TOKEN", None))
                     )
-                    await async_move(str(DEFAULT_MODEL_DIR / projector), projector_path)
+                    res["projector_path"] = os.path.join(model_dir, projector)
             
-            # Mark download as completed
-            progress_tracker.complete_download()
-            await progress_tracker.cleanup()
-            
-            logger.info(f"Successfully downloaded model: {local_path_str}")
-            return True, local_path_str
+            logger.info(f"Successfully downloaded model: {model_dir}")
+            return True, res
+        
         except KeyboardInterrupt:
             logger.info("Download canceled by user")
-            await progress_tracker.cleanup()
-            return False, None
+
         except Exception as e:
             logger.warning(f"Download attempt {attempt} failed: {e}")
-            
-            # Clean up progress tracker on failure
-            await progress_tracker.cleanup()
             
             # Calculate exponential backoff with jitter
             backoff_time = _calculate_backoff(attempt)
@@ -1109,30 +1197,26 @@ async def download_model_from_hf(data: dict) -> tuple[bool, str | None]:
             await asyncio.sleep(backoff_time)
             
             # Create a new progress tracker for the next attempt
-            progress_tracker = HuggingFaceProgressTracker(total_size_mb, repo_id)
+            progress_tracker = HuggingFaceProgressTracker(repo_id)
             attempt += 1
 
-def run_hf_download_with_pty(repo_id, model, local_dir, pattern=None):
+def run_hf_download_with_pty(repo_id: str, model: str, local_dir: str, token: str | None = None):
     """
     Run HuggingFace download in a subprocess with PTY, capturing and logging all output (including progress bar).
     Only works on Linux/macOS.
     """
-    if model:
+
+    if token is not None:
+        script = f'''
+from huggingface_hub import hf_hub_download
+hf_hub_download(repo_id="{repo_id}", filename="{model}", local_dir="{local_dir}", token="{token}")
+'''
+    else:
         script = f'''
 from huggingface_hub import hf_hub_download
 hf_hub_download(repo_id="{repo_id}", filename="{model}", local_dir="{local_dir}")
 '''
-    else:
-        if pattern:
-            script = f'''
-from huggingface_hub import snapshot_download
-snapshot_download(repo_id="{repo_id}", local_dir="{local_dir}", allow_patterns=["*{pattern}*"])
-'''
-        else:
-            script = f'''
-from huggingface_hub import snapshot_download
-snapshot_download(repo_id="{repo_id}", local_dir="{local_dir}")
-'''
+
     master_fd, slave_fd = pty.openpty()
     process = subprocess.Popen(
         [sys.executable, "-u", "-c", script],
@@ -1182,8 +1266,21 @@ snapshot_download(repo_id="{repo_id}", local_dir="{local_dir}")
     if process.returncode != 0:
         raise Exception(f"HuggingFace download failed with return code {process.returncode}")
 
-if __name__ == "__main__":
-    model_hash = "bafkreihq4usl2t3i6pqoilvorp4up263yieuxcqs6xznlmrig365bvww5i"
-    # model_hash = "bafkreiclwlxc56ppozipczuwkmgnlrxrerrvaubc5uhvfs3g2hp3lftrwm"
-    data = asyncio.run(download_model_async(model_hash))
-    print(data)
+
+async def download_model_async(hf_data: dict, filecoin_hash: str | None = None) -> tuple[bool, str | None]:
+    logger.info(f"Downloading model: {hf_data}")
+    logger.info(f"Filecoin hash: {filecoin_hash}")
+    path = None
+    if filecoin_hash is not None:
+        success, path = await download_model_async_by_hash(hf_data, filecoin_hash)
+        if not success:
+            logger.error("Failed to download model")
+            return False, None
+    else:
+        final_dir = DEFAULT_MODEL_DIR /  hf_data["repo"].replace("/", "_")
+        success, hf_res = await download_model_from_hf(hf_data, final_dir)
+        if not success:
+            logger.error("Failed to download model")
+            return False, None
+        
+    return True, path

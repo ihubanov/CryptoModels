@@ -12,7 +12,7 @@ import pkg_resources
 import shutil
 from pathlib import Path
 from loguru import logger
-from eternal_zoo.config import config
+from eternal_zoo.config import DEFAULT_CONFIG
 from eternal_zoo.utils import wait_for_health
 from typing import Optional, Dict, Any, List
 from eternal_zoo.download import download_model_async, fetch_model_metadata_async
@@ -36,18 +36,18 @@ class EternalZooManager:
     def __init__(self):
         """Initialize the EternalZooManager with optimized defaults.""" 
         # Performance constants from config
-        self.LOCK_TIMEOUT = config.core.LOCK_TIMEOUT
-        self.PORT_CHECK_TIMEOUT = config.core.PORT_CHECK_TIMEOUT
-        self.HEALTH_CHECK_TIMEOUT = config.core.HEALTH_CHECK_TIMEOUT
-        self.PROCESS_TERM_TIMEOUT = config.core.PROCESS_TERM_TIMEOUT
-        self.MAX_PORT_RETRIES = config.core.MAX_PORT_RETRIES
+        self.LOCK_TIMEOUT = DEFAULT_CONFIG.core.LOCK_TIMEOUT
+        self.PORT_CHECK_TIMEOUT = DEFAULT_CONFIG.core.PORT_CHECK_TIMEOUT
+        self.HEALTH_CHECK_TIMEOUT = DEFAULT_CONFIG.core.HEALTH_CHECK_TIMEOUT
+        self.PROCESS_TERM_TIMEOUT = DEFAULT_CONFIG.core.PROCESS_TERM_TIMEOUT
+        self.MAX_PORT_RETRIES = DEFAULT_CONFIG.core.MAX_PORT_RETRIES
         
         # File paths from config
-        self.msgpack_file = Path(config.file_paths.RUNNING_SERVICE_FILE)
+        self.msgpack_file = Path(DEFAULT_CONFIG.file_paths.RUNNING_SERVICE_FILE)
         self.loaded_models: Dict[str, Any] = {}
-        self.llama_server_path = config.file_paths.LLAMA_SERVER
-        self.start_lock_file = Path(config.file_paths.START_LOCK_FILE)
-        self.logs_dir = Path(config.file_paths.LOGS_DIR)
+        self.llama_server_path = DEFAULT_CONFIG.file_paths.LLAMA_SERVER
+        self.start_lock_file = Path(DEFAULT_CONFIG.file_paths.START_LOCK_FILE)
+        self.logs_dir = Path(DEFAULT_CONFIG.file_paths.LOGS_DIR)
         self.logs_dir.mkdir(exist_ok=True)
         
         # Clean up any stale temporary lock files on initialization
@@ -89,9 +89,9 @@ class EternalZooManager:
         Returns parsed JSON data or None on failure.
         """
         # Use config values as defaults
-        retries = retries or config.core.REQUEST_RETRIES
-        delay = delay or config.core.REQUEST_DELAY
-        timeout = timeout or config.core.REQUEST_TIMEOUT
+        retries = retries or DEFAULT_CONFIG.core.REQUEST_RETRIES
+        delay = delay or DEFAULT_CONFIG.core.REQUEST_DELAY
+        timeout = timeout or DEFAULT_CONFIG.core.REQUEST_TIMEOUT
         
         backoff_delay = delay
         last_error = None
@@ -129,28 +129,61 @@ class EternalZooManager:
         logger.error(f"Failed to fetch {url} after {retries} attempts. Last error: {last_error}")
         return None
 
-    def start(self, hashes: str, port: int = None, host: str = None, context_length: int = None) -> bool:
+    def start_multi_model(self, configs: List[dict]) -> bool:
         """
-        Start the EternalZoo service with multi-model support and on-demand loading.
+        Start the EternalZoo service with a given config.
 
         Args:
-            hashes (str): Comma-separated string of model hashes. First hash is main model (loaded immediately),
-                         subsequent hashes are stored for on-demand loading. Single hash also supported.
-            port (int): Port number for the EternalZoo service (default from config).
-            host (str): Host address for the EternalZoo service (default from config).
-            context_length (int): Context length for the model (default from config).
+            config (dict): The config to start the service with.
 
         Returns:
             bool: True if service started successfully, False otherwise.
-
-        Raises:
-            ValueError: If no hashes are provided.
-            ModelNotFoundError: If model file is not found.
-            ServiceStartError: If service fails to start.
         """
-        # Parse comma-separated hashes
-        if not hashes or not hashes.strip():
-            raise ValueError("At least one model hash is required to start the service")
+
+        
+
+
+    def start(self, config: dict) -> bool:
+        """
+        Start the EternalZoo service with a given config.
+
+        Args:
+            config (dict): The config to start the service with.
+
+        Returns:
+            bool: True if service started successfully, False otherwise.
+        """
+
+        task = config.get("task", "chat")
+
+        local_model_port = self._get_free_port()
+
+        if task == "embed":
+            logger.info(f"Starting embed model: {config}")
+            running_ai_command = self._build_embed_command(config, local_model_port)
+            service_metadata = self._create_service_metadata(
+                config, local_model_port
+            )
+        elif task == "chat":
+            logger.info(f"Starting chat model: {config}")
+            running_ai_command = self._build_chat_command(config, local_model_port)
+            service_metadata = self._create_service_metadata(
+                config, local_model_port
+            )
+        # elif task == "image-generation":
+        #     logger.info(f"Starting image generation model: {config}")
+        #     if not shutil.which("mlx-flux"):
+        #         raise EternalZooServiceError("mlx-flux command not found in PATH")
+            
+        #     running_ai_command = self._build_image_generation_command(config, local_model_port)
+        #     service_metadata = self._create_service_metadata(
+        #         config, local_model_port
+        #     )
+        else:
+            raise ValueError(f"Invalid task: {task}")
+        
+
+        return True
         
         # Split by comma and clean whitespace
         hashes_list = [h.strip() for h in hashes.split(',') if h.strip()]
@@ -315,7 +348,7 @@ class EternalZooManager:
                     )
                 elif task == "image-generation":
                     if not shutil.which("mlx-flux"):
-                        raise CryptoAgentsServiceError("mlx-flux command not found in PATH")
+                        raise EternalZooServiceError("mlx-flux command not found in PATH")
                     
                     effective_model_path = local_model_path
                     lora_paths = None
@@ -1058,18 +1091,73 @@ class EternalZooManager:
             return None
         return best_practice_path
     
-    def _build_embed_command(self, model_path: str, port: int, host: str) -> list:
+    def _build_embed_command(self, config: dict, port: int) -> list:
         """Build the embed command with common parameters."""
+        model_path = config.get("model", None)
+        if model_path is None:
+            raise ValueError("Model path is required to start the service")
+
         command = [
             self.llama_server_path,
             "--model", str(model_path),
             "--port", str(port),
-            "--host", host,
+            "--host", "0.0.0.0",
             "--embedding",
             "--pooling", "mean",
             "-ub", "8192",
             "-ngl", "9999"
         ]
+        return command
+    
+    def _build_chat_command(self, config: dict, port: int) -> list:
+        """Build the chat command with common parameters."""
+        model_path = config.get("model", None)
+        if model_path is None:
+            raise ValueError("Model path is required to start the service")
+        
+        model_family = config.get("family", None)
+        if model_family is None:
+            raise ValueError("Model family is required to start the service")
+        
+        template_path = self._get_model_template_path(model_family)
+        best_practice_path = self._get_model_best_practice_path(model_family)
+
+        projector = config.get("projector", None)
+        
+        command = [
+            self.llama_server_path,
+            "--model", str(model_path),
+            "--port", str(port),
+            "--host", "0.0.0.0",
+            "--pooling", "mean",
+            "--no-webui",
+            "-ngl", "9999",
+            "--jinja",
+            "--reasoning-format", "none",
+            "--embeddings"
+        ]
+
+        if projector is not None:
+            if os.path.exists(projector):
+                command.extend(["--mmproj", str(projector)])
+            else:
+                raise ValueError(f"Projector file not found: {projector}")
+        
+        if template_path is not None:
+            if os.path.exists(template_path):
+                command.extend(["--chat-template-file", template_path])
+            else:
+                raise ValueError(f"Template file not found: {template_path}")
+        
+        if best_practice_path is not None:
+            if os.path.exists(best_practice_path):
+                with open(best_practice_path, "r") as f:
+                    best_practice = json.load(f)
+                    for key, value in best_practice.items():
+                        command.extend([f"--{key}", str(value)])
+            else:
+                raise ValueError(f"Best practices file not found: {best_practice_path}")
+
         return command
 
     def _build_ai_command(self, model_path: str, port: int, host: str, context_length: int, template_path: Optional[str] = None, best_practice_path: Optional[str] = None) -> list:
@@ -1110,21 +1198,11 @@ class EternalZooManager:
         is_multimodal = os.path.exists(projector_path)
         return is_multimodal, projector_path if is_multimodal else None
 
-    def _create_service_metadata(self, hash: str, local_model_path: str, local_ai_port: int, 
-                                port: int, context_length: int, task: str, 
-                                is_multimodal: bool, projector_path: Optional[str]) -> dict:
+    def _create_service_metadata(self, config: dict, port: int) -> dict:
         """Create service metadata dictionary with all required fields."""
-        return {
-            "task": task,
-            "hash": hash,
-            "port": local_ai_port,
-            "local_text_path": local_model_path,
-            "app_port": port,
-            "context_length": context_length,
-            "last_activity": time.time(),
-            "multimodal": is_multimodal,
-            "local_projector_path": projector_path
-        }
+        metadata = config
+        metadata["port"] = port
+        return metadata
 
     def _validate_lock_data(self, lock_data: dict) -> tuple[bool, str]:
         """
@@ -1724,13 +1802,13 @@ class EternalZooManager:
     def get_service_info(self) -> Dict[str, Any]:
         """Get service info from msgpack file with error handling."""
         if not os.path.exists(self.msgpack_file):
-            raise CryptoAgentsServiceError("Service information not available")
+            raise EternalZooServiceError("Service information not available")
         
         try:
             with open(self.msgpack_file, "rb") as f:
                 return msgpack.load(f)
         except Exception as e:
-            raise CryptoAgentsServiceError(f"Failed to load service info: {str(e)}")
+            raise EternalZooServiceError(f"Failed to load service info: {str(e)}")
     
     def update_service_info(self, updates: Dict[str, Any]) -> bool:
         """Update service information in the msgpack file."""
@@ -1913,7 +1991,7 @@ class EternalZooManager:
                 running_ai_command = self._build_embed_command(local_model_path, local_ai_port, host)
             elif task == "image-generation":
                 if not shutil.which("mlx-flux"):
-                    raise CryptoAgentsServiceError("mlx-flux command not found in PATH")
+                    raise EternalZooServiceError("mlx-flux command not found in PATH")
                 
                 # Initialize LoRA variables
                 lora_paths = None

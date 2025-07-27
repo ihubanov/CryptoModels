@@ -4,20 +4,18 @@ import asyncio
 import argparse
 import random
 import json
-from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
-from rich.table import Table
 from rich import print as rprint
 
 from eternal_zoo.config import config
 from eternal_zoo.version import __version__
 from eternal_zoo.core import EternalZooManager
-from eternal_zoo.download import download_model_async
 from eternal_zoo.upload import upload_folder_to_lighthouse
-from eternal_zoo.models import MODEL_TO_HASH
 from eternal_zoo.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH
+from eternal_zoo.models import HASH_TO_MODEL, FEATURED_MODELS, MODEL_TO_HASH
+from eternal_zoo.download import download_model_async, fetch_model_metadata_async
 
 manager = EternalZooManager()
 
@@ -80,16 +78,9 @@ def print_warning(message):
     rprint(f"[bold yellow]⚠️  {message}[/bold yellow]")
 
 def show_available_models():
-    """Display available models in a beautiful table"""
-    console = Console()
-    table = Table(title="🤖 Available Preserved Models", border_style="cyan")
-    table.add_column("Model Name", style="bold magenta", justify="left")
-    table.add_column("Hash", style="dim", justify="left")
-
-    for model_name, model_hash in MODEL_TO_HASH.items():
-        table.add_row(model_name, model_hash[:16] + "...")
-
-    console.print(table)
+    """Display available models"""
+    for model_name in FEATURED_MODELS:
+        print(f"  {model_name}")
 
 class CustomHelpFormatter(argparse.HelpFormatter):
     """Custom help formatter for better styling"""
@@ -148,6 +139,30 @@ def parse_args():
         type=str,
         help="🔗 Comma-separated Filecoin hashes (alternative to model names)",
         metavar="HASH1,HASH2,..."
+    )
+    run_command.add_argument(
+        "--hf-repo",
+        type=str,
+        help="🤗 Hugging Face model repository",
+        metavar="REPO"
+    )
+    run_command.add_argument(
+        "--hf-file",
+        type=str,
+        help="🤗 Hugging Face model file",
+        metavar="FILE"
+    )
+    run_command.add_argument(
+        "--mmproj",
+        type=str,
+        help="🔍 Multimodal Projector File",
+        metavar="MMProj"
+    )
+    run_command.add_argument(
+        "--mmproj-url",
+        type=str,
+        help="🌐 URL to a multimodal projector file",
+        metavar="URL"
     )
     run_command.add_argument(
         "--port",
@@ -223,26 +238,40 @@ def parse_args():
         description="Download and extract model files from the decentralized network"
     )
     download_command.add_argument(
+        "model_name",
+        nargs='?',
+        help="🏷️  Model name(s) - single: qwen3-1.7b or multi: qwen3-14b,qwen3-4b (first is main, others on-demand)"
+    )
+    download_command.add_argument(
         "--hash",
-        required=True,
-        help="🔗 IPFS hash of the model metadata",
+        type=str,
+        help="🔗 Comma-separated Filecoin hashes (alternative to model names)",
         metavar="HASH"
     )
     download_command.add_argument(
-        "--chunk-size",
-        type=int,
-        default=config.network.DEFAULT_CHUNK_SIZE,
-        help=f"📦 Download chunk size in bytes (default: {config.network.DEFAULT_CHUNK_SIZE})",
-        metavar="SIZE"
+        "--hf-repo",
+        type=str,
+        help="🤗 Hugging Face model repository",
+        metavar="REPO"
     )
     download_command.add_argument(
-        "--output-dir",
-        type=Path,
-        default=None,
-        help="📁 Output directory for model files",
-        metavar="DIR"
+        "--hf-file",
+        type=str,
+        help="🤗 Hugging Face model file",
+        metavar="FILE"
     )
-
+    download_command.add_argument(
+        "--mmproj",
+        type=str,
+        help="🔍 Multimodal Projector File",
+        metavar="MMProj"
+    )
+    download_command.add_argument(
+        "--mmproj-url",
+        type=str,
+        help="🌐 URL to a multimodal projector file",
+        metavar="URL"
+    )
     # Model check command
     check_command = model_subparsers.add_parser(
         "check",
@@ -347,82 +376,70 @@ def parse_args():
 
     return parser.parse_known_args()
 
-def handle_download(args):
+def handle_download(args) -> bool:
     """Handle model download with beautiful output"""
-    print_info(f"Starting download for hash: {args.hash}")
-    try:
-        success, local_path = asyncio.run(download_model_async(args.hash))
-        if success:
-            print_success(f"Model downloaded successfully to {local_path}")
-        else:
-            print_error("Download failed")
+    # Determine the download source and validate inputs
+    if args.hash:
+        # Download by hash
+        if args.hash not in HASH_TO_MODEL:
+            print_error(f"Hash {args.hash} not found in HASH_TO_MODEL")
             sys.exit(1)
-    except Exception as e:
-        print_error(f"Download failed: {str(e)}")
+        model_name = HASH_TO_MODEL[args.hash]
+        hf_data = FEATURED_MODELS[model_name]
+        success, local_path = asyncio.run(download_model_async(hf_data, args.hash))
+    elif args.model_name:
+        if args.model_name in MODEL_TO_HASH:
+            args.hash = MODEL_TO_HASH[args.model_name]
+        if args.model_name not in FEATURED_MODELS:
+            print_error(f"Model name {args.model_name} not found in FEATURED_MODELS")
+            sys.exit(1)
+        hf_data = FEATURED_MODELS[args.model_name]
+        success, local_path = asyncio.run(download_model_async(hf_data, args.hash))
+    else:
+        # Download from Hugging Face
+        hf_data = {
+            "repo": args.hf_repo,
+            "model": args.hf_file,
+            "projector": args.mmproj,
+        }
+        success, local_path = asyncio.run(download_model_async(hf_data))
+    
+    # Handle download result
+    if success:
+        print_success(f"Model downloaded successfully to {local_path}")
+        return True
+    else:
+        print_error("Download failed")
         sys.exit(1)
 
 def handle_run(args):
     """Handle model run with multi-model support and enhanced error handling"""
-    # Determine the hash(es) to use
-    if args.hash and args.model_name:
-        print_error("Please specify either model name(s) OR --hash, not both")
-        print_info("Usage examples:")
-        print("  • eternal-zoo model run qwen3-1.7b")
-        print("  • eternal-zoo model run qwen3-14b,qwen3-4b")
-        print("  • eternal-zoo model run --hash QmHash1,QmHash2")
-        sys.exit(1)
-    elif args.hash:
-        model_hashes_str = args.hash
-        print_info(f"Using custom model hashes: {model_hashes_str}")
-    elif args.model_name:
-        # Parse comma-separated model names
-        model_names = [name.strip() for name in args.model_name.split(',') if name.strip()]
-
-        if not model_names:
-            print_error("No valid model names provided")
+    if args.hash:
+        if args.hash not in HASH_TO_MODEL:
+            print_error(f"Hash {args.hash} not found in HASH_TO_MODEL")
             sys.exit(1)
+        model_name = HASH_TO_MODEL[args.hash]
+        hf_data = FEATURED_MODELS[model_name]
+        projector = None
 
-        # Map model names to hashes
-        model_hashes = []
-        for model_name in model_names:
-            if model_name in MODEL_TO_HASH:
-                model_hash = MODEL_TO_HASH[model_name]
-                model_hashes.append(model_hash)
-                print_success(f"Found model '{model_name}' → {model_hash[:16]}...")
-            else:
-                print_error(f"Model '{model_name}' not found in preserved models")
-                print_warning("Here are the available models:")
-                show_available_models()
-                print_info("For custom models, use: eternal-zoo model run --hash <your_hash>")
-                sys.exit(1)
-
-        # Join hashes into comma-separated string
-        model_hashes_str = ','.join(model_hashes)
-
-        if len(model_names) > 1:
-            print_info(f"Multi-model setup:")
-            print_info(f"  Main model (loaded immediately): {model_names[0]}")
-            print_info(f"  On-demand models: {', '.join(model_names[1:])}")
-        else:
-            print_info(f"Single model: {model_names[0]}")
-    else:
-        print_error("Either model name(s) or --hash must be provided")
-        print_info("Usage examples:")
-        print("  • eternal-zoo model run qwen3-1.7b")
-        print("  • eternal-zoo model run qwen3-14b,qwen3-4b")
-        print("  • eternal-zoo model run --hash <hash1,hash2>")
-        print_warning("Available models:")
-        show_available_models()
-        sys.exit(1)
-
-    print_info(f"Starting model server...")
-    print_info(f"Host: {args.host}, Port: {args.port}, Context: {args.context_length}")
-
-    if not manager.start(model_hashes_str, args.port, args.host, args.context_length):
-        print_error("Failed to start model server")
-        sys.exit(1)
-    else:
-        print_success(f"Model server started successfully on {args.host}:{args.port}")
+        success, local_path = asyncio.run(download_model_async(hf_data, args.hash))
+        if not success:
+            print_error(f"Failed to download model {args.hash}")
+            sys.exit(1)
+        metadata = asyncio.run(fetch_model_metadata_async(args.hash))
+        if os.path.exists(local_path + "-projector"):
+            projector = local_path + "-projector" + "-projector"
+        config = {
+            "model": local_path,
+            "port": args.port,
+            "host": args.host,
+            "context_length": args.context_length,
+            "task": metadata["task"],
+            "is_lora": metadata.get("is_lora", False),
+            "family": metadata["folder_name"],
+            "projector": projector
+        }
+        return manager.start(config)
 
 def handle_serve(args):
     """Handle model serve command - run all downloaded models with specified main model"""
