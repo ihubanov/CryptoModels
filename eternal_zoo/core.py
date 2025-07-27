@@ -141,8 +141,6 @@ class EternalZooManager:
         """
 
         
-
-
     def start(self, config: dict) -> bool:
         """
         Start the EternalZoo service with a given config.
@@ -155,6 +153,7 @@ class EternalZooManager:
         """
 
         task = config.get("task", "chat")
+        running_ai_command = None
 
         local_model_port = self._get_free_port()
 
@@ -170,6 +169,11 @@ class EternalZooManager:
             service_metadata = self._create_service_metadata(
                 config, local_model_port
             )
+            
+        if running_ai_command is None:
+            raise ValueError(f"Invalid Running AI Command: {running_ai_command}")
+        
+        logger.info(f"Running command: {' '.join(running_ai_command)}")
         # elif task == "image-generation":
         #     logger.info(f"Starting image generation model: {config}")
         #     if not shutil.which("mlx-flux"):
