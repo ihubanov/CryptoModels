@@ -230,7 +230,13 @@ def parse_args():
         action="store_true",
         help="💥 Force kill processes immediately without graceful termination (use when normal stop fails)"
     )
-
+    stop_command.add_argument(
+        "--port",
+        type=int,
+        default=DEFAULT_CONFIG.network.DEFAULT_PORT,
+        help=f"🌐 Port number for the server (default: {DEFAULT_CONFIG.network.DEFAULT_PORT})",
+        metavar="PORT"
+    )
     # Model download command
     download_command = model_subparsers.add_parser(
         "download",

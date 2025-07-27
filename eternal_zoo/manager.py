@@ -41,35 +41,14 @@ class EternalZooManager:
         self.MAX_PORT_RETRIES = DEFAULT_CONFIG.core.MAX_PORT_RETRIES
         
         # File paths from config
-        self.ai_service_file = Path(DEFAULT_CONFIG.file_paths.AI_SERVICE_FILE)
-        self.api_service_file = Path(DEFAULT_CONFIG.file_paths.API_SERVICE_FILE)
-        self.service_info_file = Path(DEFAULT_CONFIG.file_paths.SERVICE_INFO_FILE)
+        self.ai_service_prefix = DEFAULT_CONFIG.file_paths.AI_SERVICE_PREFIX
+        self.api_service_prefix = DEFAULT_CONFIG.file_paths.API_SERVICE_PREFIX
+        self.service_info_prefix = DEFAULT_CONFIG.file_paths.SERVICE_INFO_PREFIX
 
         self.llama_server_path = DEFAULT_CONFIG.file_paths.LLAMA_SERVER
-        self.start_lock_file = Path(DEFAULT_CONFIG.file_paths.START_LOCK_FILE)
         self.logs_dir = Path(DEFAULT_CONFIG.file_paths.LOGS_DIR)
         self.logs_dir.mkdir(exist_ok=True)
         
-        # Clean up any stale temporary lock files on initialization
-        self._cleanup_temp_lock_files()
-        
-    def _cleanup_temp_lock_files(self) -> None:
-        """Clean up any temporary lock files left behind by previous runs."""
-        try:
-            # Look for .tmp files in the same directory as the lock file
-            lock_dir = self.start_lock_file.parent
-            
-            for temp_file in lock_dir.glob(f"*.tmp"):
-                # Only remove temp files that match our naming pattern
-                if temp_file.name.startswith(self.start_lock_file.stem):
-                    try:
-                        temp_file.unlink()
-                        logger.debug(f"Cleaned up stale temporary lock file: {temp_file}")
-                    except OSError as e:
-                        logger.warning(f"Failed to clean up temporary lock file {temp_file}: {e}")
-        except Exception as e:
-            logger.warning(f"Error during temp lock file cleanup: {e}")
-            
     def _get_free_port(self) -> int:
         """Get a free port number."""
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -83,6 +62,11 @@ class EternalZooManager:
             self._get_model_best_practice_path(model_family)
         )
 
+    def _init_service_files(self, port: int):
+        """Initialize service files for a given port."""
+        self.ai_service_file = Path(self.ai_service_prefix + f"_{str(port)}.msgpack")
+        self.api_service_file = Path(self.api_service_prefix + f"_{str(port)}.msgpack")
+        self.service_info_file = Path(self.service_info_prefix + f"_{str(port)}.msgpack")
         
     def start(self, configs: List[dict], port: int = 8080) -> bool:
         """
@@ -96,6 +80,7 @@ class EternalZooManager:
         """
 
         config = configs[0]
+        self._init_service_files(port)
 
         if not self._check_port_availability(config.get("host", "0.0.0.0"), port):
             raise ServiceStartError(f"Port {port} is already in use on {config.get('host', '0.0.0.0')}")
@@ -198,12 +183,13 @@ class EternalZooManager:
                 msgpack.pack(api_service, f)
 
             logger.info(f"API service metadata written to {self.api_service_file}")
+            
         except Exception as e:
             self.stop()
             logger.error(f"Error writing proxy service metadata: {str(e)}", exc_info=True)
             return False
         
-        self.update_service_info({
+        self.update_service_info({            
             "api_service": api_service,
             "ai_services": ai_services,
         })
@@ -232,7 +218,8 @@ class EternalZooManager:
             logger.error(f"Error getting running model: {str(e)}")
             return None
     
-    def stop(self) -> bool:
+    def stop(self, port: int = 8080) -> bool:
+        self._init_service_files(port)
 
         if not self.ai_service_file.exists() and not self.api_service_file.exists() and not self.service_info_file.exists():
             logger.warning("No running EternalZoo service to stop.")
@@ -813,34 +800,6 @@ class EternalZooManager:
             else:
                 raise ValueError(f"Best practices file not found: {best_practice_path}")
 
-        return command
-
-    def _build_ai_command(self, model_path: str, port: int, host: str, context_length: int, template_path: Optional[str] = None, best_practice_path: Optional[str] = None) -> list:
-        """Build the AI command with common parameters."""
-        command = [
-            self.llama_server_path,
-            "--model", str(model_path),
-            "--port", str(port),
-            "--host", host,
-            "-c", str(context_length),
-            "--no-context-shift",
-            "-fa",
-            "--pooling", "mean",
-            "--embeddings",
-            "--no-webui",
-            "-ngl", "9999",
-            "--jinja",
-            "--reasoning-format", "none"
-        ]
-        
-        if template_path:
-            command.extend(["--chat-template-file", template_path])
-        
-        if best_practice_path:
-            with open(best_practice_path, "r") as f:
-                best_practice = json.load(f)
-                for key, value in best_practice.items():
-                    command.extend([f"--{key}", str(value)])
         return command
 
     def _validate_lock_data(self, lock_data: dict) -> tuple[bool, str]:
@@ -1438,13 +1397,13 @@ class EternalZooManager:
             logger.error(f"Error reloading AI server: {str(e)}", exc_info=True)
             return False
     
-    def get_service_info(self) -> Dict[str, Any]:
+    def get_service_info(self, path: str) -> Dict[str, Any]:
         """Get service info from msgpack file with error handling."""
-        if not os.path.exists(self.msgpack_file):
+        if not os.path.exists(path):
             raise EternalZooServiceError("Service information not available")
         
         try:
-            with open(self.msgpack_file, "rb") as f:
+            with open(path, "rb") as f:
                 return msgpack.load(f)
         except Exception as e:
             raise EternalZooServiceError(f"Failed to load service info: {str(e)}")
