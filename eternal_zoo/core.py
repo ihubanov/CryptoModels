@@ -43,7 +43,8 @@ class EternalZooManager:
         self.MAX_PORT_RETRIES = DEFAULT_CONFIG.core.MAX_PORT_RETRIES
         
         # File paths from config
-        self.msgpack_file = Path(DEFAULT_CONFIG.file_paths.RUNNING_SERVICE_FILE)
+        self.ai_service_file = Path(DEFAULT_CONFIG.file_paths.AI_SERVICE_FILE)
+        self.api_service_file = Path(DEFAULT_CONFIG.file_paths.API_SERVICE_FILE)
         self.loaded_models: Dict[str, Any] = {}
         self.llama_server_path = DEFAULT_CONFIG.file_paths.LLAMA_SERVER
         self.start_lock_file = Path(DEFAULT_CONFIG.file_paths.START_LOCK_FILE)
@@ -82,52 +83,6 @@ class EternalZooManager:
             self._get_model_template_path(model_family),
             self._get_model_best_practice_path(model_family)
         )
-    
-    def _retry_request_json(self, url: str, retries: int = None, delay: int = None, timeout: int = None) -> Optional[dict]:
-        """
-        Utility to retry a GET request for JSON data with optimized parameters.
-        Returns parsed JSON data or None on failure.
-        """
-        # Use config values as defaults
-        retries = retries or DEFAULT_CONFIG.core.REQUEST_RETRIES
-        delay = delay or DEFAULT_CONFIG.core.REQUEST_DELAY
-        timeout = timeout or DEFAULT_CONFIG.core.REQUEST_TIMEOUT
-        
-        backoff_delay = delay
-        last_error = None
-        
-        for attempt in range(retries):
-            try:
-                # Use session for connection pooling if making multiple requests
-                response = requests.get(url, timeout=timeout)
-                response.raise_for_status()  # Raise exception for HTTP errors
-                
-                # Parse JSON once and return
-                return response.json()
-                
-            except requests.exceptions.Timeout as e:
-                last_error = f"Timeout after {timeout}s"
-                logger.warning(f"Attempt {attempt+1}/{retries} timed out for {url}")
-            except requests.exceptions.ConnectionError as e:
-                last_error = f"Connection error: {str(e)[:100]}"
-                logger.warning(f"Attempt {attempt+1}/{retries} connection failed for {url}")
-            except requests.exceptions.HTTPError as e:
-                last_error = f"HTTP error {e.response.status_code}"
-                logger.warning(f"Attempt {attempt+1}/{retries} HTTP error for {url}: {e}")
-                # Don't retry on 4xx errors (client errors)
-                if 400 <= e.response.status_code < 500:
-                    break
-            except (requests.exceptions.RequestException, ValueError) as e:
-                last_error = f"Request error: {str(e)[:100]}"
-                logger.warning(f"Attempt {attempt+1}/{retries} failed for {url}: {e}")
-            
-            # Sleep with exponential backoff (except on last attempt)
-            if attempt < retries - 1:
-                time.sleep(backoff_delay)
-                backoff_delay = min(backoff_delay * 1.5, 8)  # Cap at 8 seconds
-        
-        logger.error(f"Failed to fetch {url} after {retries} attempts. Last error: {last_error}")
-        return None
 
     def start_multi_model(self, configs: List[dict]) -> bool:
         """
@@ -141,7 +96,7 @@ class EternalZooManager:
         """
 
         
-    def start(self, config: dict) -> bool:
+    def start(self, config: dict, port: int = 8080) -> bool:
         """
         Start the EternalZoo service with a given config.
 
@@ -152,8 +107,18 @@ class EternalZooManager:
             bool: True if service started successfully, False otherwise.
         """
 
+        if not self._check_port_availability(config.get("host", "0.0.0.0"), port):
+            raise ServiceStartError(f"Port {port} is already in use on {config.get('host', '0.0.0.0')}")
+        
+        if self.ai_service_file.exists():
+            with open(self.ai_service_file, 'rb') as f:
+                ai_services = msgpack.unpack(f)
+        else:
+            ai_services = []
+
         task = config.get("task", "chat")
         running_ai_command = None
+        ai_service = {}
 
         local_model_port = self._get_free_port()
 
@@ -169,13 +134,6 @@ class EternalZooManager:
             service_metadata = self._create_service_metadata(
                 config, local_model_port
             )
-        else:
-            raise ValueError(f"Invalid task: {task}")
-            
-        if running_ai_command is None:
-            raise ValueError(f"Invalid running AI command: {running_ai_command}")
-        
-        logger.info(f"Running command: {' '.join(running_ai_command)}")
         # elif task == "image-generation":
         #     logger.info(f"Starting image generation model: {config}")
         #     if not shutil.which("mlx-flux"):
@@ -184,7 +142,83 @@ class EternalZooManager:
         #     running_ai_command = self._build_image_generation_command(config, local_model_port)
         #     service_metadata = self._create_service_metadata(
         #         config, local_model_port
-        #     
+        #     )
+        else:
+            raise ValueError(f"Invalid task: {task}")
+
+        if running_ai_command is None:
+            raise ValueError(f"Invalid running AI command: {running_ai_command}")
+        
+        logger.info(f"Running command: {' '.join(running_ai_command)}")
+        
+        ai_log_stderr = self.logs_dir / "ai.log"
+        try:
+            with open(ai_log_stderr, 'w') as stderr_log:
+                ai_process = subprocess.Popen(
+                    running_ai_command,
+                    stderr=stderr_log,
+                    preexec_fn=os.setsid
+                )
+                logger.info(f"AI logs written to {ai_log_stderr}")
+            ai_service["last_activity"] = int(time.time())
+            ai_service["active"] = True
+            ai_service["pid"] = ai_process.pid
+            ai_services.append(ai_service)
+            with open(self.ai_service_file, 'wb') as f:
+                msgpack.pack(ai_services, f)
+            logger.info(f"AI service metadata written to {self.ai_service_file}")
+
+        except Exception as e:
+            self.stop()
+            logger.error(f"Error starting EternalZoo service: {str(e)}", exc_info=True)
+            return False
+        
+        if not wait_for_health(local_model_port, timeout=120):
+            self.stop()
+            logger.error(f"Service failed to start within 120 seconds")
+            return False
+        
+        logger.info(f"[ETERNALZOO] Model service started on port {local_model_port}")
+
+        # Start the FastAPI app
+        uvicorn_command = [
+            "uvicorn",
+            "eternal_zoo.apis:app",
+            "--host", config.get("host", "0.0.0.0"),
+            "--port", str(port),
+            "--log-level", "info"
+        ]
+
+        api_data = {
+            "host": config.get("host", "0.0.0.0"),
+            "port": port,
+        }
+
+        api_log_stderr = self.logs_dir / "api.log"
+
+        logger.info(f"Starting API process: {' '.join(uvicorn_command)}")
+
+        try:
+            with open(api_log_stderr, 'w') as stderr_log:
+                api_process = subprocess.Popen(
+                    uvicorn_command,
+                    stderr=stderr_log,
+                    preexec_fn=os.setsid
+                )
+
+                api_data["pid"] = api_process.pid
+
+                logger.info(f"API logs written to {api_log_stderr}")
+
+            with open(self.api_service_file, 'wb') as f:
+                msgpack.pack(api_data, f)
+
+            logger.info(f"API service metadata written to {self.api_service_file}")
+        except Exception as e:
+            self.stop()
+            logger.error(f"Error writing proxy service metadata: {str(e)}", exc_info=True)
+            return False
+        
 
         return True
         
@@ -516,16 +550,6 @@ class EternalZooManager:
             # Always remove the lock when done (success or failure)
             self._release_start_lock()
 
-    def _dump_running_service(self, metadata: dict):
-        """Dump the running service details to a file."""
-        try:
-            with open(self.msgpack_file, "wb") as f:
-                msgpack.dump(metadata, f)
-                
-        except Exception as e:
-            logger.error(f"Error dumping running service: {str(e)}", exc_info=True)
-            return False
-
     def get_running_model(self) -> Optional[str]:
         """
         Get currently running model hash if the service is healthy.
@@ -547,117 +571,48 @@ class EternalZooManager:
             logger.error(f"Error getting running model: {str(e)}")
             return None
     
-    def stop(self, force: bool = False) -> bool:
-        """
-        Stop the running EternalZoo service with optimized process termination.
+    def stop(self) -> bool:
 
-        Args:
-            force (bool): If True, force kill processes immediately without graceful termination.
-
-        Returns:
-            bool: True if the service stopped successfully, False otherwise.
-        """
-        if not os.path.exists(self.msgpack_file):
+        if not self.ai_service_file.exists() and not self.proxy_service_file.exists():
             logger.warning("No running EternalZoo service to stop.")
             return False
-
-        try:
-            # Load service details from the msgpack file
-            with open(self.msgpack_file, "rb") as f:
-                service_info = msgpack.load(f)
-            
-            hash_val = service_info.get("hash")
-            pid = service_info.get("pid")
-            app_pid = service_info.get("app_pid")
-            app_port = service_info.get("app_port")
-            local_ai_port = service_info.get("port")
-
-            if force:
-                logger.info(f"Force stopping EternalZoo service '{hash_val}' running on port {app_port} (AI PID: {pid}, API PID: {app_pid})...")
-            else:
-                logger.info(f"Stopping EternalZoo service '{hash_val}' running on port {app_port} (AI PID: {pid}, API PID: {app_pid})...")
-            
-            # Use the optimized termination methods with force parameter
-            timeout = 0 if force else 15
-            ai_stopped = self._terminate_process_safely(pid, "EternalZoo service", timeout=timeout, force=force)
-            api_stopped = self._terminate_process_safely(app_pid, "API service", timeout=timeout, force=force)
-            
-            # Brief pause to allow system cleanup
-            time.sleep(1)
-            
-            # Verify ports are freed
-            ports_info = [(app_port, "API"), (local_ai_port, "AI")]
-            ports_freed = self._check_ports_freed(ports_info, max_retries=3)
-            
-            # Clean up metadata file - ONLY rely on direct process verification, not return values
-            metadata_cleaned = False
-            
-            # Direct verification: check if processes are actually dead
-            ai_actually_dead = True
-            api_actually_dead = True
-            
-            # Check AI process
-            if pid:
+        
+        # always force kill the service
+        ai_services = []
+        ai_service_stop = False
+        api_service_stop = False
+        
+        if self.ai_service_file.exists():
+            with open(self.ai_service_file, 'rb') as f:
+                ai_services = msgpack.unpack(f)
+            for ai_service in ai_services:
+                pid = ai_service.get("pid")
                 if psutil.pid_exists(pid):
-                    try:
-                        process = psutil.Process(pid)
-                        status = process.status()
-                        if status not in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
-                            ai_actually_dead = False
-                            logger.warning(f"AI process (PID: {pid}) still running with status: {status}")
-                        else:
-                            logger.info(f"AI process (PID: {pid}) confirmed dead with status: {status}")
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        # Process is gone or inaccessible, consider it dead
-                        ai_actually_dead = True
-                        logger.info(f"AI process (PID: {pid}) confirmed dead (no longer exists)")
-                else:
-                    logger.info(f"AI process (PID: {pid}) confirmed dead (PID doesn't exist)")
+                    ai_service_stop = self._terminate_process_safely(pid, "EternalZoo AI Service", force=True)
             
-            # Check API process
-            if app_pid:
-                if psutil.pid_exists(app_pid):
-                    try:
-                        process = psutil.Process(app_pid)
-                        status = process.status()
-                        if status not in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
-                            api_actually_dead = False
-                            logger.warning(f"API process (PID: {app_pid}) still running with status: {status}")
-                        else:
-                            logger.info(f"API process (PID: {app_pid}) confirmed dead with status: {status}")
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        # Process is gone or inaccessible, consider it dead
-                        api_actually_dead = True
-                        logger.info(f"API process (PID: {app_pid}) confirmed dead (no longer exists)")
-                else:
-                    logger.info(f"API process (PID: {app_pid}) confirmed dead (PID doesn't exist)")
-            
-            # Only remove msgpack file if both processes are confirmed dead
-            if ai_actually_dead and api_actually_dead:
-                metadata_cleaned = self._cleanup_service_metadata(force=force)
-                logger.info("All processes confirmed dead, removing service metadata file")
+            if ai_service_stop:
+                os.remove(self.ai_service_file)
+                logger.info(f"AI service metadata file removed: {self.ai_service_file}")
             else:
-                logger.warning("Keeping service metadata file - not all processes confirmed dead")
-                logger.warning(f"AI dead: {ai_actually_dead}, API dead: {api_actually_dead}")
-                # Log the termination attempt results for debugging
-                logger.info(f"Termination attempt results - AI stopped: {ai_stopped}, API stopped: {api_stopped}")
+                logger.error("Failed to stop EternalZoo AI Service")
+                return False
+        
+        if self.api_service_file.exists():
+            with open(self.api_service_file, 'rb') as f:
+                api_service = msgpack.unpack(f)
+            pid = api_service.get("pid", None)
+            if pid is not None:
+                if psutil.pid_exists(pid):
+                    api_service_stop = self._terminate_process_safely(pid, "EternalZoo API Service", force=True)
             
-            # Determine overall success
-            success = ai_stopped and api_stopped and metadata_cleaned
-            
-            if success:
-                logger.info("EternalZoo service stopped successfully.")
-                if not ports_freed:
-                    logger.warning("Service stopped but some ports may still be in use temporarily")
+            if api_service_stop:
+                os.remove(self.api_service_file)
+                logger.info(f"API service metadata file removed: {self.api_service_file}")
             else:
-                logger.error("EternalZoo service stop completed with some failures")
-                logger.error(f"EternalZoo stopped: {ai_stopped}, API stopped: {api_stopped}, metadata cleaned: {metadata_cleaned}")
-            
-            return success
-
-        except Exception as e:
-            logger.error(f"Error stopping EternalZoo service: {str(e)}", exc_info=True)
-            return False
+                logger.error("Failed to stop EternalZoo API Service")
+                return False
+        
+        return True
 
     def _terminate_process_safely(self, pid: int, process_name: str, timeout: int = 15, use_process_group: bool = True, force: bool = False) -> bool:
         """
@@ -1853,9 +1808,7 @@ class EternalZooManager:
             logger.error(f"Error updating LoRA: {str(e)}")
             return False
 
-    def _build_image_generation_command(self, model_path: str, port: int, host: str, config_name: str, 
-                                       lora_paths: Optional[List[str]] = None, 
-                                       lora_scales: Optional[List[float]] = None) -> list:
+    def _build_image_generation_command(self, config: dict, port: int) -> list:
         """Build the image-generation command with MLX Flux parameters and optional LoRA support."""
         command = [
             "mlx-flux",
