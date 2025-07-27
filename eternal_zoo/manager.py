@@ -771,9 +771,6 @@ class EternalZooManager:
             raise ValueError("Model path is required to start the service")
         
         model_name = config.get("model_name", None)
-        if model_family is None:
-            raise ValueError("Model family is required to start the service")
-        
         model_family = self._get_model_family(model_name)
         template_path = self._get_model_template_path(model_family)
         best_practice_path = self._get_model_best_practice_path(model_family)
