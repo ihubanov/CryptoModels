@@ -1282,5 +1282,5 @@ async def download_model_async(hf_data: dict, filecoin_hash: str | None = None) 
         if not success:
             logger.error("Failed to download model")
             return False, None
-        
+        path = final_dir
     return True, path

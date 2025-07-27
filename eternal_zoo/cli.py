@@ -518,9 +518,8 @@ def handle_run(args):
         if args.mmproj is not None:
             mmproj_path = os.path.join(local_path, args.mmproj)
             if os.path.exists(mmproj_path):
-                projector_path = mmproj_path
-            
-        
+                projector_path = mmproj_path   
+                  
         configs = [{
             "model": local_path,
             "port": args.port,
