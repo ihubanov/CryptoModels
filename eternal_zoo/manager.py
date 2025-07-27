@@ -15,8 +15,6 @@ from loguru import logger
 from eternal_zoo.config import DEFAULT_CONFIG
 from eternal_zoo.utils import wait_for_health
 from typing import Optional, Dict, Any, List
-from eternal_zoo.download import download_model_async, fetch_model_metadata_async
-
 
 class EternalZooServiceError(Exception):
     """Base exception for EternalZoo service errors."""
@@ -45,7 +43,8 @@ class EternalZooManager:
         # File paths from config
         self.ai_service_file = Path(DEFAULT_CONFIG.file_paths.AI_SERVICE_FILE)
         self.api_service_file = Path(DEFAULT_CONFIG.file_paths.API_SERVICE_FILE)
-        self.loaded_models: Dict[str, Any] = {}
+        self.service_info_file = Path(DEFAULT_CONFIG.file_paths.SERVICE_INFO_FILE)
+
         self.llama_server_path = DEFAULT_CONFIG.file_paths.LLAMA_SERVER
         self.start_lock_file = Path(DEFAULT_CONFIG.file_paths.START_LOCK_FILE)
         self.logs_dir = Path(DEFAULT_CONFIG.file_paths.LOGS_DIR)
@@ -235,9 +234,13 @@ class EternalZooManager:
     
     def stop(self) -> bool:
 
-        if not self.ai_service_file.exists() and not self.proxy_service_file.exists():
+        if not self.ai_service_file.exists() and not self.api_service_file.exists() and not self.service_info_file.exists():
             logger.warning("No running EternalZoo service to stop.")
             return False
+        
+        if self.service_info_file.exists():
+            os.remove(self.service_info_file)
+            logger.info(f"Service info file removed: {self.service_info_file}")
         
         # always force kill the service
         ai_services = []
@@ -1417,15 +1420,15 @@ class EternalZooManager:
     def update_service_info(self, updates: Dict[str, Any]) -> bool:
         """Update service information in the msgpack file."""
         try:
-            if os.path.exists(self.msgpack_file):
-                with open(self.msgpack_file, "rb") as f:
+            if os.path.exists(self.service_info_file):
+                with open(self.service_info_file, "rb") as f:
                     service_info = msgpack.load(f)
             else:
                 service_info = {}
             
             service_info.update(updates)
             
-            with open(self.msgpack_file, "wb") as f:
+            with open(self.service_info_file, "wb") as f:
                 msgpack.dump(service_info, f)
             
             return True
@@ -1454,32 +1457,32 @@ class EternalZooManager:
             logger.error(f"Error updating LoRA: {str(e)}")
             return False
 
-    def _build_image_generation_command(self, config: dict, port: int) -> list:
-        """Build the image-generation command with MLX Flux parameters and optional LoRA support."""
-        command = [
-            "mlx-flux",
-            "serve",
-            "--model-path", str(model_path),
-            "--config-name", config_name,
-            "--port", str(port),
-            "--host", host
-        ]
+    # def _build_image_generation_command(self, config: dict, port: int) -> list:
+    #     """Build the image-generation command with MLX Flux parameters and optional LoRA support."""
+    #     command = [
+    #         "mlx-flux",
+    #         "serve",
+    #         "--model-path", str(model_path),
+    #         "--config-name", config_name,
+    #         "--port", str(port),
+    #         "--host", host
+    #     ]
         
-        # Validate LoRA parameters
-        if lora_paths and lora_scales and len(lora_paths) != len(lora_scales):
-            raise ValueError(f"LoRA paths count ({len(lora_paths)}) must match scales count ({len(lora_scales)})")
+    #     # Validate LoRA parameters
+    #     if lora_paths and lora_scales and len(lora_paths) != len(lora_scales):
+    #         raise ValueError(f"LoRA paths count ({len(lora_paths)}) must match scales count ({len(lora_scales)})")
         
-        # Add LoRA paths if provided
-        if lora_paths:
-            lora_path_str = ",".join(lora_paths)
-            command.extend(["--lora-paths", lora_path_str])
+    #     # Add LoRA paths if provided
+    #     if lora_paths:
+    #         lora_path_str = ",".join(lora_paths)
+    #         command.extend(["--lora-paths", lora_path_str])
         
-        # Add LoRA scales if provided
-        if lora_scales:
-            lora_scale_str = ",".join(str(scale) for scale in lora_scales)
-            command.extend(["--lora-scales", lora_scale_str])
+    #     # Add LoRA scales if provided
+    #     if lora_scales:
+    #         lora_scale_str = ",".join(str(scale) for scale in lora_scales)
+    #         command.extend(["--lora-scales", lora_scale_str])
         
-        return command
+    #     return command
 
     def _build_model_command(self, folder_name: str, local_model_path: str, local_ai_port: int, host: str, context_length: int) -> list:
         """Build the appropriate command for a model based on its family."""

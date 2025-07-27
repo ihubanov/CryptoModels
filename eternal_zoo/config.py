@@ -98,6 +98,7 @@ class FilePathConfig:
     # Service files
     AI_SERVICE_FILE: str = os.getenv("AI_SERVICE_FILE", "ai_service.msgpack")
     API_SERVICE_FILE: str = os.getenv("API_SERVICE_FILE", "api_service.msgpack")
+    SERVICE_INFO_FILE: str = os.getenv("SERVICE_INFO_FILE", "service_info.msgpack")
     START_LOCK_FILE: str = os.getenv("START_LOCK_FILE", "start_lock.lock")
     
     # Directories
