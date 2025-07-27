@@ -426,7 +426,10 @@ def handle_run(args):
         if not success:
             print_error(f"Failed to download model {args.hash}")
             sys.exit(1)
-        metadata = asyncio.run(fetch_model_metadata_async(args.hash))
+        success, metadata = asyncio.run(fetch_model_metadata_async(args.hash))
+        if not success:
+            print_error(f"Failed to fetch model metadata for {args.hash}")
+            sys.exit(1)
         if os.path.exists(local_path + "-projector"):
             projector = local_path + "-projector" + "-projector"
         config = {
