@@ -434,7 +434,7 @@ def handle_run(args):
             "port": args.port,
             "host": args.host,
             "context_length": args.context_length,
-            "task": metadata["task"],
+            "task": metadata.get("task", "chat"),
             "is_lora": metadata.get("is_lora", False),
             "family": metadata["folder_name"],
             "projector": projector
