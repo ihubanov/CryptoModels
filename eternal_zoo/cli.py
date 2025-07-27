@@ -9,8 +9,8 @@ from rich.panel import Panel
 from rich.text import Text
 from rich import print as rprint
 
-from eternal_zoo.config import config
 from eternal_zoo.version import __version__
+from eternal_zoo.config import DEFAULT_CONFIG
 from eternal_zoo.core import EternalZooManager
 from eternal_zoo.upload import upload_folder_to_lighthouse
 from eternal_zoo.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH
@@ -167,69 +167,69 @@ def parse_args():
     run_command.add_argument(
         "--port",
         type=int,
-        default=config.network.DEFAULT_PORT,
-        help=f"🌐 Port number for the server (default: {config.network.DEFAULT_PORT})",
+        default=DEFAULT_CONFIG.network.DEFAULT_PORT,
+        help=f"🌐 Port number for the server (default: {DEFAULT_CONFIG.network.DEFAULT_PORT})",
         metavar="PORT"
     )
     run_command.add_argument(
         "--host",
         type=str,
-        default=config.network.DEFAULT_HOST,
-        help=f"🏠 Host address for the server (default: {config.network.DEFAULT_HOST})",
+        default=DEFAULT_CONFIG.network.DEFAULT_HOST,
+        help=f"🏠 Host address for the server (default: {DEFAULT_CONFIG.network.DEFAULT_HOST})",
         metavar="HOST"
     )
     run_command.add_argument(
         "--context-length",
         type=int,
-        default=config.model.DEFAULT_CONTEXT_LENGTH,
-        help=f"📏 Context length for the model (default: {config.model.DEFAULT_CONTEXT_LENGTH})",
+        default=DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH,
+        help=f"📏 Context length for the model (default: {DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH})",
         metavar="LENGTH"
     )
 
-    # Model serve command
-    serve_command = model_subparsers.add_parser(
-        "serve",
-        help="🎯 Serve all downloaded models with optional main model selection",
-        description="Run all models in llms-storage with a main model (randomly selected if not specified)"
-    )
-    serve_command.add_argument(
-        "--main-hash",
-        help="🔗 Hash of the main model to serve (if not specified, uses random model)",
-        metavar="HASH"
-    )
-    serve_command.add_argument(
-        "--port",
-        type=int,
-        default=config.network.DEFAULT_PORT,
-        help=f"🌐 Port number for the server (default: {config.network.DEFAULT_PORT})",
-        metavar="PORT"
-    )
-    serve_command.add_argument(
-        "--host",
-        type=str,
-        default=config.network.DEFAULT_HOST,
-        help=f"🏠 Host address for the server (default: {config.network.DEFAULT_HOST})",
-        metavar="HOST"
-    )
-    serve_command.add_argument(
-        "--context-length",
-        type=int,
-        default=config.model.DEFAULT_CONTEXT_LENGTH,
-        help=f"📏 Context length for the model (default: {config.model.DEFAULT_CONTEXT_LENGTH})",
-        metavar="LENGTH"
-    )
+    # # Model serve command
+    # serve_command = model_subparsers.add_parser(
+    #     "serve",
+    #     help="🎯 Serve all downloaded models with optional main model selection",
+    #     description="Run all models in llms-storage with a main model (randomly selected if not specified)"
+    # )
+    # serve_command.add_argument(
+    #     "--main-hash",
+    #     help="🔗 Hash of the main model to serve (if not specified, uses random model)",
+    #     metavar="HASH"
+    # )
+    # serve_command.add_argument(
+    #     "--port",
+    #     type=int,
+    #     default=config.network.DEFAULT_PORT,
+    #     help=f"🌐 Port number for the server (default: {config.network.DEFAULT_PORT})",
+    #     metavar="PORT"
+    # )
+    # serve_command.add_argument(
+    #     "--host",
+    #     type=str,
+    #     default=config.network.DEFAULT_HOST,
+    #     help=f"🏠 Host address for the server (default: {config.network.DEFAULT_HOST})",
+    #     metavar="HOST"
+    # )
+    # serve_command.add_argument(
+    #     "--context-length",
+    #     type=int,
+    #     default=config.model.DEFAULT_CONTEXT_LENGTH,
+    #     help=f"📏 Context length for the model (default: {config.model.DEFAULT_CONTEXT_LENGTH})",
+    #     metavar="LENGTH"
+    # )
 
-    # Model stop command
-    stop_command = model_subparsers.add_parser(
-        "stop",
-        help="🛑 Stop the running model server",
-        description="Gracefully shutdown the currently running model server"
-    )
-    stop_command.add_argument(
-        "--force",
-        action="store_true",
-        help="💥 Force kill processes immediately without graceful termination (use when normal stop fails)"
-    )
+    # # Model stop command
+    # stop_command = model_subparsers.add_parser(
+    #     "stop",
+    #     help="🛑 Stop the running model server",
+    #     description="Gracefully shutdown the currently running model server"
+    # )
+    # stop_command.add_argument(
+    #     "--force",
+    #     action="store_true",
+    #     help="💥 Force kill processes immediately without graceful termination (use when normal stop fails)"
+    # )
 
     # Model download command
     download_command = model_subparsers.add_parser(
