@@ -698,7 +698,9 @@ class EternalZooManager:
             logger.error(f"Error removing service metadata file: {str(e)}")
             return False
 
-    def _get_model_template_path(self, model_family: str) -> str:
+    def _get_model_template_path(self, model_family: str | None = None) -> str:
+        if model_family is None:
+            return None
         """Get the template path for a specific model family."""
         chat_template_path = pkg_resources.resource_filename("eternal_zoo", f"examples/templates/{model_family}.jinja")
         # check if the template file exists
@@ -706,7 +708,9 @@ class EternalZooManager:
             return None
         return chat_template_path
 
-    def _get_model_best_practice_path(self, model_family: str) -> str:
+    def _get_model_best_practice_path(self, model_family: str | None = None) -> str:
+        if model_family is None:
+            return None
         """Get the best practices for a specific model family."""
         best_practice_path = pkg_resources.resource_filename("eternal_zoo", f"examples/best_practices/{model_family}.json")
         # check if the best practices file exists
@@ -732,16 +736,45 @@ class EternalZooManager:
         ]
         return command
     
+    def _get_model_family(self, model_name: str | None = None) -> str:
+        if model_name is None:
+            return None
+        model_name = model_name.lower()
+
+        if "qwen3-coder" in model_name:
+            return "qwen3-coder"
+        if "qwen3" in model_name:
+            return "qwen3"
+        if "qwen2.5" in model_name:
+            return "qwen2.5"
+        if "lfm2" in model_name:
+            return "lfm2"
+        if "openreasoning-nemotron" in model_name:
+            return "openreasoning-nemotron"
+        if "dolphin-3.0" in model_name:
+            return "dolphin-3.0"
+        if "dolphin-3.1" in model_name:
+            return "dolphin-3.1"
+        if "devstral-small" in model_name:
+            return "devstral-small"
+        if "gemma-3n" in model_name:
+            return "gemma-3n"
+        if "gemma-3" in model_name:
+            return "gemma-3"
+    
+        return None
+    
     def _build_chat_command(self, config: dict, port: int) -> list:
         """Build the chat command with common parameters."""
         model_path = config.get("model", None)
         if model_path is None:
             raise ValueError("Model path is required to start the service")
         
-        model_family = config.get("family", None)
+        model_name = config.get("model_name", None)
         if model_family is None:
             raise ValueError("Model family is required to start the service")
         
+        model_family = self._get_model_family(model_name)
         template_path = self._get_model_template_path(model_family)
         best_practice_path = self._get_model_best_practice_path(model_family)
 
@@ -754,6 +787,8 @@ class EternalZooManager:
             "--host", "0.0.0.0",
             "--pooling", "mean",
             "--no-webui",
+            "--no-context-shift",
+            "-fa",
             "-ngl", "9999",
             "--jinja",
             "--reasoning-format", "none",
