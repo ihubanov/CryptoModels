@@ -219,17 +219,17 @@ def parse_args():
     #     metavar="LENGTH"
     # )
 
-    # # Model stop command
-    # stop_command = model_subparsers.add_parser(
-    #     "stop",
-    #     help="🛑 Stop the running model server",
-    #     description="Gracefully shutdown the currently running model server"
-    # )
-    # stop_command.add_argument(
-    #     "--force",
-    #     action="store_true",
-    #     help="💥 Force kill processes immediately without graceful termination (use when normal stop fails)"
-    # )
+    # Model stop command
+    stop_command = model_subparsers.add_parser(
+        "stop",
+        help="🛑 Stop the running model server",
+        description="Gracefully shutdown the currently running model server"
+    )
+    stop_command.add_argument(
+        "--force",
+        action="store_true",
+        help="💥 Force kill processes immediately without graceful termination (use when normal stop fails)"
+    )
 
     # Model download command
     download_command = model_subparsers.add_parser(
@@ -503,11 +503,7 @@ def handle_serve(args):
 
 def handle_stop(args):
     """Handle model stop with beautiful output"""
-    if args.force:
-        print_info("Force stopping model server...")
-    else:
-        print_info("Stopping model server...")
-    if not manager.stop(force=args.force):
+    if not manager.stop():
         print_error("Failed to stop model server or no server running")
     else:
         print_success("Model server stopped successfully")
