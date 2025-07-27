@@ -3,15 +3,14 @@ Schema definitions for API requests and responses following OpenAI's API standar
 """
 
 import re
-import os
-from typing_extensions import Literal
-from pydantic import BaseModel, Field, validator, root_validator
-from typing import List, Dict, Optional, Union, Any, ClassVar
 import time
 import uuid
 from enum import Enum
+from typing_extensions import Literal
+from pydantic import BaseModel, Field, validator, root_validator
+from typing import List, Dict, Optional, Union, Any, ClassVar
 # Import configuration settings
-from eternal_zoo.config import config
+from eternal_zoo.config import DEFAULT_CONFIG
 
 # Precompile regex patterns for better performance
 UNICODE_BOX_PATTERN = re.compile(r'\\u25[0-9a-fA-F]{2}')
@@ -80,7 +79,7 @@ class ChatCompletionRequestBase(BaseModel):
     """
     Base model for chat completion requests.
     """
-    model: str = Field(config.model.DEFAULT_CHAT_MODEL, description="Model to use for completion")
+    model: str = Field(DEFAULT_CONFIG.model.DEFAULT_CHAT_MODEL, description="Model to use for completion")
     messages: List[Message] = Field(..., description="List of messages in the conversation")
     tools: Optional[List[Dict[str, Any]]] = Field(None, description="Available tools for the model")
     tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(None, description="Tool choice configuration")
@@ -241,7 +240,7 @@ class EmbeddingRequest(BaseModel):
     """
     Model for embedding requests.
     """
-    model: str = Field(config.model.DEFAULT_EMBED_MODEL, description="Model to use for embedding")
+    model: str = Field(DEFAULT_CONFIG.model.DEFAULT_EMBED_MODEL, description="Model to use for embedding")
     input: List[str] = Field(..., min_items=1, description="List of text inputs for embedding")
 
     @validator("input")
@@ -383,7 +382,7 @@ class Priority(str, Enum):
 class ImageGenerationRequest(BaseModel):
     """Request schema for OpenAI-compatible image generation API"""
     prompt: str = Field(..., description="A text description of the desired image(s). The maximum length is 1000 characters.", max_length=1000)
-    model: Optional[str] = Field(config.model.DEFAULT_IMAGE_MODEL, description="The model to use for image generation")
+    model: Optional[str] = Field(DEFAULT_CONFIG.model.DEFAULT_IMAGE_MODEL, description="The model to use for image generation")
     size: Optional[ImageSize] = Field(default=ImageSize.COSMOS_SIZE, description="The size of the generated images")
     negative_prompt: Optional[str] = Field(None, description="The negative prompt to generate the image from")
     steps: Optional[int] = Field(default=50, ge=1, le=50, description="The number of inference steps (1-50)")
