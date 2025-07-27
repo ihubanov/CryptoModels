@@ -427,28 +427,28 @@ def handle_download(args) -> bool:
         print_error("Download failed")
         sys.exit(1)
 
-def _download_and_validate_model(hf_data, hash_value=None):
-    """Helper function to download and validate a model"""
-    success, local_path = asyncio.run(download_model_async(hf_data, hash_value))
-    if not success:
-        print_error(f"Failed to download model {hash_value or 'from Hugging Face'}")
-        sys.exit(1)
+def handle_run(args):
     
-    if hash_value:
-        success, metadata = asyncio.run(fetch_model_metadata_async(hash_value))
-        if not success:
-            print_error(f"Failed to fetch model metadata for {hash_value}")
+    if args.hash:
+        if args.hash not in HASH_TO_MODEL:
+            print_error(f"Hash {args.hash} not found in HASH_TO_MODEL")
             sys.exit(1)
-        return local_path, metadata
-    
-    return local_path, None
+        model_name = HASH_TO_MODEL[args.hash]
+        hf_data = FEATURED_MODELS[model_name]
+        projector = None
 
-def _create_model_config(local_path, args, hash_value=None, metadata=None, projector=None):
-    """Helper function to create model configuration"""
-    if metadata:
-        # Use metadata for featured models
-        config = {
-            "hash": hash_value,
+        success, local_path = asyncio.run(download_model_async(hf_data, args.hash))
+        if not success:
+            print_error(f"Failed to download model {args.hash}")
+            sys.exit(1)
+        success, metadata = asyncio.run(fetch_model_metadata_async(args.hash))
+        if not success:
+            print_error(f"Failed to fetch model metadata for {args.hash}")
+            sys.exit(1)
+        if os.path.exists(local_path + "-projector"):
+            projector = local_path + "-projector"
+        configs = [{
+            "hash": args.hash,
             "model": local_path,
             "port": args.port,
             "host": args.host,
@@ -460,82 +460,78 @@ def _create_model_config(local_path, args, hash_value=None, metadata=None, proje
             "multimodal": False if projector is None else True,
             "on_demand": False,
             "lora": metadata.get("lora", False),
-        }
-    else:
-        # Use args for Hugging Face models
-        folder_name = os.path.basename(local_path)
-        model_path = local_path
-        if args.hf_file is not None:
-            model_path = os.path.join(local_path, args.hf_file)
-        
-        config = {
-            "model": model_path,
-            "port": args.port,
-            "host": args.host,
-            "context_length": args.context_length,
-            "model_name": folder_name,
-            "task": args.task,
-            "config_name": args.config_name,
-            "multimodal": True if args.mmproj else False,
-            "on_demand": False,
-            "lora": False,
-            "is_lora": False,
-            "projector": projector,
-        }
-    
-    return config
-
-def handle_run(args):
-    """Handle model run command with optimized logic"""
-    
-    # Handle hash-based model loading
-    if args.hash:
-        if args.hash not in HASH_TO_MODEL:
-            print_error(f"Hash {args.hash} not found in HASH_TO_MODEL")
-            sys.exit(1)
-        
-        model_name = HASH_TO_MODEL[args.hash]
-        hf_data = FEATURED_MODELS[model_name]
-        
-        local_path, metadata = _download_and_validate_model(hf_data, args.hash)
-        projector = local_path + "-projector" if os.path.exists(local_path + "-projector") else None
-        
-        configs = [_create_model_config(local_path, args, args.hash, metadata, projector)]
+        }]
         return manager.start(configs)
     
-    # Handle model name-based loading
     if args.model_name:
         if args.model_name in MODEL_TO_HASH:
             args.hash = MODEL_TO_HASH[args.model_name]
-        
         if args.model_name not in FEATURED_MODELS:
             print_error(f"Model name {args.model_name} not found in FEATURED_MODELS")
             sys.exit(1)
-        
         hf_data = FEATURED_MODELS[args.model_name]
-        local_path, metadata = _download_and_validate_model(hf_data, args.hash)
-        projector = local_path + "-projector" if os.path.exists(local_path + "-projector") else None
+        success, local_path = asyncio.run(download_model_async(hf_data, args.hash))
         
-        configs = [_create_model_config(local_path, args, args.hash, metadata, projector)]
+        if not success:
+            print_error(f"Failed to download model {args.hash}")
+            sys.exit(1)
+        success, metadata = asyncio.run(fetch_model_metadata_async(args.hash))
+        if not success:
+            print_error(f"Failed to fetch model metadata for {args.hash}")
+            sys.exit(1)
+        if os.path.exists(local_path + "-projector"):
+            projector = local_path + "-projector"
+        configs = [{
+            "hash": args.hash,
+            "model": local_path,
+            "port": args.port,
+            "host": args.host,
+            "context_length": args.context_length,
+            "model_name": metadata["folder_name"],
+            "task": metadata.get("task", "chat"),
+            "is_lora": metadata.get("is_lora", False),
+            "projector": projector,
+            "multimodal": False if projector is None else True,
+            "on_demand": False,
+            "lora": metadata.get("lora", False),
+        }]
         return manager.start(configs)
     
-    # Handle Hugging Face repository loading
     if args.hf_repo is not None:
         hf_data = {
             "repo": args.hf_repo,
             "model": args.hf_file,
             "projector": args.mmproj,
         }
+        success, local_model_path = asyncio.run(download_model_async(hf_data))
+        if not success:
+            print_error(f"Failed to download model {args.hf_repo}")
+            sys.exit(1)
+
+        folder_name = os.path.basename(local_path)
+        if args.model is not None:
+            local_model_path = os.path.join(local_path, args.model)
+
+        if args.mmproj is not None:
+            projector = os.path.join(local_model_path, args.mmproj)
         
-        local_path, _ = _download_and_validate_model(hf_data)
-        projector = os.path.join(local_path, args.mmproj) if args.mmproj else None
-        
-        configs = [_create_model_config(local_path, args, projector=projector)]
+        configs = [{
+            "model": local_model_path,
+            "port": args.port,
+            "host": args.host,
+            "context_length": args.context_length,
+            "model_name": folder_name,
+            "task": args.task,
+            "config_name": args.config_name,
+            "context_length": args.context_length,
+            "multimodal": True if args.mmproj else False,
+            "on_demand": False,
+            "lora": False,
+            "is_lora": False,
+            "projector": projector,
+        }]
         return manager.start(configs)
-    
-    # If no valid input provided
-    print_error("No model specified. Please provide --hash, model_name, or --hf-repo")
-    sys.exit(1)
+
 
 def handle_serve(args):
     """Handle model serve command - run all downloaded models with specified main model"""
