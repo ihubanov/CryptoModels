@@ -187,12 +187,15 @@ class ServiceHandler:
                 chat_models.append(ai_service)
 
         if len(chat_models) == 0:
-            raise HTTPException(status_code=404, detail=f"No chat models found")
+            raise HTTPException(status_code=404, detail=f"No chat model found")
         
         if len(chat_models) > 1:
-            raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
-        else:
-            raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
+            for chat_model in chat_models:
+                if chat_model["model_id"] == model_id:
+                    port = chat_model["port"]
+                    break
+                else:
+                    raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
         
         if request.is_vision_request():
             if not service_info.get("multimodal", False):

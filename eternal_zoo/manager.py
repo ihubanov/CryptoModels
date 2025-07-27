@@ -1379,10 +1379,10 @@ class EternalZooManager:
         config_name = config["model_name"]
         lora_config = config.get("lora_config", None)
         is_lora = config.get("is_lora", False)
+        lora_paths = []
+        lora_scales = []
 
         if is_lora:
-            lora_paths = []
-            lora_scales = []
             for key, value in lora_config.items():
                 lora_paths.append(value["path"])
                 lora_scales.append(value["scale"])
@@ -1598,60 +1598,3 @@ class EternalZooManager:
             if ai_service["task"] == task:
                 models.append(ai_service)
         return models
-        
-
-    def _validate_lora_metadata(self, lora_metadata: dict) -> tuple[bool, str]:
-        """Validate LoRA metadata structure and return validation result."""
-        required_fields = ["base_model", "lora_paths", "lora_scales"]
-        
-        for field in required_fields:
-            if field not in lora_metadata:
-                return False, f"Missing required field: {field}"
-        
-        lora_paths = lora_metadata["lora_paths"]
-        lora_scales = lora_metadata["lora_scales"]
-        
-        if not isinstance(lora_paths, list):
-            return False, "lora_paths must be a list"
-        
-        if not isinstance(lora_scales, list):
-            return False, "lora_scales must be a list"
-        
-        if len(lora_paths) != len(lora_scales):
-            return False, f"lora_paths count ({len(lora_paths)}) must match lora_scales count ({len(lora_scales)})"
-        
-        if len(lora_paths) == 0:
-            return False, "lora_paths cannot be empty"
-        
-        # Validate that all scales are numeric
-        for i, scale in enumerate(lora_scales):
-            if not isinstance(scale, (int, float)):
-                return False, f"lora_scales[{i}] must be a number, got {type(scale).__name__}"
-        
-        return True, "Valid LoRA metadata"
-    
-    def _load_lora_metadata(self, metadata_path: str) -> tuple[Optional[dict], Optional[str]]:
-        """Load and validate LoRA metadata from file."""
-        try:
-            with open(metadata_path, "r") as f:
-                lora_metadata = json.load(f)
-            
-            is_valid, message = self._validate_lora_metadata(lora_metadata)
-            if not is_valid:
-                logger.error(f"Invalid LoRA metadata: {message}")
-                return None, f"Invalid LoRA metadata: {message}"
-            
-            return lora_metadata, None
-        
-        except FileNotFoundError:
-            error_msg = f"LoRA metadata file not found: {metadata_path}"
-            logger.error(error_msg)
-            return None, error_msg
-        except json.JSONDecodeError as e:
-            error_msg = f"Invalid JSON in LoRA metadata file: {e}"
-            logger.error(error_msg)
-            return None, error_msg
-        except Exception as e:
-            error_msg = f"Error loading LoRA metadata: {e}"
-            logger.error(error_msg)
-            return None, error_msg
