@@ -513,7 +513,7 @@ def handle_run(args):
 
         folder_name = os.path.basename(local_path)
         if args.hf_file is not None:
-            local_path = os.path.join(local_path, args.model)
+            local_path = os.path.join(local_path, args.hf_file)
 
         if args.mmproj is not None:
             mmproj_path = os.path.join(local_path, args.mmproj)
