@@ -169,9 +169,11 @@ class EternalZooManager:
             service_metadata = self._create_service_metadata(
                 config, local_model_port
             )
+        else:
+            raise ValueError(f"Invalid task: {task}")
             
         if running_ai_command is None:
-            raise ValueError(f"Invalid Running AI Command: {running_ai_command}")
+            raise ValueError(f"Invalid running AI command: {running_ai_command}")
         
         logger.info(f"Running command: {' '.join(running_ai_command)}")
         # elif task == "image-generation":
@@ -182,10 +184,7 @@ class EternalZooManager:
         #     running_ai_command = self._build_image_generation_command(config, local_model_port)
         #     service_metadata = self._create_service_metadata(
         #         config, local_model_port
-        #     )
-        else:
-            raise ValueError(f"Invalid task: {task}")
-        
+        #     
 
         return True
         
