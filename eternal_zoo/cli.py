@@ -606,58 +606,82 @@ def handle_run(args):
     return success
 
 
+def load_model_metadata(model_id, is_main=False):
+    """Load model metadata from JSON file and prepare configuration.
+
+    Args:
+        model_id (str): The identifier of the model.
+        is_main (bool): Whether this is the main model (default: False).
+
+    Returns:
+        dict: Configuration dictionary for the model.
+    """
+    json_path = os.path.join(DEFAULT_MODEL_DIR, f"{model_id}.json")
+    try:
+        with open(json_path, "r") as f:
+            metadata = json.load(f)
+    except FileNotFoundError:
+        print_error(f"Metadata file not found for model {model_id}")
+        sys.exit(1)
+    except json.JSONDecodeError:
+        print_error(f"Invalid JSON in metadata file for model {model_id}")
+        sys.exit(1)
+
+    local_path = os.path.join(DEFAULT_MODEL_DIR, model_id)
+    projector_path = None
+    if metadata.get("multimodal", False):
+        projector_path = os.path.join(DEFAULT_MODEL_DIR, f"{model_id}-projector")
+
+    config = {
+        "model_id": model_id,
+        "model": local_path,
+        "projector": projector_path,
+        "on_demand": not is_main,
+        "is_lora": metadata.get("lora", False),
+        "context_length": DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH,
+    }
+    return config
+
 def handle_serve(args):
-    """Handle model serve command - run all downloaded models with specified main model"""
+    """Handle model serve command - run all downloaded models with specified main model.
+
+    Args:
+        args: Command-line arguments containing host, port, main_hash, and main_model.
+    """
     print_info("Discovering downloaded models in models directory...")
 
     # Get all downloaded models
     downloaded_models = get_all_downloaded_models()
 
-    if len(downloaded_models) == 0:
+    if not downloaded_models:
         print_error("No downloaded models found in models directory")
         sys.exit(1)
 
     print_success(f"Found {len(downloaded_models)} downloaded model(s)")
 
-    main_model_id = downloaded_models[0]
-
+    # Determine the main model ID
     if args.main_hash:
         main_model_id = args.main_hash
-
+    elif args.main_model:
+        main_model_id = args.main_model
     else:
-        if args.main_model:
-            main_model_id = args.main_model
-        else:
-            main_model_id = random.choice(downloaded_models)
-    
-    configs = []
-    local_path = None
-    projector_path = None
-    with open(os.path.join(DEFAULT_MODEL_DIR, main_model_id + ".json"), "r") as f:
-        model_metadata = json.load(f)
-        if model_metadata.get("multimodal", False):
-            projector_path = os.path.join(DEFAULT_MODEL_DIR, main_model_id + "-projector")
+        main_model_id = downloaded_models[0]  # Default to first model instead of random
 
-        local_path = os.path.join(DEFAULT_MODEL_DIR, main_model_id)
-        model_metadata["projector"] = projector_path
-        model_metadata["model"] = local_path
-        model_metadata["context_length"] = DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH
-        model_metadata["on_demand"] = False
-        configs.append(model_metadata)
+    # Validate that the main model exists in downloaded models
+    if main_model_id not in downloaded_models:
+        print_error(f"Specified main model {main_model_id} not found in downloaded models")
+        sys.exit(1)
+
+    # Prepare configurations
+    main_config = load_model_metadata(main_model_id, is_main=True)
+    configs = [main_config]
 
     other_models = [model_id for model_id in downloaded_models if model_id != main_model_id]
-
     for model_id in other_models:
-        with open(os.path.join(DEFAULT_MODEL_DIR, model_id + ".json"), "r") as f:
-            model_metadata = json.load(f)
-            if model_metadata.get("multimodal", False):
-                projector_path = os.path.join(DEFAULT_MODEL_DIR, model_id + "-projector")
-                model_metadata["projector"] = projector_path
-            local_path = os.path.join(DEFAULT_MODEL_DIR, model_id)
-            model_metadata["model"] = local_path
-            model_metadata["on_demand"] = True
-            configs.append(model_metadata)
+        config = load_model_metadata(model_id, is_main=False)
+        configs.append(config)
 
+    # Start the model server
     success = manager.start(configs, args.port, args.host)
 
     if not success:
@@ -665,7 +689,10 @@ def handle_serve(args):
         sys.exit(1)
     else:
         print_success(f"Model server started successfully on {args.host}:{args.port}")
-        print_info(f"Serving {len(configs)} model(s) with main model: {main_model_id}")
+        if other_models:
+            print_info(f"Serving {len(configs)} model(s) with main model: {main_model_id} and other models: {', '.join(other_models)}")
+        else:
+            print_info(f"Serving only the main model: {main_model_id}")
    
 
 def handle_stop(args):
