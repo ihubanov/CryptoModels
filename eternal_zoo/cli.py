@@ -530,16 +530,12 @@ def handle_run(args):
         if not success:
             print_error(f"Failed to fetch model metadata for {args.hash}")
             sys.exit(1)
-        is_lora = metadata.get("is_lora", False)
+        is_lora = metadata.get("lora", False)
         task = metadata.get("task", "chat")
         model_name_from_metadata = metadata.get("folder_name", model_name)
     else:
         is_lora = hf_data.get("lora", False)
         task = hf_data.get("task", "chat")
-
-    print(f"is_lora: {is_lora}")
-    print(f"task: {task}")
-    print(f"model_name_from_metadata: {model_name_from_metadata}")
 
     # Handle LoRA configuration
     if is_lora:
