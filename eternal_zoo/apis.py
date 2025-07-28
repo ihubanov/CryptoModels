@@ -584,6 +584,7 @@ class RequestProcessor:
         This method is called within the processing lock to ensure atomic model switching.
         
         Args:
+            task (str): The task type (chat, embed, image-generation)
             model_requested (str): The model hash requested by the client
             request_id (str): The request ID for logging
             
@@ -606,6 +607,7 @@ class RequestProcessor:
             
             if model is None:
                 model = available_models[0]
+                logger.info(f"[{request_id}] No model {model_requested} found, using {model['model_id']} instead")
             
             # Check if model is already active
             if model["active"]:
