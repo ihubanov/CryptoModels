@@ -707,6 +707,8 @@ class RequestProcessor:
             
             model_id = request_obj.model
             available_models = eternal_zoo_manager.get_models_by_task(task)
+
+            print(f"available_models: {available_models}")
             if len(available_models) == 0:
                 raise HTTPException(status_code=404, detail=f"No {task} model found")
             
