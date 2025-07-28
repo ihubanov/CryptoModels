@@ -41,9 +41,9 @@ class EternalZooManager:
         self.MAX_PORT_RETRIES = DEFAULT_CONFIG.core.MAX_PORT_RETRIES
         
         # File paths from config
-        self.ai_service_prefix = DEFAULT_CONFIG.file_paths.AI_SERVICE_PREFIX
-        self.api_service_prefix = DEFAULT_CONFIG.file_paths.API_SERVICE_PREFIX
-        self.service_info_prefix = DEFAULT_CONFIG.file_paths.SERVICE_INFO_PREFIX
+        self.ai_service_file = Path(DEFAULT_CONFIG.file_paths.AI_SERVICE_FILE)
+        self.api_service_file = Path(DEFAULT_CONFIG.file_paths.API_SERVICE_FILE)
+        self.service_info_file = Path(DEFAULT_CONFIG.file_paths.SERVICE_INFO_FILE)
 
         self.llama_server_path = DEFAULT_CONFIG.file_paths.LLAMA_SERVER
         self.logs_dir = Path(DEFAULT_CONFIG.file_paths.LOGS_DIR)
@@ -61,12 +61,6 @@ class EternalZooManager:
             self._get_model_template_path(model_family),
             self._get_model_best_practice_path(model_family)
         )
-
-    def _init_service_files(self, port: int):
-        """Initialize service files for a given port."""
-        self.ai_service_file = Path(self.ai_service_prefix + f"_{str(port)}.msgpack")
-        self.api_service_file = Path(self.api_service_prefix + f"_{str(port)}.msgpack")
-        self.service_info_file = Path(self.service_info_prefix + f"_{str(port)}.msgpack")
 
     def _check_port_availability(self, host: str, port: int) -> bool:
         """Check if a port is available on the given host."""
@@ -89,13 +83,11 @@ class EternalZooManager:
             bool: True if service started successfully, False otherwise.
         """
 
-        self._init_service_files(port)
-
         if not self._check_port_availability(host, port):
             raise ServiceStartError(f"Port {port} is already in use on {host}")
         
-        if self.ai_service_file.exists():
-            self.stop()
+        # stop the service if it is already running
+        self.stop()
 
         ai_services = []
         api_service = {
@@ -206,8 +198,7 @@ class EternalZooManager:
 
         return True
     
-    def stop(self, port: int = 8080) -> bool:
-        self._init_service_files(port)
+    def stop(self) -> bool:
 
         if not self.ai_service_file.exists() and not self.api_service_file.exists() and not self.service_info_file.exists():
             logger.warning("No running EternalZoo service to stop.")

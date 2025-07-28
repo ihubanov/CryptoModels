@@ -25,7 +25,6 @@ from eternal_zoo.schema import (
     Message,
     ModelCard,
     ModelList,
-    ModelPermission,
     LoraConfigRequest,
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -99,36 +98,6 @@ def get_service_info() -> Dict[str, Any]:
 def convert_request_to_dict(request) -> Dict[str, Any]:
     """Convert request object to dictionary, supporting both Pydantic v1 and v2."""
     return request.model_dump() if hasattr(request, "model_dump") else request.dict()
-
-def validate_model_field(request_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Validate that the model field is present and matches one of the available model hashes."""
-
-    requested_model = request_data["model"]
-    
-    try:
-        service_info = get_service_info()
-        models = list(service_info.get("models", {}).keys())
-        
-        # Check if the requested model hash is in the models dictionary
-        if requested_model not in models:
-            logger.warning(f"Requested model '{requested_model}' not found in available models: {models}. Using model {models[0]} instead.")
-            return service_info, models[0] 
-        
-        logger.debug(f"Model validation passed for '{requested_model}'")
-        
-        # Return the service info to avoid redundant calls
-        return service_info, requested_model
-            
-    except HTTPException as e:
-        # If we can't get service info (503), it means no model is running
-        if e.status_code == 503:
-            logger.warning(f"Service info not available, requested model '{requested_model}' cannot be validated")
-            raise HTTPException(
-                status_code=400,
-                detail="Service is not running"
-            )
-        # Re-raise other HTTPExceptions
-        raise
 
 def generate_request_id() -> str:
     """Generate a short request ID for tracking."""
