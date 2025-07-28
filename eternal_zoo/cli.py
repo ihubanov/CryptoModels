@@ -33,9 +33,9 @@ def get_all_downloaded_models() -> list:
 
     # Look for all .gguf files in the directory
     for model_file in DEFAULT_MODEL_DIR.glob(f"*.json"):
-        model_hash = model_file.stem
-        if model_hash:  # Make sure it's not empty
-            downloaded_models.append(model_hash)
+        model_id = model_file.stem
+        if model_id:  # Make sure it's not empty
+            downloaded_models.append(model_id)
 
     return downloaded_models
 
@@ -201,31 +201,38 @@ def parse_args():
         metavar="CONFIG"
     )
 
-    # # Model serve command
-    # serve_command = model_subparsers.add_parser(
-    #     "serve",
-    #     help="🎯 Serve all downloaded models with optional main model selection",
-    #     description="Run all models in llms-storage with a main model (randomly selected if not specified)"
-    # )
-    # serve_command.add_argument(
-    #     "--main-hash",
-    #     help="🔗 Hash of the main model to serve (if not specified, uses random model)",
-    #     metavar="HASH"
-    # )
-    # serve_command.add_argument(
-    #     "--port",
-    #     type=int,
-    #     default=config.network.DEFAULT_PORT,
-    #     help=f"🌐 Port number for the server (default: {config.network.DEFAULT_PORT})",
-    #     metavar="PORT"
-    # )
-    # serve_command.add_argument(
-    #     "--host",
-    #     type=str,
-    #     default=config.network.DEFAULT_HOST,
-    #     help=f"🏠 Host address for the server (default: {config.network.DEFAULT_HOST})",
-    #     metavar="HOST"
-    # )
+    # Model serve command
+    serve_command = model_subparsers.add_parser(
+        "serve",
+        help="🎯 Serve all downloaded models with optional main model selection",
+        description="Run all models in llms-storage with a main model (randomly selected if not specified)"
+    )
+    serve_command.add_argument(
+        "--main-hash",
+        help="🔗 Hash of the main model to serve (if not specified, uses random model)",
+        metavar="HASH"
+    )
+    serve_command.add_argument(
+        "--main-model",
+        type=str,
+        help="🏷️  Model name(s) - single: qwen3-1.7b or multi: qwen3-14b,qwen3-4b (first is main, others on-demand)",
+        metavar="MODEL"
+    )
+    serve_command.add_argument(
+        "--port",
+        type=int,
+        default=DEFAULT_CONFIG.network.DEFAULT_PORT,
+        help=f"🌐 Port number for the server (default: {DEFAULT_CONFIG.network.DEFAULT_PORT})",
+        metavar="PORT"
+    )
+    serve_command.add_argument(
+        "--host",
+        type=str,
+        default=DEFAULT_CONFIG.network.DEFAULT_HOST,
+        help=f"🏠 Host address for the server (default: {DEFAULT_CONFIG.network.DEFAULT_HOST})",
+        metavar="HOST"
+    )
+
     # serve_command.add_argument(
     #     "--context-length",
     #     type=int,
@@ -608,57 +615,49 @@ def handle_run(args):
 
 def handle_serve(args):
     """Handle model serve command - run all downloaded models with specified main model"""
-    print_info("Discovering downloaded models in llms-storage...")
+    print_info("Discovering downloaded models in models directory...")
 
     # Get all downloaded models
     downloaded_models = get_all_downloaded_models()
 
-    if not downloaded_models:
-        print_error("No downloaded models found in llms-storage directory")
-        print_info("Use 'eai model download --hash <hash>' to download models first")
+    if len(downloaded_models) == 0:
+        print_error("No downloaded models found in models directory")
         sys.exit(1)
 
     print_success(f"Found {len(downloaded_models)} downloaded model(s)")
 
-    # Handle main hash selection
-    main_hash = args.main_hash
-    if main_hash is None:
-        # Randomly select a model as main
-        main_hash = random.choice(downloaded_models)
-        print_info(f"No main hash specified, randomly selected: {main_hash}")
+    main_model_id = downloaded_models[0]
+
+    if args.main_hash:
+        main_model_id = args.main_hash
+
     else:
-        # Validate that main hash exists among downloaded models
-        if main_hash not in downloaded_models:
-            print_error(f"Main model hash '{main_hash}' not found in downloaded models")
-            print_warning("Available downloaded models:")
-            for i, model_hash in enumerate(downloaded_models, 1):
-                print(f"  {i}. {model_hash}")
-            sys.exit(1)
-        print_success(f"Using specified main model hash: {main_hash}")
+        if args.main_model:
+            main_model_id = args.main_model
+        else:
+            main_model_id = random.choice(downloaded_models)
+    
+    configs = []
+    with open(os.path.join(DEFAULT_MODEL_DIR, main_model_id + ".json"), "r") as f:
+        model_metadata = json.load(f)
+        configs.append(model_metadata)
 
-    # Prepare the hash string for multi-model startup
-    # Put main hash first, then all others (excluding main hash to avoid duplication)
-    other_hashes = [h for h in downloaded_models if h != main_hash]
-    all_hashes = [main_hash] + other_hashes
-    model_hashes_str = ','.join(all_hashes)
+    other_models = [model_id for model_id in downloaded_models if model_id != main_model_id]
 
-    if len(all_hashes) > 1:
-        print_info(f"Multi-model setup:")
-        print_info(f"  Main model (loaded immediately): {main_hash}")
-        print_info(f"  On-demand models ({len(other_hashes)}): {', '.join(other_hashes[:3])}" +
-                  ("..." if len(other_hashes) > 3 else ""))
-    else:
-        print_info(f"Single model: {main_hash}")
+    for model_id in other_models:
+        with open(os.path.join(DEFAULT_MODEL_DIR, model_id + ".json"), "r") as f:
+            model_metadata = json.load(f)
+            configs.append(model_metadata)
 
-    print_info(f"Starting model server...")
-    print_info(f"Host: {args.host}, Port: {args.port}, Context: {args.context_length}")
+    success = manager.start(configs, args.port, args.host)
 
-    if not manager.start(model_hashes_str, args.port, args.host, args.context_length):
+    if not success:
         print_error("Failed to start model server")
         sys.exit(1)
     else:
         print_success(f"Model server started successfully on {args.host}:{args.port}")
-        print_info(f"Serving {len(all_hashes)} model(s) with main model: {main_hash}")
+        print_info(f"Serving {len(configs)} model(s) with main model: {main_model_id}")
+   
 
 def handle_stop(args):
     """Handle model stop with beautiful output"""
@@ -766,10 +765,10 @@ def main():
             handle_stop(known_args)
         elif known_args.model_command == "download":
             handle_download(known_args)
-        # elif known_args.model_command == "preserve":
-        #     handle_preserve(known_args)
-        # elif known_args.model_command == "check":
-        #     handle_check(known_args)
+        elif known_args.model_command == "preserve":
+            handle_preserve(known_args)
+        elif known_args.model_command == "check":
+            handle_check(known_args)
         else:
             print_error(f"Unknown model command: {known_args.model_command}")
             print_info("Available model commands: run, serve, stop, download, status, preserve, check")
