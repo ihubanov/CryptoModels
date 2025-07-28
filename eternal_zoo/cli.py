@@ -545,6 +545,7 @@ def handle_run(args):
             sys.exit(1)
         with open(metadata_path, "r") as f:
             lora_metadata = json.load(f)
+        print(f"lora_metadata: {lora_metadata}")
         lora_paths = lora_metadata.get("lora_paths", [])
         lora_scales = lora_metadata.get("lora_scales", [])
         base_model_hash = lora_metadata.get("base_model")
@@ -556,6 +557,7 @@ def handle_run(args):
         success, base_model_local_path = asyncio.run(download_model_async(base_model_hf_data, base_model_hash))
         if not success:
             print_error(f"Failed to download base model {base_model_hash}")
+            sys.exit(1)
         local_path = base_model_local_path
         lora_config = dict(zip(lora_paths, lora_scales))
 
