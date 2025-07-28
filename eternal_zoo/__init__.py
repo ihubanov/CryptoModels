@@ -5,6 +5,7 @@ from loguru import logger
 from dotenv import load_dotenv
 
 load_dotenv()
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
