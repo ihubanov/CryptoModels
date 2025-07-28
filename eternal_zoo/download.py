@@ -15,6 +15,7 @@ from pathlib import Path
 from loguru import logger
 from huggingface_hub import HfApi
 from huggingface_hub import snapshot_download
+from eternal_zoo.models import FEATURED_MODELS, HASH_TO_MODEL
 from eternal_zoo.utils import compute_file_hash, async_extract_zip, async_move, async_rmtree
 from eternal_zoo.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH, GATEWAY_URLS, ETERNAL_AI_METADATA_GW, PREFIX_DOWNLOAD_LOG
 
@@ -753,8 +754,13 @@ async def download_model_async_by_hash(hf_data: dict, filecoin_hash: str | None 
                 if base_model_hash is None:
                     logger.error("No base_model found in LoRA metadata")
                     return False, None
+
+                base_model_hf_data = None
                 
-                success, base_model_path = await download_model_async_by_hash(base_model_hash)
+                if base_model_hash in HASH_TO_MODEL:
+                    base_model_hf_data = FEATURED_MODELS[HASH_TO_MODEL[base_model_hash]]
+
+                success, base_model_path = await download_model_async_by_hash(base_model_hf_data, base_model_hash)
                 if not success:
                     logger.error(f"Failed to download base model: {base_model_hash}")
                     return False, None
