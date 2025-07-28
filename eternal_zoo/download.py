@@ -711,7 +711,10 @@ async def download_model_async_by_hash(hf_data: dict, filecoin_hash: str | None 
                 else:
                     logger.warning(f"LoRA model exists but base model not found at {lora_base_model_path_str}")
                     logger.info(f"Downloading missing base model: {base_model_hash}")
-                    success, base_model_path = await download_model_async_by_hash(base_model_hash)
+                    base_model_hf_data = None
+                    if base_model_hash in HASH_TO_MODEL:
+                        base_model_hf_data = FEATURED_MODELS[HASH_TO_MODEL[base_model_hash]]
+                    success, base_model_path = await download_model_async_by_hash(base_model_hf_data, base_model_hash)
                     if not success:
                         logger.error(f"Failed to download base model: {base_model_hash}")
                         return False, None
