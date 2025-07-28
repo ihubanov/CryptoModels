@@ -279,17 +279,12 @@ def parse_args():
         metavar="MMProj"
     )
     download_command.add_argument(
-        "--mmproj-url",
+        "--pattern",
         type=str,
-        help="🌐 URL to a multimodal projector file",
-        metavar="URL"
+        help="🔍 Pattern to download from Hugging Face",
+        metavar="PATTERN"
     )
-    download_command.add_argument(
-        "--lora-config-path",
-        type=str,
-        help="🔍 Path to a lora config file",
-        metavar="PATH"
-    )
+
     # Model check command
     check_command = model_subparsers.add_parser(
         "check",
@@ -431,6 +426,7 @@ def handle_run(args):
             "repo": args.hf_repo,
             "model": args.hf_file,
             "projector": args.mmproj,
+            "pattern": args.pattern
         }
         success, local_path = asyncio.run(download_model_async(hf_data))
         if not success:
@@ -449,10 +445,19 @@ def handle_run(args):
 
         projector_path = None
         if args.mmproj:
-            model_id = model_id
             mmproj_path = local_path + "-projector"
             if os.path.exists(mmproj_path):
                 projector_path = mmproj_path
+
+        if args.pattern:
+            # check `local_path` is a folder
+            if not os.path.isdir(local_path):
+                print_error(f"Path {local_path} is not a folder")
+                sys.exit(1)
+            files_in_folder = sorted(os.listdir(local_path))
+            local_path = os.path.join(local_path, files_in_folder[0])
+            model_id = model_id + "_" + args.pattern
+            
 
         config = {
             "model_id": model_id,
@@ -569,6 +574,16 @@ def handle_run(args):
             break
 
     model_id = args.hash if hasattr(args, 'hash') else model_name
+    pattern = hf_data.get("pattern", None)
+    if pattern:
+        model_id = model_id + "_" + pattern
+
+        if not os.path.isdir(local_path):
+            print_error(f"Path {local_path} is not a folder")
+            sys.exit(1)
+        files_in_folder = sorted(os.listdir(local_path))
+        local_path = os.path.join(local_path, files_in_folder[0])
+        
     # Build configuration
     config = {
         "model_id": model_id,
