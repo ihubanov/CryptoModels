@@ -1180,7 +1180,9 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
                         None,
                         lambda: run_hf_download_with_pty(repo_id, projector, model_dir, token= os.getenv("HF_TOKEN", None))
                     )
-                    res["projector_path"] = os.path.join(model_dir, projector)
+                    final_projector_path = os.path.join(model_dir, model + "_" + projector)
+                    await async_move(os.path.join(model_dir, projector), final_projector_path)
+                    res["projector_path"] = final_projector_path
             
             logger.info(f"Successfully downloaded model: {model_dir}")
             return True, res
@@ -1271,13 +1273,18 @@ async def download_model_async(hf_data: dict, filecoin_hash: str | None = None) 
     logger.info(f"Downloading model: {hf_data}")
     logger.info(f"Filecoin hash: {filecoin_hash}")
     path = None
-    if filecoin_hash is not None:
+    if filecoin_hash:
         success, path = await download_model_async_by_hash(hf_data, filecoin_hash)
         if not success:
             logger.error("Failed to download model")
             return False, None
     else:
-        final_dir = DEFAULT_MODEL_DIR /  hf_data["repo"].replace("/", "_")
+        final_dir = DEFAULT_MODEL_DIR
+        model = hf_data.get("model", None)
+
+        if model is None:
+            final_dir = final_dir / hf_data["repo"].replace("/", "_")
+
         success, hf_res = await download_model_from_hf(hf_data, final_dir)
         if not success:
             logger.error("Failed to download model")

@@ -480,7 +480,7 @@ def handle_run(args):
             print_error(f"Failed to start model {model_id}")
             sys.exit(1)
         
-        model_metadata_path = os.path.join(DEFAULT_MODEL_DIR, model_id + ".json")
+        model_metadata_path = os.path.join(DEFAULT_MODEL_DIR, folder_name + ".json")
         if not os.path.exists(model_metadata_path):
             with open(model_metadata_path, "w") as f:
                 json.dump(config, f)
