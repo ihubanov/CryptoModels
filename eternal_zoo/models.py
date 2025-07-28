@@ -29,92 +29,123 @@ MODEL_TO_HASH = {model: hash for hash, model in HASH_TO_MODEL.items()}
 FEATURED_MODELS = {
     "qwen3-embedding-0.6b": {
         "repo": "Qwen/Qwen3-Embedding-0.6B-GGUF",
-        "model": "Qwen3-Embedding-0.6B-Q8_0.gguf"
+        "model": "Qwen3-Embedding-0.6B-Q8_0.gguf",
+        "task": "embed"
     },
     "qwen3-embedding-4b": {
         "repo": "Qwen/Qwen3-Embedding-4B-GGUF",
-        "model": "Qwen3-Embedding-4B-Q8_0.gguf"
+        "model": "Qwen3-Embedding-4B-Q8_0.gguf",
+        "task": "embed"
     },
     "qwen3-1.7b": {
         "repo": "Qwen/Qwen3-1.7B-GGUF",
-        "model": "Qwen3-1.7B-Q8_0.gguf"
+        "model": "Qwen3-1.7B-Q8_0.gguf",
+        "task": "chat"
     },
     "qwen3-4b": {
        "repo": "Qwen/Qwen3-4B-GGUF",
        "model": "Qwen3-4B-Q8_0.gguf",
+       "task": "chat"
     },
     "qwen3-8b": {
         "repo": "Qwen/Qwen3-8B-GGUF",
-        "model": "Qwen3-8B-Q8_0.gguf"
+        "model": "Qwen3-8B-Q8_0.gguf",
+        "task": "chat"
     },
     "qwen3-14b": {
         "repo": "Qwen/Qwen3-14B-GGUF",
-        "model": "Qwen3-14B-Q8_0.gguf"
+        "model": "Qwen3-14B-Q8_0.gguf",
+        "task": "chat"
     },
     "qwen3-32b": {
         "repo": "Qwen/Qwen3-32B-GGUF",
-        "model": "Qwen3-32B-Q8_0.gguf"
+        "model": "Qwen3-32B-Q8_0.gguf",
+        "task": "chat"
     },
     "qwen3-30b-a3b": {
         "repo": "Qwen/Qwen3-30B-GGUF",
-        "model": "Qwen3-30B-A3B-Q8_0.gguf"
+        "model": "Qwen3-30B-A3B-Q8_0.gguf",
+        "task": "chat"
     },
     "qwen3-235b-a22b": {
         "repo": "unsloth/Qwen3-235B-A22B-Instruct-2507-GGUF",
-        "pattern": "Q4_K_M"
+        "pattern": "Q4_K_M",
+        "task": "chat"
     },
     "qwen3-coder-480b-a35b": {
         "repo": "unsloth/Qwen3-Coder-480B-A35B-Instruct-GGUF",
-        "pattern": "Q4_K_M"
+        "pattern": "Q4_K_M",
+        "task": "chat"
     },
     "gemma-3-4b": {
         "repo": "lmstudio-community/gemma-3-4B-it-qat-GGUF",
         "model": "gemma-3-4B-it-QAT-Q4_0.gguf",
-        "projector": "mmproj-model-f16.gguf"
+        "projector": "mmproj-model-f16.gguf",
+        "task": "chat"
     },
     "gemma-3-12b": {
         "repo": "lmstudio-community/gemma-3-12B-it-qat-GGUF",
         "model": "gemma-3-12B-it-QAT-Q4_0.gguf",
-        "projector": "mmproj-model-f16.gguf"
+        "projector": "mmproj-model-f16.gguf",
+        "task": "chat"
     },
     "gemma-3-27b": {
         "repo": "lmstudio-community/gemma-3-27B-it-qat-GGUF",
         "model": "gemma-3-27B-it-QAT-Q4_0.gguf",
-        "projector": "mmproj-model-f16.gguf"
+        "projector": "mmproj-model-f16.gguf",
+        "task": "chat"
     },
     "gemma-3n-e4b": {
         "repo": "unsloth/gemma-3n-E4B-it-GGUF",
-        "model": "gemma-3n-E4B-it-Q8_0.gguf"
+        "model": "gemma-3n-E4B-it-Q8_0.gguf",
+        "task": "chat"
     },
     "lfm2-1.2b": {
         "repo": "LiquidAI/LFM2-1.2B-GGUF",
-        "model": "LFM2-1.2B-Q8_0.gguf"
+        "model": "LFM2-1.2B-Q8_0.gguf",
+        "task": "chat"
     },
     "openreasoning-nemotron-32b": {
         "repo": "lmstudio-community/OpenReasoning-Nemotron-32B-GGUF",
-        "model": "OpenReasoning-Nemotron-32B-Q8_0.gguf"
+        "model": "OpenReasoning-Nemotron-32B-Q8_0.gguf",
+        "task": "chat"
     },
     "devstral-small": {
         "repo": "mistralai/Devstral-Small-2507_gguf",
-        "model": "Devstral-Small-2507-Q8_0.gguf"
+        "model": "Devstral-Small-2507-Q8_0.gguf",
+        "task": "chat"
     },
     "dolphin-3.0-llama3.1-8b": {
         "repo": "dphn/Dolphin3.0-Llama3.1-8B-GGUF",
         "model": "Dolphin3.0-Llama3.1-8B-Q8_0.gguf",
+        "task": "chat"
     },
     "flux-dev": {
-       "repo": "NikolaSigmoid/FLUX.1-dev"
+       "repo": "NikolaSigmoid/FLUX.1-dev",
+       "task": "image-generation",
+       "architecture": "flux-dev"
     },
     "flux-schnell": {
         "repo": "NikolaSigmoid/FLUX.1-schnell",
+        "task": "image-generation",
+        "architecture": "flux-schnell"
     },
     "flux-dev-nsfw": {
-        "repo": "NikolaSigmoid/FLUX.1-dev-NSFW-Master"
+        "repo": "NikolaSigmoid/FLUX.1-dev-NSFW-Master",
+        "task": "image-generation",
+        "lora": True,
+        "base_model": "flux-dev"
     },
     "flux-dev-18-loras": {
-        "repo": "NikolaSigmoid/FLUX.1-dev-18-loras"
+        "repo": "NikolaSigmoid/FLUX.1-dev-18-loras",
+        "task": "image-generation",
+        "lora": True,
+        "base_model": "flux-dev"
     },
     "nsfw-lab": {
-       "repo": "NikolaSigmoid/NSFW-Lab"
+       "repo": "NikolaSigmoid/NSFW-Lab",
+       "task": "image-generation",
+       "lora": True,
+       "base_model": "flux-schnell"
     }
 }

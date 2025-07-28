@@ -176,29 +176,34 @@ class ServiceHandler:
     @staticmethod
     async def generate_text_response(request: ChatCompletionRequest):
         """Generate a response for chat completion requests, supporting both streaming and non-streaming."""
-        service_info = get_service_info()
-        ai_services = service_info.get("ai_services", [])
         model_id = request.model
-        chat_models = []
-
-        for ai_service in ai_services:
-            task = ai_service["task"]
-            if task == "chat":
-                chat_models.append(ai_service)
-
+        chat_models = eternal_zoo_manager.get_models_by_task("chat")
         if len(chat_models) == 0:
             raise HTTPException(status_code=404, detail=f"No chat model found")
         
-        if len(chat_models) > 1:
-            for chat_model in chat_models:
-                if chat_model["model_id"] == model_id:
-                    port = chat_model["port"]
-                    break
-                else:
-                    raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
+        model_id = request.model
+        port = None
+
+        active_model = None
+
+        for chat_model in chat_models:
+            if chat_model["active"]:
+                active_model = chat_model
+                break
+
+        # Find the active model
+        for chat_model in chat_models:
+            if chat_model["model_id"] == model_id:
+                active_model = chat_model
+                break
+        
+        if active_model is None:
+            port = chat_models[0]["port"]
+        else:
+            port = active_model["port"]
         
         if request.is_vision_request():
-            if not service_info.get("multimodal", False):
+            if not active_model.get("multimodal", False):
                 content = "Unfortunately, I'm not equipped to interpret images at this time. Please provide a text description if possible."
                 return ServiceHandler._create_vision_error_response(request, content)
                 
@@ -716,15 +721,36 @@ class RequestProcessor:
         request_id = generate_request_id()
         logger.info(f"[{request_id}] Processing direct request for endpoint {endpoint}")
         
-        # Validate that model field is present and get service info
-        service_info, validated_model = validate_model_field(request_data)
-        request_data["model"] = validated_model
-        
         start_time = time.time()
         if endpoint in RequestProcessor.MODEL_ENDPOINTS:
             model_cls, handler = RequestProcessor.MODEL_ENDPOINTS[endpoint]
             request_obj = model_cls(**request_data)
+
+            task = "chat"
+            active_model = None
+
+            if endpoint == "/v1/embeddings" or endpoint == "/embeddings":
+                task = "embed"
+            elif endpoint == "/v1/images/generations" or endpoint == "/images/generations":
+                task = "image-generation"
+            else:
+                task = "image-edit"
             
+            model_id = request_obj.model
+            available_models = eternal_zoo_manager.get_models_by_task(task)
+            if len(available_models) == 0:
+                raise HTTPException(status_code=404, detail=f"No {task} model found")
+            
+            for model in available_models:
+                if model["model_id"] == model_id:
+                    active_model = model
+                    break
+            
+            if active_model is None:
+                active_model = available_models[0]   
+
+            request_obj.model = active_model["model_id"]
+                
             # Ensure model is active before processing (for direct requests)
             if hasattr(request_obj, 'model') and request_obj.model:
                 logger.debug(f"[{request_id}] Ensuring model {request_obj.model} is active for direct request")

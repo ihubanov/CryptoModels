@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import shutil
 import signal
 import msgpack
 import psutil
@@ -8,7 +9,6 @@ import asyncio
 import socket
 import subprocess
 import pkg_resources
-import shutil
 from pathlib import Path
 from loguru import logger
 from eternal_zoo.config import DEFAULT_CONFIG
@@ -67,8 +67,18 @@ class EternalZooManager:
         self.ai_service_file = Path(self.ai_service_prefix + f"_{str(port)}.msgpack")
         self.api_service_file = Path(self.api_service_prefix + f"_{str(port)}.msgpack")
         self.service_info_file = Path(self.service_info_prefix + f"_{str(port)}.msgpack")
+
+    def _check_port_availability(self, host: str, port: int) -> bool:
+        """Check if a port is available on the given host."""
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(1)
+                result = s.connect_ex((host, port))
+                return result != 0  # Port is available if connection fails
+        except Exception:
+            return False
         
-    def start(self, configs: List[dict], port: int = 8080) -> bool:
+    def start(self, configs: List[dict], port: int = 8080, host: str = "0.0.0.0") -> bool:
         """
         Start the EternalZoo service with a given config.
 
@@ -79,84 +89,86 @@ class EternalZooManager:
             bool: True if service started successfully, False otherwise.
         """
 
-        config = configs[0]
         self._init_service_files(port)
 
-        if not self._check_port_availability(config.get("host", "0.0.0.0"), port):
-            raise ServiceStartError(f"Port {port} is already in use on {config.get('host', '0.0.0.0')}")
+        if not self._check_port_availability(host, port):
+            raise ServiceStartError(f"Port {port} is already in use on {host}")
         
         if self.ai_service_file.exists():
             self.stop()
 
         ai_services = []
         api_service = {
-            "host": config.get("host", "0.0.0.0"),
+            "host": host,
             "port": port,
         }
 
-        task = config.get("task", "chat")
-        running_ai_command = None
-        ai_service = {
-            "config": config,
-        }
+        for config in configs:
 
-        local_model_port = self._get_free_port()    
+            task = config.get("task", "chat")
+            running_ai_command = None
+            ai_service = {
+                "config": config,
+            }
 
-        if task == "embed":
-            logger.info(f"Starting embed model: {config}")
-            running_ai_command = self._build_embed_command(config, local_model_port)
-        elif task == "chat":
-            logger.info(f"Starting chat model: {config}")
-            running_ai_command = self._build_chat_command(config, local_model_port)
-        elif task == "image-generation":
-            logger.info(f"Starting image generation model: {config}")
-            if not shutil.which("mlx-flux"):
-                raise EternalZooServiceError("mlx-flux command not found in PATH")
-            running_ai_command = self._build_image_generation_command(config, local_model_port)
-        elif task == "image-edit":
-            raise NotImplementedError("Image edit is not implemented yet")
-        else:
-            raise ValueError(f"Invalid task: {task}")
+            local_model_port = self._get_free_port()    
 
-        if running_ai_command is None:
-            raise ValueError(f"Invalid running AI command: {running_ai_command}")
-        
-        logger.info(f"Running command: {' '.join(running_ai_command)}")
-        
-        ai_log_stderr = self.logs_dir / "ai.log"
-        try:
-            with open(ai_log_stderr, 'w') as stderr_log:
-                ai_process = subprocess.Popen(
-                    running_ai_command,
-                    stderr=stderr_log,
-                    preexec_fn=os.setsid
-                )
-                logger.info(f"AI logs written to {ai_log_stderr}")
-            ai_service["last_activity"] = int(time.time())
-            ai_service["active"] = True
-            ai_service["pid"] = ai_process.pid
-            ai_services.append(ai_service)
-            with open(self.ai_service_file, 'wb') as f:
-                msgpack.pack(ai_services, f)
-            logger.info(f"AI service metadata written to {self.ai_service_file}")
+            if task == "embed":
+                logger.info(f"Starting embed model: {config}")
+                running_ai_command = self._build_embed_command(config, local_model_port)
+            elif task == "chat":
+                logger.info(f"Starting chat model: {config}")
+                running_ai_command = self._build_chat_command(config, local_model_port)
+            elif task == "image-generation":
+                logger.info(f"Starting image generation model: {config}")
+                if not shutil.which("mlx-flux"):
+                    raise EternalZooServiceError("mlx-flux command not found in PATH")
+                running_ai_command = self._build_image_generation_command(config, local_model_port)
+            elif task == "image-edit":
+                raise NotImplementedError("Image edit is not implemented yet")
+            else:
+                raise ValueError(f"Invalid task: {task}")
 
-        except Exception as e:
-            self.stop()
-            logger.error(f"Error starting EternalZoo service: {str(e)}", exc_info=True)
-            return False
-        
-        if not wait_for_health(local_model_port, timeout=120):
-            self.stop()
-            logger.error(f"Service failed to start within 120 seconds")
-            return False
-        
-        logger.info(f"[ETERNALZOO] Model service started on port {local_model_port}")
+            if running_ai_command is None:
+                raise ValueError(f"Invalid running AI command: {running_ai_command}")
+            
+            logger.info(f"Running command: {' '.join(running_ai_command)}")
+
+            if not config.get("on_demand", False):
+                ai_log_stderr = self.logs_dir / "ai.log"
+                try:
+                    with open(ai_log_stderr, 'w') as stderr_log:
+                        ai_process = subprocess.Popen(
+                            running_ai_command,
+                            stderr=stderr_log,
+                            preexec_fn=os.setsid
+                        )
+                        logger.info(f"AI logs written to {ai_log_stderr}")
+                    ai_service["last_activity"] = int(time.time())
+                    ai_service["active"] = True
+                    ai_service["pid"] = ai_process.pid
+                    ai_services.append(ai_service)
+                    with open(self.ai_service_file, 'wb') as f:
+                        msgpack.pack(ai_services, f)
+                    logger.info(f"AI service metadata written to {self.ai_service_file}")
+
+                except Exception as e:
+                    self.stop()
+                    logger.error(f"Error starting EternalZoo service: {str(e)}", exc_info=True)
+                    return False
+                
+                if not wait_for_health(local_model_port, timeout=120):
+                    self.stop()
+                    logger.error(f"Service failed to start within 120 seconds")
+                    return False
+                
+                logger.info(f"[ETERNALZOO] Model service started on port {local_model_port}")
 
         # Start the FastAPI app
         uvicorn_command = [
             "uvicorn",
             "eternal_zoo.apis:app",
-            "--host", config.get("host", "0.0.0.0"),
+            "--host", host,
             "--port", str(port),
             "--log-level", "info"
         ]
@@ -193,7 +205,6 @@ class EternalZooManager:
         })
 
         return True
-        
     
     def stop(self, port: int = 8080) -> bool:
         self._init_service_files(port)
@@ -778,504 +789,6 @@ class EternalZooManager:
                 raise ValueError(f"Best practices file not found: {best_practice_path}")
 
         return command
-
-    def _validate_lock_data(self, lock_data: dict) -> tuple[bool, str]:
-        """
-        Validate lock file data structure and return (is_valid, error_message).
-        
-        Args:
-            lock_data: Dictionary containing lock file data
-            
-        Returns:
-            tuple: (is_valid: bool, error_message: str)
-        """
-        required_fields = ["pid", "timestamp", "hash", "host", "port"]
-        
-        for field in required_fields:
-            if field not in lock_data:
-                return False, f"Missing required field: {field}"
-            
-        # Validate field types
-        if not isinstance(lock_data["pid"], int) or lock_data["pid"] <= 0:
-            return False, "Invalid PID: must be positive integer"
-            
-        if not isinstance(lock_data["timestamp"], (int, float)) or lock_data["timestamp"] <= 0:
-            return False, "Invalid timestamp: must be positive number"
-            
-        if not isinstance(lock_data["hash"], str) or not lock_data["hash"].strip():
-            return False, "Invalid hash: must be non-empty string"
-            
-        if not isinstance(lock_data["host"], str) or not lock_data["host"].strip():
-            return False, "Invalid host: must be non-empty string"
-            
-        if not isinstance(lock_data["port"], int) or not (1 <= lock_data["port"] <= 65535):
-            return False, "Invalid port: must be integer between 1-65535"
-            
-        # Check version compatibility (if present)
-        version = lock_data.get("version", "1.0")
-        if not isinstance(version, str):
-            return False, "Invalid version: must be string"
-            
-        # For now, we support version 1.0 (current) and future versions
-        try:
-            major, minor = map(int, version.split(".")[:2])
-            if major > 1:
-                return False, f"Unsupported lock file version: {version}"
-        except (ValueError, IndexError):
-            return False, f"Invalid version format: {version}"
-            
-        return True, ""
-    
-    def _acquire_start_lock(self, hash: str, host: str, port: int, force_takeover: bool = True) -> bool:
-        """
-        Acquire the start lock with support for force takeover of stuck processes.
-        
-        Args:
-            hash: Model hash for the service
-            host: Host address
-            port: Port number
-            force_takeover: If True, kill any existing start process and take over
-            
-        Returns:
-            bool: True if lock acquired, False otherwise
-        """
-        current_pid = os.getpid()
-        current_time = time.time()
-        
-        # Create lock data
-        lock_data = {
-            "version": "1.0",
-            "pid": current_pid,
-            "hash": hash,
-            "timestamp": current_time,
-            "host": host,
-            "port": port
-        }
-        
-        # Attempt to acquire lock with force takeover capability
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            try:
-                # Check and handle existing lock
-                if self.start_lock_file.exists():
-                    try:
-                        with open(self.start_lock_file, "r") as f:
-                            existing_lock_data = json.load(f)
-                        
-                        # Validate existing lock data
-                        is_valid, error_msg = self._validate_lock_data(existing_lock_data)
-                        if not is_valid:
-                            logger.warning(f"Removing corrupted lock file (attempt {attempt + 1}/{max_attempts}): {error_msg}")
-                            try:
-                                self.start_lock_file.unlink()
-                            except OSError:
-                                pass  # May have been removed by another process
-                        elif existing_lock_data.get("pid") == current_pid:
-                            # Same process already has the lock
-                            logger.info(f"Lock already acquired by current process (PID: {current_pid})")
-                            return True
-                        else:
-                            # Different process has the lock
-                            existing_pid = existing_lock_data.get("pid")
-                            
-                            if existing_pid and psutil.pid_exists(existing_pid):
-                                # Process exists - check if we should force takeover
-                                if force_takeover:
-                                    logger.warning(f"Force takeover: killing existing start process (PID: {existing_pid})")
-                                    
-                                    # Try to gracefully terminate the process first
-                                    try:
-                                        process = psutil.Process(existing_pid)
-                                        process.terminate()
-                                        
-                                        # Wait for graceful termination
-                                        try:
-                                            process.wait(timeout=5)
-                                            logger.info(f"Gracefully terminated existing start process (PID: {existing_pid})")
-                                        except psutil.TimeoutExpired:
-                                            # Force kill if graceful termination fails
-                                            logger.warning(f"Force killing stuck start process (PID: {existing_pid})")
-                                            process.kill()
-                                            process.wait(timeout=3)
-                                            logger.info(f"Force killed existing start process (PID: {existing_pid})")
-                                    except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-                                        logger.info(f"Process {existing_pid} already terminated: {e}")
-                                    except Exception as e:
-                                        logger.error(f"Error terminating process {existing_pid}: {e}")
-                                        if attempt < max_attempts - 1:
-                                            time.sleep(0.5 * (attempt + 1))
-                                            continue
-                                        else:
-                                            return False
-                                    
-                                    # Remove the lock file after killing the process
-                                    try:
-                                        self.start_lock_file.unlink()
-                                        logger.info(f"Removed lock file after killing process {existing_pid}")
-                                    except OSError:
-                                        pass  # May have been removed by another process
-                                else:
-                                    # No force takeover allowed
-                                    logger.error(f"Another process (PID: {existing_pid}) is already starting service")
-                                    return False
-                            else:
-                                # Process doesn't exist, remove stale lock
-                                logger.warning(f"Removing lock file for dead/non-existent process (PID: {existing_pid})")
-                                try:
-                                    self.start_lock_file.unlink()
-                                except OSError:
-                                    pass
-                                    
-                    except (json.JSONDecodeError, KeyError, OSError) as e:
-                        logger.warning(f"Corrupted lock file (attempt {attempt + 1}/{max_attempts}), removing: {e}")
-                        try:
-                            self.start_lock_file.unlink()
-                        except OSError:
-                            pass
-                
-                # Atomic lock creation using temporary file + rename
-                temp_lock_file = self.start_lock_file.with_suffix('.tmp')
-                try:
-                    # Write to temporary file first
-                    with open(temp_lock_file, "w") as f:
-                        json.dump(lock_data, f)
-                        f.flush()
-                        os.fsync(f.fileno())  # Ensure data is written to disk
-                    
-                    # Atomic rename (on most filesystems)
-                    temp_lock_file.rename(self.start_lock_file)
-                    logger.info(f"Acquired start lock for PID {current_pid}")
-                    return True
-                    
-                except OSError as e:
-                    # Clean up temp file on error
-                    try:
-                        temp_lock_file.unlink()
-                    except OSError:
-                        pass
-                    
-                    if attempt < max_attempts - 1:
-                        logger.warning(f"Failed to create lock file (attempt {attempt + 1}/{max_attempts}): {e}")
-                        time.sleep(0.1 * (attempt + 1))  # Brief exponential backoff
-                        continue
-                    else:
-                        logger.error(f"Failed to create lock file after {max_attempts} attempts: {e}")
-                        return False
-                        
-            except Exception as e:
-                logger.error(f"Unexpected error during lock acquisition (attempt {attempt + 1}/{max_attempts}): {e}")
-                if attempt < max_attempts - 1:
-                    time.sleep(0.1 * (attempt + 1))
-                    continue
-                else:
-                    return False
-        
-        return False
-    
-    def _release_start_lock(self) -> None:
-        """Release the start lock if we own it, with improved error handling."""
-        if not self.start_lock_file.exists():
-            logger.debug("Lock file does not exist, nothing to release")
-            return
-            
-        current_pid = os.getpid()
-        max_attempts = 3
-        
-        for attempt in range(max_attempts):
-            try:
-                # Read and verify lock ownership
-                with open(self.start_lock_file, "r") as f:
-                    lock_data = json.load(f)
-                
-                # Validate lock data
-                is_valid, error_msg = self._validate_lock_data(lock_data)
-                if not is_valid:
-                    logger.warning(f"Corrupted lock file during release (attempt {attempt + 1}/{max_attempts}): {error_msg}")
-                    try:
-                        self.start_lock_file.unlink()
-                        logger.info("Removed corrupted lock file during release")
-                        return
-                    except OSError as e2:
-                        if attempt < max_attempts - 1:
-                            logger.warning(f"Failed to remove corrupted lock file: {e2}")
-                            time.sleep(0.1 * (attempt + 1))
-                            continue
-                        else:
-                            logger.error(f"Failed to remove corrupted lock file after {max_attempts} attempts: {e2}")
-                            return
-                
-                existing_pid = lock_data.get("pid")
-                if not existing_pid:
-                    logger.warning("Lock file has no PID, removing corrupted file")
-                    try:
-                        self.start_lock_file.unlink()
-                        logger.info("Removed corrupted lock file")
-                    except OSError as e:
-                        logger.warning(f"Failed to remove corrupted lock file: {e}")
-                    return
-                
-                if existing_pid == current_pid:
-                    # We own the lock, remove it
-                    try:
-                        self.start_lock_file.unlink()
-                        logger.info(f"Released start lock for PID {current_pid}")
-                    except OSError as e:
-                        if attempt < max_attempts - 1:
-                            logger.warning(f"Failed to remove lock file (attempt {attempt + 1}/{max_attempts}): {e}")
-                            time.sleep(0.1 * (attempt + 1))
-                            continue
-                        else:
-                            logger.error(f"Failed to remove lock file after {max_attempts} attempts: {e}")
-                    return
-                else:
-                    # Check if the other process still exists
-                    if psutil.pid_exists(existing_pid):
-                        logger.warning(f"Lock file owned by different process (PID: {existing_pid}), not removing")
-                    else:
-                        logger.warning(f"Lock file owned by dead process (PID: {existing_pid}), removing stale lock")
-                        try:
-                            self.start_lock_file.unlink()
-                            logger.info(f"Removed stale lock file for dead process (PID: {existing_pid})")
-                        except OSError as e:
-                            logger.warning(f"Failed to remove stale lock file: {e}")
-                    return
-                    
-            except (json.JSONDecodeError, KeyError) as e:
-                logger.warning(f"Corrupted lock file during release (attempt {attempt + 1}/{max_attempts}): {e}")
-                try:
-                    self.start_lock_file.unlink()
-                    logger.info("Removed corrupted lock file during release")
-                    return
-                except OSError as e2:
-                    if attempt < max_attempts - 1:
-                        logger.warning(f"Failed to remove corrupted lock file: {e2}")
-                        time.sleep(0.1 * (attempt + 1))
-                        continue
-                    else:
-                        logger.error(f"Failed to remove corrupted lock file after {max_attempts} attempts: {e2}")
-                        return
-                        
-            except OSError as e:
-                if attempt < max_attempts - 1:
-                    logger.warning(f"Error accessing lock file during release (attempt {attempt + 1}/{max_attempts}): {e}")
-                    time.sleep(0.1 * (attempt + 1))
-                    continue
-                else:
-                    logger.error(f"Error accessing lock file during release after {max_attempts} attempts: {e}")
-                    return
-            
-            except Exception as e:
-                logger.error(f"Unexpected error during lock release (attempt {attempt + 1}/{max_attempts}): {e}")
-                if attempt < max_attempts - 1:
-                    time.sleep(0.1 * (attempt + 1))
-                    continue
-                else:
-                    return
-
-    def get_start_process_info(self) -> Optional[Dict[str, Any]]:
-        """
-        Get information about the currently running start process, if any.
-        
-        Returns:
-            Optional[Dict[str, Any]]: Start process information or None if no start process is running
-        """
-        if not self.start_lock_file.exists():
-            return None
-            
-        try:
-            with open(self.start_lock_file, "r") as f:
-                lock_data = json.load(f)
-            
-            # Validate lock data
-            is_valid, error_msg = self._validate_lock_data(lock_data)
-            if not is_valid:
-                logger.warning(f"Corrupted lock file: {error_msg}")
-                return None
-            
-            pid = lock_data.get("pid")
-            if not pid:
-                return None
-            
-            # Check if process is still running
-            if not psutil.pid_exists(pid):
-                logger.debug(f"Start process {pid} no longer exists")
-                return None
-            
-            # Get additional process information
-            try:
-                process = psutil.Process(pid)
-                process_info = {
-                    "pid": pid,
-                    "hash": lock_data.get("hash"),
-                    "host": lock_data.get("host"),
-                    "port": lock_data.get("port"),
-                    "timestamp": lock_data.get("timestamp"),
-                    "version": lock_data.get("version"),
-                    "status": process.status(),
-                    "create_time": process.create_time(),
-                    "cpu_percent": process.cpu_percent(),
-                    "memory_info": process.memory_info()._asdict(),
-                    "cmdline": process.cmdline(),
-                    "username": process.username()
-                }
-                return process_info
-            except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-                logger.debug(f"Could not get process info for PID {pid}: {e}")
-                # Return basic info without process details
-                return {
-                    "pid": pid,
-                    "hash": lock_data.get("hash"),
-                    "host": lock_data.get("host"),
-                    "port": lock_data.get("port"),
-                    "timestamp": lock_data.get("timestamp"),
-                    "version": lock_data.get("version"),
-                    "status": "unknown"
-                }
-                
-        except (json.JSONDecodeError, KeyError, OSError) as e:
-            logger.warning(f"Error reading start lock file: {e}")
-            return None
-
-    def force_kill_start_process(self) -> bool:
-        """
-        Force kill any currently running start process and clean up the lock.
-        
-        Returns:
-            bool: True if process was killed or no process was running, False on error
-        """
-        process_info = self.get_start_process_info()
-        if not process_info:
-            logger.info("No start process currently running")
-            return True
-        
-        pid = process_info["pid"]
-        logger.warning(f"Force killing start process (PID: {pid})")
-        
-        try:
-            process = psutil.Process(pid)
-            
-            # Try graceful termination first
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-                logger.info(f"Gracefully terminated start process (PID: {pid})")
-            except psutil.TimeoutExpired:
-                # Force kill if graceful termination fails
-                logger.warning(f"Force killing start process (PID: {pid})")
-                process.kill()
-                process.wait(timeout=3)
-                logger.info(f"Force killed start process (PID: {pid})")
-            
-            # Clean up lock file
-            try:
-                if self.start_lock_file.exists():
-                    self.start_lock_file.unlink()
-                    logger.info("Removed start lock file after force kill")
-            except OSError as e:
-                logger.warning(f"Failed to remove lock file: {e}")
-            
-            return True
-            
-        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-            logger.info(f"Process {pid} already terminated: {e}")
-            # Clean up lock file anyway
-            try:
-                if self.start_lock_file.exists():
-                    self.start_lock_file.unlink()
-                    logger.info("Removed start lock file for already terminated process")
-            except OSError:
-                pass
-            return True
-        except Exception as e:
-            logger.error(f"Error force killing start process {pid}: {e}")
-            return False
-
-    def get_lock_status_summary(self) -> Dict[str, Any]:
-        """
-        Get a comprehensive summary of the current lock status and any running processes.
-        
-        Returns:
-            Dict[str, Any]: Summary of lock status, running processes, and system state
-        """
-        summary = {
-            "lock_file_exists": self.start_lock_file.exists(),
-            "start_process_info": None,
-            "running_service_info": None,
-            "lock_status": "no_lock"
-        }
-        
-        # Check start process
-        start_process = self.get_start_process_info()
-        if start_process:
-            summary["start_process_info"] = start_process
-            summary["lock_status"] = "start_process_running"
-        elif self.start_lock_file.exists():
-            summary["lock_status"] = "stale_lock"
-        
-        # Check running service
-        try:
-            if os.path.exists(self.msgpack_file):
-                with open(self.msgpack_file, "rb") as f:
-                    service_info = msgpack.load(f)
-                summary["running_service_info"] = {
-                    "hash": service_info.get("hash"),
-                    "port": service_info.get("port"),
-                    "app_port": service_info.get("app_port"),
-                    "task": service_info.get("task"),
-                    "pid": service_info.get("pid"),
-                    "app_pid": service_info.get("app_pid"),
-                    "last_activity": service_info.get("last_activity"),
-                    "models_count": len(service_info.get("models", {}))
-                }
-        except Exception as e:
-            summary["running_service_info"] = {"error": str(e)}
-        
-        return summary
-
-    def _check_port_availability(self, host: str, port: int, timeout: int = 2) -> bool:
-        """
-        Check if a port is available (not in use).
-        Returns True if port is free, False if in use.
-        """
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(timeout)
-                result = s.connect_ex((host, port))
-                return result != 0  # 0 means connection successful (port in use)
-        except socket.error:
-            return True  # Assume port is free if we can't check
-        
-    def _check_ports_freed(self, ports_info: list, max_retries: int = 5) -> bool:
-        """
-        Check if multiple ports are freed with optimized retry logic.
-        ports_info: list of (port, service_name) tuples
-        Returns True if all ports are freed.
-        """
-        if not ports_info:
-            return True
-            
-        freed_ports = set()
-        
-        for retry in range(max_retries):
-            for port, service_name in ports_info:
-                if port and port not in freed_ports:
-                    if self._check_port_availability('localhost', port, timeout=1):
-                        freed_ports.add(port)
-                        logger.debug(f"{service_name} port {port} is now free")
-            
-            # If all ports are freed, return early
-            if len(freed_ports) == len([p for p, _ in ports_info if p]):
-                return True
-                
-            if retry < max_retries - 1:
-                time.sleep(1)
-        
-        # Log which ports are still in use
-        for port, service_name in ports_info:
-            if port and port not in freed_ports:
-                logger.warning(f"{service_name} port {port} still in use after {max_retries} checks")
-        
-        return len(freed_ports) == len([p for p, _ in ports_info if p])
     
     async def kill_ai_server(self) -> bool:
         """Kill the AI server process if it's running (optimized async version)."""
@@ -1320,7 +833,6 @@ class EternalZooManager:
             logger.error(f"Error killing AI server: {str(e)}", exc_info=True)
             return False
 
-    
     def get_service_info(self, path: str) -> Dict[str, Any]:
         """Get service info from msgpack file with error handling."""
         if not os.path.exists(path):
@@ -1413,37 +925,36 @@ class EternalZooManager:
         return command
 
 
-    # async def switch_model(self, target_hash: str, service_start_timeout: int = 120) -> bool:
-    #     """
-    #     Switch to a different model that was registered during multi-model start.
-    #     This will offload the currently active model and load the requested model.
+    async def switch_model(self, target_model_id: str, service_start_timeout: int = 120) -> bool:
+        """
+        Switch to a different model that was registered during multi-model start.
+        This will offload the currently active model and load the requested model.
 
-    #     Args:
-    #         target_hash (str): Hash of the model to switch to.
-    #         service_start_timeout (int): Timeout for service startup in seconds.
+        Args:
+            target_hash (str): Hash of the model to switch to.
+            service_start_timeout (int): Timeout for service startup in seconds.
 
-    #     Returns:
-    #         bool: True if model switch was successful, False otherwise.
-    #     """
-    #     try:
-    #         if not os.path.exists(self.msgpack_file):
-    #             logger.error("No service info found, cannot switch model")
-    #             return False
+        Returns:
+            bool: True if model switch was successful, False otherwise.
+        """
+        try:
+            if not os.path.exists(self.service_info_file):
+                logger.error("No service info found, cannot switch model")
+                return False
+            
+            # Load service details
+            with open(self.service_info_file, "rb") as f:
+                service_info = msgpack.load(f)
+                
+            ai_services = service_info.get("ai_services", [])
 
-    #         # Load service details
-    #         with open(self.msgpack_file, "rb") as f:
-    #             service_info = msgpack.load(f)
-
-    #         # Check if target model is available
-    #         models = service_info.get("models", {})
-    #         if target_hash not in models:
-    #             logger.error(f"Model {target_hash} not found in available models")
-    #             return False
-
-    #         # Check if model is already active
-    #         if models[target_hash].get("active", False):
-    #             logger.info(f"Model {target_hash} is already active")
-    #             return True
+            for ai_service in ai_services:
+                if ai_service["model_id"] == target_model_id:
+                    running_model_command = ai_service["running_ai_command"]
+                    break
+            
+            
+            
 
     #         target_model = models[target_hash]
     #         logger.info(f"Switching to model: {target_hash}")
@@ -1559,34 +1070,7 @@ class EternalZooManager:
     #     except Exception as e:
     #         logger.error(f"Error switching model: {str(e)}", exc_info=True)
     #         return False
-
-    def get_available_models(self) -> Dict[str, Dict[str, Any]]:
-        """
-        Get information about all available models in the current service.
-
-        Returns:
-            Dict[str, Dict[str, Any]]: Dictionary mapping model hashes to their information.
-        """
-        try:
-            service_info = self.get_service_info()
-            return service_info.get("models", {})
-        except Exception as e:
-            logger.error(f"Error getting available models: {str(e)}")
-            return {}
-
-    def get_active_model(self) -> List[Dict[str, Any]]:
-        """
-        Get the list of active models.
-        """
-        service_info = self.get_service_info()
-        ai_services = service_info.get("ai_services", [])
-        active_models = []
-        for ai_service in ai_services:
-            if ai_service["active"]:
-                active_models.append(ai_service)
-        return active_models
         
-
     def get_models_by_task(self, task: str) -> List[Dict[str, Any]]:
         """
         Get the list of models by task.

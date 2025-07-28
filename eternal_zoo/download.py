@@ -587,7 +587,7 @@ def check_disk_space(path: Path, required_bytes: int = 2 * 1024 * 1024 * 1024) -
         raise Exception(f"Unable to check disk space at {path}: {e}")
     
 
-async def fetch_model_metadata_async(filecoin_hash: str, max_attempts: int = 3) -> tuple[bool, dict | None]:
+async def fetch_model_metadata_async(filecoin_hash: str, max_attempts: int = 10) -> tuple[bool, dict | None]:
     """
     Asynchronously fetch model metadata from the fastest gateway with retry logic.
     

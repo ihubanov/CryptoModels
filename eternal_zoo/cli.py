@@ -32,8 +32,7 @@ def get_all_downloaded_models() -> list:
         return downloaded_models
 
     # Look for all .gguf files in the directory
-    for model_file in DEFAULT_MODEL_DIR.glob(f"*{POSTFIX_MODEL_PATH}"):
-        # Extract hash from filename (remove .gguf extension)
+    for model_file in DEFAULT_MODEL_DIR.glob(f"*.json"):
         model_hash = model_file.stem
         if model_hash:  # Make sure it's not empty
             downloaded_models.append(model_hash)
@@ -434,107 +433,9 @@ def handle_download(args) -> bool:
         sys.exit(1)
 
 def handle_run(args):
-    projector_path = None
-    lora_config = None
-    model_name = None
-    
-    if args.hash:
-        if args.hash not in HASH_TO_MODEL:
-            print_error(f"Hash {args.hash} not found in HASH_TO_MODEL")
-            sys.exit(1)
-        model_name = HASH_TO_MODEL[args.hash]
-        hf_data = FEATURED_MODELS[model_name]
-        projector = None
-
-        success, local_path = asyncio.run(download_model_async(hf_data, args.hash))
-        if not success:
-            print_error(f"Failed to download model {args.hash}")
-            sys.exit(1)
-        success, metadata = asyncio.run(fetch_model_metadata_async(args.hash))
-        if not success:
-            print_error(f"Failed to fetch model metadata for {args.hash}")
-            sys.exit(1)
-        is_lora = metadata.get("is_lora", False)
-
-        if is_lora:
-            lora_config = {}
-            metadata_path = os.path.join(local_path, "metadata.json")
-            if not os.path.exists(metadata_path):
-                print_error(f"Lora model found but metadata.json is missing")
-                sys.exit(1)
-            with open(metadata_path, "r") as f:
-                lora_metadata = json.load(f)
-            lora_paths = lora_metadata.get("lora_paths", [])
-            lora_scales = lora_metadata.get("lora_scales", [])
-            base_model_hash = lora_metadata.get("base_model", None)
-            base_model_name = HASH_TO_MODEL[base_model_hash]
-            base_model_hf_data = FEATURED_MODELS[base_model_name]
-            model_name = base_model_name
-            success, base_model_local_path = asyncio.run(download_model_async(base_model_hf_data, base_model_hash))
-            if not success:
-                print_error(f"Failed to download base model {base_model_hash}")
-                sys.exit(1)
-            local_path = base_model_local_path
-            for lora_path, lora_scale in zip(lora_paths, lora_scales):
-                lora_config[lora_path] = lora_scale
-            
-        if os.path.exists(local_path + "-projector"):
-            projector = local_path + "-projector"
-
-        configs = [{
-            "hash": args.hash,
-            "model": local_path,
-            "port": args.port,
-            "host": args.host,
-            "context_length": args.context_length,
-            "model_name": model_name,
-            "task": metadata.get("task", "chat"),
-            "projector": projector,
-            "multimodal": False if projector is None else True,
-            "on_demand": False,
-            "lora_config": lora_config,
-            "is_lora": True if lora_config is not None else False,
-        }]
-
-        return manager.start(configs)
-    
-    if args.model_name:
-        if args.model_name in MODEL_TO_HASH:
-            args.hash = MODEL_TO_HASH[args.model_name]
-        if args.model_name not in FEATURED_MODELS:
-            print_error(f"Model name {args.model_name} not found in FEATURED_MODELS")
-            sys.exit(1)
-        hf_data = FEATURED_MODELS[args.model_name]
-        success, local_path = asyncio.run(download_model_async(hf_data, args.hash))
-        
-        if not success:
-            print_error(f"Failed to download model {args.hash}")
-            sys.exit(1)
-        success, metadata = asyncio.run(fetch_model_metadata_async(args.hash))
-        if not success:
-            print_error(f"Failed to fetch model metadata for {args.hash}")
-            sys.exit(1)
-
-        if os.path.exists(local_path + "-projector"):
-            projector_path = local_path + "-projector"
-            
-        configs = [{
-            "hash": args.hash,
-            "model": local_path,
-            "port": args.port,
-            "host": args.host,
-            "context_length": args.context_length,
-            "model_name": metadata["folder_name"],
-            "task": metadata.get("task", "chat"),
-            "is_lora": metadata.get("is_lora", False),
-            "projector": projector_path,
-            "multimodal": False if projector_path is None else True,
-            "on_demand": False,
-            "lora": metadata.get("lora", False),
-        }]
-        return manager.start(configs)
-    
-    if args.hf_repo is not None:
+    """Handle model loading and configuration based on provided arguments."""
+    # Handle Hugging Face repository case separately
+    if args.hf_repo:
         hf_data = {
             "repo": args.hf_repo,
             "model": args.hf_file,
@@ -546,30 +447,150 @@ def handle_run(args):
             sys.exit(1)
 
         folder_name = os.path.basename(local_path)
-        if args.hf_file is not None:
+        model_id = folder_name.replace("/", "_")
+        if args.hf_file:
             local_path = os.path.join(local_path, args.hf_file)
+            model_id = args.hf_file
 
-        if args.mmproj is not None:
+        projector_path = None
+        if args.mmproj:
             mmproj_path = os.path.join(local_path, args.mmproj)
             if os.path.exists(mmproj_path):
-                projector_path = mmproj_path   
+                projector_path = mmproj_path
+                model_id = f"{model_id}_{args.mmproj}"
 
-        configs = [{
+        config = {
+            "model_id": model_id,
             "model": local_path,
-            "port": args.port,
-            "host": args.host,
             "context_length": args.context_length,
             "model_name": folder_name,
             "task": args.task,
-            "config_name": args.config_name,
-            "context_length": args.context_length,
             "on_demand": False,
-            "lora": False,
             "is_lora": False,
             "projector": projector_path,
-            "multimodal": True if projector_path is not None else False,
-        }]
-        return manager.start(configs)
+            "multimodal": bool(projector_path),
+        }
+        
+        if args.config_name:
+            config["config_name"] = args.config_name
+
+        success =  manager.start([config], args.port, args.host)
+
+        if not success:
+            print_error(f"Failed to start model {model_id}")
+            sys.exit(1)
+        
+        model_metadata_path = model_id + ".json"
+        if not os.path.exists(model_metadata_path):
+            with open(model_metadata_path, "w") as f:
+                json.dump(config, f)
+
+
+
+    # Handle hash or model_name cases
+    if args.hash:
+        if args.hash not in HASH_TO_MODEL:
+            print_error(f"Hash {args.hash} not found in HASH_TO_MODEL")
+            sys.exit(1)
+        model_name = HASH_TO_MODEL[args.hash]
+    elif args.model_name:
+        if args.model_name not in FEATURED_MODELS:
+            print_error(f"Model name {args.model_name} not found in FEATURED_MODELS")
+            sys.exit(1)
+        model_name = args.model_name
+        if model_name in MODEL_TO_HASH:
+            args.hash = MODEL_TO_HASH[model_name]
+    else:
+        print_error("Either hash, model_name, or hf_repo must be provided")
+        sys.exit(1)
+
+    hf_data = FEATURED_MODELS[model_name]
+    success, local_path = asyncio.run(download_model_async(hf_data, getattr(args, 'hash', None)))
+    if not success:
+        print_error(f"Failed to download model {model_name}")
+        sys.exit(1)
+
+    is_lora = False
+    lora_config = None
+    projector_path = None
+    task = "chat"
+    model_name_from_metadata = model_name
+
+    # Fetch metadata if hash is available
+    if hasattr(args, 'hash'):
+        success, metadata = asyncio.run(fetch_model_metadata_async(args.hash))
+        if not success:
+            print_error(f"Failed to fetch model metadata for {args.hash}")
+            sys.exit(1)
+        is_lora = metadata.get("is_lora", False)
+        task = metadata.get("task", "chat")
+        model_name_from_metadata = metadata.get("folder_name", model_name)
+    else:
+        is_lora = hf_data.get("lora", False)
+        task = hf_data.get("task", "chat")
+
+    # Handle LoRA configuration
+    if is_lora:
+        metadata_path = os.path.join(local_path, "metadata.json")
+        if not os.path.exists(metadata_path):
+            print_error("LoRA model found but metadata.json is missing")
+            sys.exit(1)
+        with open(metadata_path, "r") as f:
+            lora_metadata = json.load(f)
+        lora_paths = lora_metadata.get("lora_paths", [])
+        lora_scales = lora_metadata.get("lora_scales", [])
+        base_model_hash = lora_metadata.get("base_model")
+        if base_model_hash not in HASH_TO_MODEL:
+            print_error(f"Base model hash {base_model_hash} not found")
+            sys.exit(1)
+        base_model_name = HASH_TO_MODEL[base_model_hash]
+        base_model_hf_data = FEATURED_MODELS[base_model_name]
+        success, base_model_local_path = asyncio.run(download_model_async(base_model_hf_data, base_model_hash))
+        if not success:
+            print_error(f"Failed to download base model {base_model_hash}")
+        local_path = base_model_local_path
+        lora_config = dict(zip(lora_paths, lora_scales))
+
+    # Determine projector path
+    projector_candidates = [
+        f"{local_path}-projector",
+        os.path.join(local_path, hf_data.get("projector", "")) if "projector" in hf_data else None
+    ]
+    for candidate in projector_candidates:
+        if candidate and os.path.exists(candidate):
+            projector_path = candidate
+            break
+
+    model_id = args.hash if hasattr(args, 'hash') else model_name
+    # Build configuration
+    config = {
+        "model_id": model_id,
+        "hash": getattr(args, 'hash', None),
+        "model": local_path,
+        "context_length": args.context_length,
+        "model_name": model_name_from_metadata,
+        "task": task,
+        "projector": projector_path,
+        "multimodal": bool(projector_path),
+        "on_demand": False,
+        "is_lora": is_lora,
+        "lora_config": lora_config,
+    }
+
+    success = manager.start([config], args.port, args.host)
+
+    if not success:
+        print_error(f"Failed to start model {model_id}")
+        sys.exit(1)
+
+    model_metadata_path = model_id + ".json"
+    if not os.path.exists(model_metadata_path):
+        with open(model_metadata_path, "w") as f:
+            json.dump(config, f)
+    else:
+        print_warning(f"Model metadata file {model_metadata_path} already exists")
+    
+    return success
 
 
 def handle_serve(args):
