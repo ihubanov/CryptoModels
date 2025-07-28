@@ -490,12 +490,9 @@ def handle_run(args):
             "multimodal": bool(projector_path),
         }
         model_metadata_path = os.path.join(DEFAULT_MODEL_DIR, model_id + ".json")
-        if not os.path.exists(model_metadata_path):
-            with open(model_metadata_path, "w") as f:
-                json.dump(model_metadata, f)
-            print_success(f"Model metadata file {model_metadata_path} created")
-        else:
-            print_warning(f"Model metadata file {model_metadata_path} already exists")
+        with open(model_metadata_path, "w") as f:
+            json.dump(model_metadata, f)
+        print_success(f"Model metadata file {model_metadata_path} created")
         return success
 
     # Handle hash or model_name cases
@@ -601,13 +598,10 @@ def handle_run(args):
         "multimodal": bool(projector_path),
     }
     model_metadata_path = os.path.join(DEFAULT_MODEL_DIR, model_id + ".json")
-    if not os.path.exists(model_metadata_path):
-        with open(model_metadata_path, "w") as f:
-            json.dump(model_metadata, f)
-        print_success(f"Model metadata file {model_metadata_path} created")
-    else:
-        print_warning(f"Model metadata file {model_metadata_path} already exists")
-    
+
+    with open(model_metadata_path, "w") as f:
+        json.dump(model_metadata, f)
+    print_success(f"Model metadata file {model_metadata_path} created")
     return success
 
 
