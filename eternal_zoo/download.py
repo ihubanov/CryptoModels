@@ -1033,7 +1033,6 @@ class HuggingFaceProgressTracker:
         
         percentage = (self.last_folder_size / self.total_size_bytes * 100) if self.total_size_bytes > 0 else 0
         percentage = min(percentage, 100.0)  # Cap at 100%
-        
         elapsed_time = current_time - self.start_time
         current_speed_mbps = (self.last_folder_size / (1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
 
@@ -1151,6 +1150,8 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
     
                 if pattern:
                     # Download only the files that match the allow_patterns
+                    pattern_dir = os.path.join(model_dir, pattern)
+                    progress_tracker.set_watch_dir(pattern_dir)
                     await loop.run_in_executor(
                         None,
                         lambda: snapshot_download(
@@ -1162,7 +1163,7 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
                         )
                     )
                     res["is_folder"] = True
-                    res["model_path"] = os.path.join(model_dir, pattern)
+                    res["model_path"] = pattern_dir
                 
                 else:
 
