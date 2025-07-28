@@ -459,8 +459,7 @@ def handle_run(args):
         projector_path = None
         if args.mmproj:
             model_id = model_id + "_" + args.mmproj
-            mmproj_path = os.path.join(local_path, model_id)
-            print_info(f"Checking if projector file {mmproj_path} exists")
+            mmproj_path = local_path + "_" + args.mmproj
             if os.path.exists(mmproj_path):
                 projector_path = mmproj_path
 
