@@ -1056,9 +1056,12 @@ async def list_models():
     models = []
 
     for ai_service in ai_services:
-        config = ai_service.get("config", {})
-        model_id = config.get("model_id", "")
-        task = config.get("task", "")
+        if "config" not in ai_service:
+            logger.warning(f"AI service {ai_service} has no config")
+            continue
+        config = ai_service["config"]
+        model_id = config.get("model_id", "default-chat-model")
+        task = config.get("task", "chat")
         is_lora = config.get("is_lora", False)
         multimodal = config.get("multimodal", False)
         lora_config = config.get("lora_config", None)

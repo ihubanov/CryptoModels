@@ -640,7 +640,9 @@ def load_model_metadata(model_id, is_main=False):
 
     config = {
         "model_id": model_id,
+        "task": metadata.get("task", "chat"),
         "model": local_path,
+        "multimodal": metadata.get("multimodal", False),
         "projector": projector_path,
         "on_demand": not is_main,
         "is_lora": metadata.get("lora", False),
