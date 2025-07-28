@@ -756,9 +756,12 @@ async def download_model_async_by_hash(hf_data: dict, filecoin_hash: str | None 
                     return False, None
 
                 base_model_hf_data = None
-                
+
                 if base_model_hash in HASH_TO_MODEL:
                     base_model_hf_data = FEATURED_MODELS[HASH_TO_MODEL[base_model_hash]]
+
+                print(f"base_model_hf_data: {base_model_hf_data}")
+                print(f"base_model_hash: {base_model_hash}")
 
                 success, base_model_path = await download_model_async_by_hash(base_model_hf_data, base_model_hash)
                 if not success:
