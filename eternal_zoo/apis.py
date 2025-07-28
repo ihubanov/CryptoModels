@@ -561,26 +561,6 @@ class RequestProcessor:
                 logger.info(f"No stale streams found, {len(RequestProcessor.active_streams)} active streams are healthy")
     
     @staticmethod
-    async def _verify_model_switch(model_requested: str, request_id: str, max_retries: int = MODEL_SWITCH_MAX_RETRIES) -> bool:
-        """Verify model switch with retry logic."""
-        for attempt in range(max_retries):
-            try:
-                await asyncio.sleep(MODEL_SWITCH_VERIFICATION_DELAY)
-                
-                updated_service_info = eternal_zoo_manager.get_service_info()
-                updated_models = updated_service_info.get("models", {})
-                
-                if model_requested in updated_models and updated_models[model_requested].get("active", False):
-                    logger.debug(f"[{request_id}] Model switch verification successful (attempt {attempt + 1})")
-                    return True
-                    
-            except Exception as e:
-                logger.warning(f"[{request_id}] Verification attempt {attempt + 1} failed: {e}")
-        
-        logger.error(f"[{request_id}] Model switch verification failed after {max_retries} attempts")
-        return False
-    
-    @staticmethod
     async def _add_to_queue_with_backpressure(item, timeout: float = QUEUE_BACKPRESSURE_TIMEOUT):
         """Add item to queue with timeout and backpressure handling."""
         try:
@@ -598,7 +578,7 @@ class RequestProcessor:
             )
     
     @staticmethod
-    async def _ensure_model_active_in_queue(model_requested: str, request_id: str) -> bool:
+    async def _ensure_model_active_in_queue(task: str, model_requested: str, request_id: str) -> bool:
         """
         Ensure the requested model is active within the queue processing context.
         This method is called within the processing lock to ensure atomic model switching.
@@ -612,21 +592,23 @@ class RequestProcessor:
         """
         try:
             # Get current service info
-            service_info = get_service_info()
-            ai_services = service_info.get("ai_services", [])
+            available_models = eternal_zoo_manager.get_models_by_task(task)
 
-            model_info = None
-            for ai_service in ai_services:
-                if ai_service.get("model_id", None) == model_requested:
-                    model_info = ai_service
+            if len(available_models) == 0:
+                logger.error(f"[{request_id}] No {task} models found")
+                return False
+
+            model = None
+            for available_model in available_models:
+                if available_model.get("model_id", None) == model_requested:
+                    model = available_model
                     break
             
-            if model_info is None:
-                logger.error(f"[{request_id}] Requested model {model_requested} not found in available models")
-                return False
+            if model is None:
+                model = available_models[0]
             
             # Check if model is already active
-            if model_info["active"]:
+            if model["active"]:
                 logger.debug(f"[{request_id}] Model {model_requested} is already active")
                 return True
                 
@@ -684,68 +666,68 @@ class RequestProcessor:
         
         return result
     
-    @staticmethod
-    async def process_direct(endpoint: str, request_data: Dict[str, Any]):
-        """Process a request directly without queueing for administrative endpoints."""
-        request_id = generate_request_id()
-        logger.info(f"[{request_id}] Processing direct request for endpoint {endpoint}")
+    # @staticmethod
+    # async def process_direct(endpoint: str, request_data: Dict[str, Any]):
+    #     """Process a request directly without queueing for administrative endpoints."""
+    #     request_id = generate_request_id()
+    #     logger.info(f"[{request_id}] Processing direct request for endpoint {endpoint}")
         
-        start_time = time.time()
-        if endpoint in RequestProcessor.MODEL_ENDPOINTS:
-            model_cls, handler = RequestProcessor.MODEL_ENDPOINTS[endpoint]
-            request_obj = model_cls(**request_data)
+    #     start_time = time.time()
+    #     if endpoint in RequestProcessor.MODEL_ENDPOINTS:
+    #         model_cls, handler = RequestProcessor.MODEL_ENDPOINTS[endpoint]
+    #         request_obj = model_cls(**request_data)
 
-            task = "chat"
-            active_model = None
+    #         task = "chat"
+    #         active_model = None
 
-            if endpoint == "/v1/embeddings" or endpoint == "/embeddings":
-                task = "embed"
-            elif endpoint == "/v1/images/generations" or endpoint == "/images/generations":
-                task = "image-generation"
-            else:
-                task = "image-edit"
+    #         if endpoint == "/v1/embeddings" or endpoint == "/embeddings":
+    #             task = "embed"
+    #         elif endpoint == "/v1/images/generations" or endpoint == "/images/generations":
+    #             task = "image-generation"
+    #         else:
+    #             task = "image-edit"
             
-            model_id = request_obj.model
-            available_models = eternal_zoo_manager.get_models_by_task(task)
+    #         model_id = request_obj.model
+    #         available_models = eternal_zoo_manager.get_models_by_task(task)
 
-            print(f"available_models: {available_models}")
-            if len(available_models) == 0:
-                raise HTTPException(status_code=404, detail=f"No {task} model found")
+    #         print(f"available_models: {available_models}")
+    #         if len(available_models) == 0:
+    #             raise HTTPException(status_code=404, detail=f"No {task} model found")
             
-            for model in available_models:
-                if model["model_id"] == model_id:
-                    active_model = model
-                    break
+    #         for model in available_models:
+    #             if model["model_id"] == model_id:
+    #                 active_model = model
+    #                 break
             
-            if active_model is None:
-                active_model = available_models[0]   
+    #         if active_model is None:
+    #             active_model = available_models[0]   
 
-            request_obj.model = active_model["model_id"]
+    #         request_obj.model = active_model["model_id"]
                 
-            # Ensure model is active before processing (for direct requests)
-            if hasattr(request_obj, 'model') and request_obj.model:
-                logger.debug(f"[{request_id}] Ensuring model {request_obj.model} is active for direct request")
+    #         # Ensure model is active before processing (for direct requests)
+    #         if hasattr(request_obj, 'model') and request_obj.model:
+    #             logger.debug(f"[{request_id}] Ensuring model {request_obj.model} is active for direct request")
                 
-                # Use the same centralized model switching logic as the queue
-                if not await RequestProcessor._ensure_model_active_in_queue(request_obj.model, request_id):
-                    error_msg = f"Model {request_obj.model} is not available or failed to switch"
-                    logger.error(f"[{request_id}] {error_msg}")
-                    raise HTTPException(status_code=400, detail=error_msg)
+    #             # Use the same centralized model switching logic as the queue
+    #             if not await RequestProcessor._ensure_model_active_in_queue(request_obj.model, request_id):
+    #                 error_msg = f"Model {request_obj.model} is not available or failed to switch"
+    #                 logger.error(f"[{request_id}] {error_msg}")
+    #                 raise HTTPException(status_code=400, detail=error_msg)
                 
-                # Refresh service info after potential model switch
-                service_info = get_service_info()
-                logger.debug(f"[{request_id}] Model {request_obj.model} confirmed active for direct request")
+    #             # Refresh service info after potential model switch
+    #             service_info = get_service_info()
+    #             logger.debug(f"[{request_id}] Model {request_obj.model} confirmed active for direct request")
             
-            # Process the request with the updated service info
-            result = await handler(request_obj, service_info)
+    #         # Process the request with the updated service info
+    #         result = await handler(request_obj, service_info)
             
-            process_time = time.time() - start_time
-            logger.info(f"[{request_id}] Direct request completed for endpoint {endpoint} (time: {process_time:.2f}s)")
+    #         process_time = time.time() - start_time
+    #         logger.info(f"[{request_id}] Direct request completed for endpoint {endpoint} (time: {process_time:.2f}s)")
             
-            return result
-        else:
-            logger.error(f"[{request_id}] Endpoint not found: {endpoint}")
-            raise HTTPException(status_code=404, detail="Endpoint not found")
+    #         return result
+    #     else:
+    #         logger.error(f"[{request_id}] Endpoint not found: {endpoint}")
+    #         raise HTTPException(status_code=404, detail="Endpoint not found")
     
     @staticmethod
     async def worker():
@@ -769,9 +751,20 @@ class RequestProcessor:
                 # Process the request within the lock to ensure sequential execution
                 async with RequestProcessor.processing_lock:
                     processing_start = time.time()
+                    task = "chat"
                     
                     if endpoint in RequestProcessor.MODEL_ENDPOINTS:
                         model_cls, handler = RequestProcessor.MODEL_ENDPOINTS[endpoint]
+
+                        if endpoint == "/v1/chat/completions" or endpoint == "/chat/completions":
+                            task = "chat"
+                        elif endpoint == "/v1/embeddings" or endpoint == "/embeddings":
+                            task = "embed"
+                        elif endpoint == "/v1/images/generations" or endpoint == "/images/generations":
+                            task = "image-generation"
+                        else:
+                            raise HTTPException(status_code=404, detail="Task not found")
+                        
                         try:
                             request_obj = model_cls(**request_data)
                             
@@ -789,18 +782,17 @@ class RequestProcessor:
                                 if active_stream_count > 0:
                                     logger.info(f"[{request_id}] Found {active_stream_count} active streams before model check")
                                 
-                                if not await RequestProcessor._ensure_model_active_in_queue(request_obj.model, request_id):
+                                if not await RequestProcessor._ensure_model_active_in_queue(task, request_obj.model, request_id):
                                     error_msg = f"Model {request_obj.model} is not available or failed to switch"
                                     logger.error(f"[{request_id}] {error_msg}")
                                     future.set_exception(HTTPException(status_code=400, detail=error_msg))
                                     continue
                                 
                                 # Refresh service info after potential model switch
-                                service_info = get_service_info()
                                 logger.debug(f"[{request_id}] Model {request_obj.model} confirmed active, proceeding with request")
                             
                             # Process the request with the updated service info
-                            result = await handler(request_obj, service_info)
+                            result = await handler(request_obj)
                             future.set_result(result)
                             
                             processing_time = time.time() - processing_start
