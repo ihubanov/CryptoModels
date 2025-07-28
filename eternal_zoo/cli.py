@@ -620,17 +620,17 @@ def load_model_metadata(model_id, is_main=False) -> tuple[bool, dict | None]:
         with open(json_path, "r") as f:
             metadata = json.load(f)
     except FileNotFoundError:
-        print_error(f"Metadata file not found for model {model_id}")
+        print_warning(f"Metadata file not found for model {model_id}")
         return False, None
     except json.JSONDecodeError:
-        print_error(f"Invalid JSON in metadata file for model {model_id}")
+        print_warning(f"Invalid JSON in metadata file for model {model_id}")
         return False, None
 
     local_path = os.path.join(DEFAULT_MODEL_DIR, model_id)
     if not os.path.exists(local_path):
         local_path = local_path + POSTFIX_MODEL_PATH
         if not os.path.exists(local_path):
-            print_error(f"Model file not found for model {model_id}")
+            print_warning(f"Model file not found for model {model_id}")
             return False, None
 
     projector_path = None
@@ -644,8 +644,8 @@ def load_model_metadata(model_id, is_main=False) -> tuple[bool, dict | None]:
         lora_config = {}
         lora_metadata_path = os.path.join(local_path, "metadata.json")
         if not os.path.exists(lora_metadata_path):
-            print_error("LoRA model found but metadata.json is missing")
-            sys.exit(1)
+            print_warning("LoRA model found but metadata.json is missing")
+            return False, None
         with open(lora_metadata_path, "r") as f:
             lora_metadata = json.load(f)
         lora_paths = lora_metadata.get("lora_paths", [])
