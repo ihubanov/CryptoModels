@@ -460,6 +460,7 @@ def handle_run(args):
         if args.mmproj:
             model_id = model_id + "_" + args.mmproj
             mmproj_path = os.path.join(local_path, model_id)
+            print_info(f"Checking if projector file {mmproj_path} exists")
             if os.path.exists(mmproj_path):
                 projector_path = mmproj_path
 
@@ -483,6 +484,7 @@ def handle_run(args):
         if not success:
             print_error(f"Failed to start model {model_id}")
             sys.exit(1)
+
         model_metadata = {
             "task": args.task,
             "folder_name": folder_name,
