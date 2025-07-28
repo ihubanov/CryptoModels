@@ -225,8 +225,7 @@ class EternalZooManager:
                 os.remove(self.ai_service_file)
                 logger.info(f"AI service metadata file removed: {self.ai_service_file}")
             else:
-                logger.error("Failed to stop EternalZoo AI Service")
-                return False
+                logger.warning("Failed to stop EternalZoo AI Service")
         
         if self.api_service_file.exists():
             with open(self.api_service_file, 'rb') as f:
@@ -239,8 +238,7 @@ class EternalZooManager:
                 os.remove(self.api_service_file)
                 logger.info(f"API service metadata file removed: {self.api_service_file}")
             else:
-                logger.error("Failed to stop EternalZoo API Service")
-                return False
+                logger.warning("Failed to stop EternalZoo API Service")
         
         return True
 
