@@ -349,7 +349,7 @@ class LoraItem(BaseModel):
     scale: float
 
 class LoraConfigRequest(BaseModel):
-    model_hash: str
+    model: str
     lora_config: Dict[str, LoraItem]
 
 

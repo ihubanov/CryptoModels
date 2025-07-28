@@ -797,7 +797,7 @@ class EternalZooManager:
             service_info = self.get_service_info()
             ai_services = service_info.get("ai_services", [])
             for ai_service in ai_services:
-                if ai_service["model_id"] == request["model_id"]:
+                if ai_service["model_id"] == request["model"]:
                     ai_service["lora_config"] = request["lora_config"]
                     break
             self.update_service_info({
