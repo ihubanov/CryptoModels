@@ -631,6 +631,20 @@ def load_model_metadata(model_id, is_main=False):
     projector_path = None
     if metadata.get("multimodal", False):
         projector_path = os.path.join(DEFAULT_MODEL_DIR, f"{model_id}-projector")
+    
+    lora_config = None
+    is_lora = metadata.get("lora", False)
+
+    if is_lora:
+        lora_metadata_path = os.path.join(local_path, "metadata.json")
+        if not os.path.exists(lora_metadata_path):
+            print_error("LoRA model found but metadata.json is missing")
+            sys.exit(1)
+        with open(lora_metadata_path, "r") as f:
+            lora_metadata = json.load(f)
+        lora_paths = lora_metadata.get("lora_paths", [])
+        lora_scales = lora_metadata.get("lora_scales", [])
+        lora_config = dict(zip(lora_paths, lora_scales))
 
     config = {
         "model_id": model_id,
@@ -640,7 +654,8 @@ def load_model_metadata(model_id, is_main=False):
         "multimodal": metadata.get("multimodal", False),
         "projector": projector_path,
         "on_demand": not is_main,
-        "is_lora": metadata.get("lora", False),
+        "is_lora": is_lora,
+        "lora_config": lora_config,
         "context_length": DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH,
     }
     return config
