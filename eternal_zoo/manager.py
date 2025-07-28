@@ -48,6 +48,8 @@ class EternalZooManager:
         self.llama_server_path = DEFAULT_CONFIG.file_paths.LLAMA_SERVER
         self.logs_dir = Path(DEFAULT_CONFIG.file_paths.LOGS_DIR)
         self.logs_dir.mkdir(exist_ok=True)
+        self.ai_log_file = self.logs_dir / "ai.log"
+        self.api_log_file = self.logs_dir / "api.log"
         
     def _get_free_port(self) -> int:
         """Get a free port number."""
@@ -128,15 +130,14 @@ class EternalZooManager:
             logger.info(f"Running command: {' '.join(running_ai_command)}")
 
             if not config.get("on_demand", False):
-                ai_log_stderr = self.logs_dir / "ai.log"
                 try:
-                    with open(ai_log_stderr, 'w') as stderr_log:
+                    with open(self.ai_log_file, 'w') as stderr_log:
                         ai_process = subprocess.Popen(
                             running_ai_command,
                             stderr=stderr_log,
                             preexec_fn=os.setsid
                         )
-                        logger.info(f"AI logs written to {ai_log_stderr}")
+                        logger.info(f"AI logs written to {self.ai_log_file}")
                     ai_service["created"] = int(time.time())
                     ai_service["owned_by"] = "user"
                     ai_service["active"] = True
@@ -173,12 +174,10 @@ class EternalZooManager:
             "--log-level", "info"
         ]
 
-        api_log_stderr = self.logs_dir / "api.log"
-
         logger.info(f"Starting API process: {' '.join(uvicorn_command)}")
 
         try:
-            with open(api_log_stderr, 'w') as stderr_log:
+            with open(self.api_log_file, 'w') as stderr_log:
                 api_process = subprocess.Popen(
                     uvicorn_command,
                     stderr=stderr_log,
@@ -187,7 +186,7 @@ class EternalZooManager:
 
                 api_service["pid"] = api_process.pid
 
-                logger.info(f"API logs written to {api_log_stderr}")
+                logger.info(f"API logs written to {self.api_log_file}")
 
             with open(self.api_service_file, 'wb') as f:
                 msgpack.pack(api_service, f)
@@ -921,151 +920,72 @@ class EternalZooManager:
         return command
 
 
-    # async def switch_model(self, target_model_id: str, service_start_timeout: int = 120) -> bool:
-    #     """
-    #     Switch to a different model that was registered during multi-model start.
-    #     This will offload the currently active model and load the requested model.
+    async def switch_model(self, target_model_id: str) -> bool:
+        """
+        Switch to a different model that was registered during multi-model start.
+        This will offload the currently active model and load the requested model.
 
-    #     Args:
-    #         target_hash (str): Hash of the model to switch to.
-    #         service_start_timeout (int): Timeout for service startup in seconds.
+        Args:
+            target_hash (str): Hash of the model to switch to.
+            service_start_timeout (int): Timeout for service startup in seconds.
 
-    #     Returns:
-    #         bool: True if model switch was successful, False otherwise.
-    #     """
-    #     try:
-    #         if not os.path.exists(self.service_info_file):
-    #             logger.error("No service info found, cannot switch model")
-    #             return False
-            
-    #         # Load service details
-    #         with open(self.service_info_file, "rb") as f:
-    #             service_info = msgpack.load(f)
-                
-    #         ai_services = service_info.get("ai_services", [])
+        Returns:
+            bool: True if model switch was successful, False otherwise.
+        """
+        service_info = self.get_service_info()
+        ai_services = service_info.get("ai_services", [])
+        active_service_index = 0
+        target_service_index = 0
+        active_ai_service = None
+        target_ai_service = None
+        for i, ai_service in enumerate(ai_services):
+            if ai_service["active"]:
+                active_service_index = i
+                active_ai_service = ai_service
+            if ai_service["model_id"] == target_model_id:
+                target_service_index = i
+                target_ai_service = ai_service
+        
+        if target_ai_service is None:
+            logger.error(f"Target model {target_model_id} not found")
+            return False
+        
+        active_pid = active_ai_service.get("pid", None)
+        if active_pid and psutil.pid_exists(active_pid):
+            self._terminate_process_safely(active_pid, "EternalZoo AI Service", force=True)
+        else:
+            logger.warning(f"Active model {active_ai_service.get('model_id', 'unknown')} not found")
 
-    #         for ai_service in ai_services:
-    #             if ai_service["model_id"] == target_model_id:
-    #                 running_model_command = ai_service["running_ai_command"]
-    #                 break
-            
-            
-            
+        active_ai_service["active"] = False
+        active_ai_service.pop("pid", None)
+        ai_services[active_service_index] = active_ai_service
+    
+        running_ai_command = target_ai_service["running_ai_command"]
+        if running_ai_command is None:
+            logger.error(f"Target model {target_model_id} has no running AI command")
+            return False
+        
+        logger.info(f"Switching to model: {target_model_id} with command: {' '.join(running_ai_command)}")
+        with open(self.ai_log_file, 'w') as stderr_log:
+            ai_process = subprocess.Popen(
+                running_ai_command,
+                stderr=stderr_log,
+                preexec_fn=os.setsid
+            )
+            target_ai_service["pid"] = ai_process.pid
+            target_ai_service["active"] = True
+            ai_services[target_service_index] = target_ai_service
+        
+        with open(self.ai_service_file, 'wb') as f:
+            msgpack.pack(ai_services, f)
+        logger.info(f"AI service metadata written to {self.ai_service_file}")
 
-    #         target_model = models[target_hash]
-    #         logger.info(f"Switching to model: {target_hash}")
+        self.update_service_info({
+            "ai_services": ai_services, 
+        })
 
-    #         # Kill current AI server process
-    #         if not await self.kill_ai_server():
-    #             logger.error("Failed to stop current AI server")
-    #             return False
-
-    #         # Build command for target model
-    #         local_model_path = target_model["local_model_path"]
-    #         metadata = target_model["metadata"]
-    #         folder_name = metadata.get("folder_name", "")
-    #         task = metadata.get("task", "chat")
-    #         config_name = metadata.get("config_name", "flux-dev")
-    #         is_lora = metadata.get("lora", False)
-    #         gguf_folder = metadata.get("gguf_folder", False)
-            
-    #         # Get current service configuration
-    #         local_ai_port = service_info["port"]
-    #         host = service_info.get("host", "localhost")
-    #         context_length = service_info.get("context_length", 32768)
-
-    #         # Build appropriate command based on task
-    #         if task == "embed":
-    #             running_ai_command = self._build_embed_command(local_model_path, local_ai_port, host)
-    #         elif task == "image-generation":
-    #             if not shutil.which("mlx-flux"):
-    #                 raise EternalZooServiceError("mlx-flux command not found in PATH")
-                
-    #             # Initialize LoRA variables
-    #             lora_paths = None
-    #             lora_scales = None
-    #             effective_model_path = local_model_path
-                
-    #             if is_lora:
-    #                 base_model_path = target_model["base_model_path"]
-    #                 lora_config = target_model["lora_config"]       
-    #                 effective_model_path = base_model_path
-    #                 lora_paths = []
-    #                 lora_scales = []
-    #                 for key, value in lora_config.items():
-    #                     lora_paths.append(value["path"])
-    #                     lora_scales.append(value["scale"])
-                
-    #             running_ai_command = self._build_image_generation_command(
-    #                 effective_model_path, local_ai_port, host, config_name, lora_paths, lora_scales
-    #             )
-    #         else:
-    #             is_multimodal = target_model["multimodal"]
-    #             projector_path = target_model["local_projector_path"]
-                
-    #             if gguf_folder:
-    #                 # list all files in the folder
-    #                 files = os.listdir(local_model_path)
-    #                 # filter files that end with .gguf
-    #                 files = [f for f in files if f.endswith(".gguf")]
-    #                 # sort files by name
-    #                 files.sort()
-    #                 local_model_path = os.path.join(local_model_path, files[0])
-                
-    #             running_ai_command = self._build_model_command(folder_name, local_model_path, local_ai_port, host, context_length)
-
-    #             if is_multimodal:
-    #                 running_ai_command.extend([
-    #                     "--mmproj", str(projector_path)
-    #                 ])
-
-    #         logger.info(f"Starting new model with command: {running_ai_command}")
-
-    #         # Start new AI server process
-    #         ai_log_stderr = self.logs_dir / "ai.log"
-    #         try:
-    #             with open(ai_log_stderr, 'w') as stderr_log:
-    #                 ai_process = subprocess.Popen(
-    #                     running_ai_command,
-    #                     stderr=stderr_log,
-    #                     preexec_fn=os.setsid
-    #                 )
-    #             logger.info(f"AI logs written to {ai_log_stderr}")
-    #         except Exception as e:
-    #             logger.error(f"Error starting new model: {str(e)}", exc_info=True)
-    #             return False
-
-    #         # Wait for the new process to start
-    #         if not wait_for_health(local_ai_port, timeout=service_start_timeout):
-    #             logger.error(f"New model failed to start within {service_start_timeout} seconds")
-    #             return False
-
-    #         # Update service metadata
-    #         service_info["hash"] = target_hash
-    #         service_info["pid"] = ai_process.pid
-    #         service_info["running_ai_command"] = running_ai_command
-    #         service_info["local_text_path"] = local_model_path
-    #         service_info["family"] = metadata.get("family", None)
-    #         service_info["folder_name"] = folder_name
-    #         service_info["ram"] = metadata.get("ram", None)
-    #         service_info["task"] = task
-    #         service_info["multimodal"] = target_model.get("multimodal", False)
-    #         service_info["local_projector_path"] = target_model.get("local_projector_path")
-
-    #         # Update active model flags
-    #         for hash_val in models:
-    #             models[hash_val]["active"] = (hash_val == target_hash)
-
-    #         # Save updated service info
-    #         with open(self.msgpack_file, "wb") as f:
-    #             msgpack.dump(service_info, f)
-
-    #         logger.info(f"Successfully switched to model {target_hash} with PID {ai_process.pid}")
-    #         return True
-
-    #     except Exception as e:
-    #         logger.error(f"Error switching model: {str(e)}", exc_info=True)
-    #         return False
+        return True
+        
         
     def get_models_by_task(self, task: str) -> List[Dict[str, Any]]:
         """
