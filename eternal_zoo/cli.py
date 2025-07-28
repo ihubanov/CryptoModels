@@ -537,6 +537,10 @@ def handle_run(args):
         is_lora = hf_data.get("lora", False)
         task = hf_data.get("task", "chat")
 
+    print(f"is_lora: {is_lora}")
+    print(f"task: {task}")
+    print(f"model_name_from_metadata: {model_name_from_metadata}")
+
     # Handle LoRA configuration
     if is_lora:
         metadata_path = os.path.join(local_path, "metadata.json")
