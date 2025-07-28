@@ -934,6 +934,7 @@ class EternalZooManager:
         target_service_index = 0
         active_ai_service = None
         target_ai_service = None
+        
         for i, ai_service in enumerate(ai_services):
             if ai_service["active"]:
                 active_service_index = i

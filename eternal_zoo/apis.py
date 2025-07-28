@@ -608,6 +608,7 @@ class RequestProcessor:
             if model is None:
                 model = available_models[0]
                 logger.info(f"[{request_id}] No model {model_requested} found, using {model['model_id']} instead")
+                model_requested = model["model_id"]
             
             # Check if model is already active
             if model["active"]:
