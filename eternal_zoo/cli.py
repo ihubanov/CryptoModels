@@ -470,7 +470,7 @@ def handle_run(args):
             "projector": projector_path,
             "multimodal": bool(projector_path),
         }
-        
+
         if args.config_name:
             config["config_name"] = args.config_name
 
@@ -480,12 +480,13 @@ def handle_run(args):
             print_error(f"Failed to start model {model_id}")
             sys.exit(1)
         
-        model_metadata_path = model_id + ".json"
+        model_metadata_path = os.path.join(DEFAULT_MODEL_DIR, model_id + ".json")
         if not os.path.exists(model_metadata_path):
             with open(model_metadata_path, "w") as f:
                 json.dump(config, f)
-
-
+        else:
+            print_warning(f"Model metadata file {model_metadata_path} already exists")
+        return success
 
     # Handle hash or model_name cases
     if args.hash:
@@ -583,7 +584,7 @@ def handle_run(args):
         print_error(f"Failed to start model {model_id}")
         sys.exit(1)
 
-    model_metadata_path = model_id + ".json"
+    model_metadata_path = os.path.join(DEFAULT_MODEL_DIR, model_id + ".json")
     if not os.path.exists(model_metadata_path):
         with open(model_metadata_path, "w") as f:
             json.dump(config, f)
