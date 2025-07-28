@@ -192,14 +192,6 @@ def parse_args():
         help="🎯 Model task type (default: chat)",
         metavar="TYPE"
     )
-    run_command.add_argument(
-        "--config-name",
-        type=str,
-        default=None,
-        choices=["flux-dev", "flux-schnell"],
-        help="🔍 Model config name (default: None), need for image-generation and image-edit models",
-        metavar="CONFIG"
-    )
 
     # Model serve command
     serve_command = model_subparsers.add_parser(
@@ -474,9 +466,6 @@ def handle_run(args):
             "multimodal": bool(projector_path),
         }
 
-        if args.config_name:
-            config["config_name"] = args.config_name
-
         success =  manager.start([config], args.port, args.host)
 
         if not success:
@@ -562,7 +551,7 @@ def handle_run(args):
             sys.exit(1)
         local_path = base_model_local_path
         lora_config = dict(zip(lora_paths, lora_scales))
-        print(f"lora_config: {lora_config}")
+        model_name_from_metadata = base_model_name
 
     # Determine projector path
     projector_candidates = [
