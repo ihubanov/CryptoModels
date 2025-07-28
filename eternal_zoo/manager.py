@@ -925,33 +925,33 @@ class EternalZooManager:
         return command
 
 
-    async def switch_model(self, target_model_id: str, service_start_timeout: int = 120) -> bool:
-        """
-        Switch to a different model that was registered during multi-model start.
-        This will offload the currently active model and load the requested model.
+    # async def switch_model(self, target_model_id: str, service_start_timeout: int = 120) -> bool:
+    #     """
+    #     Switch to a different model that was registered during multi-model start.
+    #     This will offload the currently active model and load the requested model.
 
-        Args:
-            target_hash (str): Hash of the model to switch to.
-            service_start_timeout (int): Timeout for service startup in seconds.
+    #     Args:
+    #         target_hash (str): Hash of the model to switch to.
+    #         service_start_timeout (int): Timeout for service startup in seconds.
 
-        Returns:
-            bool: True if model switch was successful, False otherwise.
-        """
-        try:
-            if not os.path.exists(self.service_info_file):
-                logger.error("No service info found, cannot switch model")
-                return False
+    #     Returns:
+    #         bool: True if model switch was successful, False otherwise.
+    #     """
+    #     try:
+    #         if not os.path.exists(self.service_info_file):
+    #             logger.error("No service info found, cannot switch model")
+    #             return False
             
-            # Load service details
-            with open(self.service_info_file, "rb") as f:
-                service_info = msgpack.load(f)
+    #         # Load service details
+    #         with open(self.service_info_file, "rb") as f:
+    #             service_info = msgpack.load(f)
                 
-            ai_services = service_info.get("ai_services", [])
+    #         ai_services = service_info.get("ai_services", [])
 
-            for ai_service in ai_services:
-                if ai_service["model_id"] == target_model_id:
-                    running_model_command = ai_service["running_ai_command"]
-                    break
+    #         for ai_service in ai_services:
+    #             if ai_service["model_id"] == target_model_id:
+    #                 running_model_command = ai_service["running_ai_command"]
+    #                 break
             
             
             
