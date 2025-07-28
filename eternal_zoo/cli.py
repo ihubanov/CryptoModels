@@ -639,7 +639,9 @@ def load_model_metadata(model_id, is_main=False) -> tuple[bool, dict | None]:
     
     lora_config = None
     is_lora = metadata.get("lora", False)
-    model_name = metadata.get("model_name", model_id)
+    model_name = metadata.get("model_name", None)
+    if model_name is None:
+        model_name = metadata.get("folder_name", model_id)
 
     if is_lora:
         lora_config = {}
