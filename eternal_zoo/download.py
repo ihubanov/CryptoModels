@@ -1133,7 +1133,7 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
     model = data.get("model", None)
     projector = data.get("projector", None)
     pattern = data.get("pattern", None)
-    model_dir = str(output_dir) if output_dir else tempfile.mkdtemp(prefix=f"hf_download_{repo_id.replace('/', '_')}_")
+    model_dir = str(output_dir) if output_dir else str(DEFAULT_MODEL_DIR/f"tmp_{repo_id.replace('/', '_')}")
         
     attempt = 1
     while True:  # Infinite loop until success or user cancellation
