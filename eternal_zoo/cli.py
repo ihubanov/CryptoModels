@@ -759,8 +759,8 @@ def main():
     if known_args.command == "model":
         if known_args.model_command == "run":
             handle_run(known_args)
-        # elif known_args.model_command == "serve":
-        #     handle_serve(known_args)
+        elif known_args.model_command == "serve":
+            handle_serve(known_args)
         elif known_args.model_command == "stop":
             handle_stop(known_args)
         elif known_args.model_command == "download":
