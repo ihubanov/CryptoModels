@@ -109,10 +109,10 @@ class EternalZooManager:
 
             if task == "embed":
                 logger.info(f"Starting embed model: {config}")
-                running_ai_command = self._build_embed_command(config, local_model_port)
+                running_ai_command = self._build_embed_command(config)
             elif task == "chat":
                 logger.info(f"Starting chat model: {config}")
-                running_ai_command = self._build_chat_command(config, local_model_port)
+                running_ai_command = self._build_chat_command(config)
             elif task == "image-generation":
                 logger.info(f"Starting image generation model: {config}")
                 if not shutil.which("mlx-flux"):
@@ -131,6 +131,8 @@ class EternalZooManager:
 
             if not config.get("on_demand", False):
                 try:
+                    # append port and host to the running_ai_command
+                    running_ai_command.extend(["--port", str(local_model_port), "--host", host])
                     with open(self.ai_log_file, 'w') as stderr_log:
                         ai_process = subprocess.Popen(
                             running_ai_command,
@@ -142,6 +144,8 @@ class EternalZooManager:
                     ai_service["owned_by"] = "user"
                     ai_service["active"] = True
                     ai_service["pid"] = ai_process.pid
+                    ai_service["port"] = local_model_port
+                    ai_service["host"] = host
                     ai_services.append(ai_service)
                     with open(self.ai_service_file, 'wb') as f:
                         msgpack.pack(ai_services, f)
@@ -688,24 +692,6 @@ class EternalZooManager:
             return None
         return best_practice_path
     
-    def _build_embed_command(self, config: dict, port: int) -> list:
-        """Build the embed command with common parameters."""
-        model_path = config.get("model", None)
-        if model_path is None:
-            raise ValueError("Model path is required to start the service")
-
-        command = [
-            self.llama_server_path,
-            "--model", str(model_path),
-            "--port", str(port),
-            "--host", "0.0.0.0",
-            "--embedding",
-            "--pooling", "mean",
-            "-ub", "8192",
-            "-ngl", "9999"
-        ]
-        return command
-    
     def _get_model_family(self, model_name: str | None = None) -> str:
         if model_name is None:
             return None
@@ -733,57 +719,6 @@ class EternalZooManager:
             return "gemma-3"
     
         return None
-    
-    def _build_chat_command(self, config: dict, port: int) -> list:
-        """Build the chat command with common parameters."""
-        model_path = config.get("model", None)
-        if model_path is None:
-            raise ValueError("Model path is required to start the service")
-        
-        model_name = config.get("model_name", None)
-        model_family = self._get_model_family(model_name)
-        template_path = self._get_model_template_path(model_family)
-        best_practice_path = self._get_model_best_practice_path(model_family)
-
-        projector = config.get("projector", None)
-        
-        command = [
-            self.llama_server_path,
-            "--model", str(model_path),
-            "--port", str(port),
-            "--host", "0.0.0.0",
-            "--pooling", "mean",
-            "--no-webui",
-            "--no-context-shift",
-            "-fa",
-            "-ngl", "9999",
-            "--jinja",
-            "--reasoning-format", "none",
-            "--embeddings"
-        ]
-
-        if projector is not None:
-            if os.path.exists(projector):
-                command.extend(["--mmproj", str(projector)])
-            else:
-                raise ValueError(f"Projector file not found: {projector}")
-        
-        if template_path is not None:
-            if os.path.exists(template_path):
-                command.extend(["--chat-template-file", template_path])
-            else:
-                raise ValueError(f"Template file not found: {template_path}")
-        
-        if best_practice_path is not None:
-            if os.path.exists(best_practice_path):
-                with open(best_practice_path, "r") as f:
-                    best_practice = json.load(f)
-                    for key, value in best_practice.items():
-                        command.extend([f"--{key}", str(value)])
-            else:
-                raise ValueError(f"Best practices file not found: {best_practice_path}")
-
-        return command
     
     async def kill_ai_server(self) -> bool:
         """Kill the AI server process if it's running (optimized async version)."""
@@ -878,8 +813,73 @@ class EternalZooManager:
         except Exception as e:
             logger.error(f"Error updating LoRA: {str(e)}")
             return False
+        
+    def _build_chat_command(self, config: dict) -> list:
+        """Build the chat command with common parameters."""
+        model_path = config.get("model", None)
+        if model_path is None:
+            raise ValueError("Model path is required to start the service")
+        
+        model_name = config.get("model_name", None)
+        model_family = self._get_model_family(model_name)
+        template_path = self._get_model_template_path(model_family)
+        best_practice_path = self._get_model_best_practice_path(model_family)
 
-    def _build_image_generation_command(self, config: dict, port: int) -> list:
+        projector = config.get("projector", None)
+        
+        command = [
+            self.llama_server_path,
+            "--model", str(model_path),
+            "--pooling", "mean",
+            "--no-webui",
+            "--no-context-shift",
+            "-fa",
+            "-ngl", "9999",
+            "--jinja",
+            "--reasoning-format", "none",
+            "--embeddings"
+        ]
+
+        if projector is not None:
+            if os.path.exists(projector):
+                command.extend(["--mmproj", str(projector)])
+            else:
+                raise ValueError(f"Projector file not found: {projector}")
+        
+        if template_path is not None:
+            if os.path.exists(template_path):
+                command.extend(["--chat-template-file", template_path])
+            else:
+                raise ValueError(f"Template file not found: {template_path}")
+        
+        if best_practice_path is not None:
+            if os.path.exists(best_practice_path):
+                with open(best_practice_path, "r") as f:
+                    best_practice = json.load(f)
+                    for key, value in best_practice.items():
+                        command.extend([f"--{key}", str(value)])
+            else:
+                raise ValueError(f"Best practices file not found: {best_practice_path}")
+
+        return command
+
+    def _build_embed_command(self, config: dict) -> list:
+        """Build the embed command with common parameters."""
+        model_path = config.get("model", None)
+        if model_path is None:
+            raise ValueError("Model path is required to start the service")
+
+        command = [
+            self.llama_server_path,
+            "--model", str(model_path),
+            "--embedding",
+            "--pooling", "mean",
+            "-ub", "8192",
+            "-ngl", "9999"
+        ]
+        return command
+
+    def _build_image_generation_command(self, config: dict) -> list:
         """Build the image-generation command with MLX Flux parameters and optional LoRA support."""
 
         model_path = config["model"]
@@ -898,9 +898,7 @@ class EternalZooManager:
             "mlx-flux",
             "serve",
             "--model-path", str(model_path),
-            "--config-name", config_name,
-            "--port", str(port),
-            "--host", "0.0.0.0"
+            "--config-name", config_name
         ]
         
         # Validate LoRA parameters
@@ -957,16 +955,23 @@ class EternalZooManager:
             logger.warning(f"Active model {active_ai_service.get('model_id', 'unknown')} not found")
 
         active_ai_service["active"] = False
+        host = active_ai_service.get("host", "0.0.0.0")
         active_ai_service.pop("pid", None)
+        active_ai_service.pop("host", None)
+        active_ai_service.pop("port", None)
         ai_services[active_service_index] = active_ai_service
     
         running_ai_command = target_ai_service["running_ai_command"]
         if running_ai_command is None:
             logger.error(f"Target model {target_model_id} has no running AI command")
             return False
-        
+
+        local_model_port = self._get_free_port()
+        # extend the running_ai_command with the port and host
+        running_ai_command.extend(["--port", str(local_model_port), "--host", host])
         logger.info(f"Switching to model: {target_model_id} with command: {' '.join(running_ai_command)}")
         with open(self.ai_log_file, 'w') as stderr_log:
+            # ex
             ai_process = subprocess.Popen(
                 running_ai_command,
                 stderr=stderr_log,
@@ -974,6 +979,8 @@ class EternalZooManager:
             )
             target_ai_service["pid"] = ai_process.pid
             target_ai_service["active"] = True
+            target_ai_service["port"] = local_model_port
+            target_ai_service["host"] = host
             ai_services[target_service_index] = target_ai_service
         
         with open(self.ai_service_file, 'wb') as f:
