@@ -1034,6 +1034,9 @@ class HuggingFaceProgressTracker:
         elapsed_time = current_time - self.start_time
         current_speed_mbps = (self.last_folder_size / (1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
 
+        percentage = max(self.last_percentage, percentage)
+        current_speed_mbps = max(self.last_speed_mbps, current_speed_mbps)
+
         self.last_percentage = percentage
         self.last_speed_mbps = current_speed_mbps
         
