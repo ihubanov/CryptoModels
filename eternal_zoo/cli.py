@@ -233,14 +233,6 @@ def parse_args():
         metavar="HOST"
     )
 
-    # serve_command.add_argument(
-    #     "--context-length",
-    #     type=int,
-    #     default=config.model.DEFAULT_CONTEXT_LENGTH,
-    #     help=f"📏 Context length for the model (default: {config.model.DEFAULT_CONTEXT_LENGTH})",
-    #     metavar="LENGTH"
-    # )
-
     # Model stop command
     stop_command = model_subparsers.add_parser(
         "stop",
@@ -493,8 +485,8 @@ def handle_run(args):
 
         model_metadata = {
             "task": args.task,
-            "folder_name": folder_name,
-            "lora": False,
+            "model_id": model_id,
+            "model_name": folder_name,
             "multimodal": bool(projector_path),
         }
         model_metadata_path = os.path.join(DEFAULT_MODEL_DIR, model_id + ".json")
@@ -601,7 +593,8 @@ def handle_run(args):
 
     model_metadata = {
         "task": task,
-        "folder_name": model_name_from_metadata,
+        "model_id": model_id,
+        "model_name": model_name_from_metadata,
         "lora": is_lora,
         "multimodal": bool(projector_path),
     }
@@ -638,8 +631,18 @@ def handle_serve(args):
             main_model_id = random.choice(downloaded_models)
     
     configs = []
+    local_path = None
+    projector_path = None
     with open(os.path.join(DEFAULT_MODEL_DIR, main_model_id + ".json"), "r") as f:
         model_metadata = json.load(f)
+        if model_metadata.get("multimodal", False):
+            projector_path = os.path.join(DEFAULT_MODEL_DIR, main_model_id + "-projector")
+
+        local_path = os.path.join(DEFAULT_MODEL_DIR, main_model_id)
+        model_metadata["projector"] = projector_path
+        model_metadata["model"] = local_path
+        model_metadata["context_length"] = DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH
+        model_metadata["on_demand"] = False
         configs.append(model_metadata)
 
     other_models = [model_id for model_id in downloaded_models if model_id != main_model_id]
@@ -647,6 +650,12 @@ def handle_serve(args):
     for model_id in other_models:
         with open(os.path.join(DEFAULT_MODEL_DIR, model_id + ".json"), "r") as f:
             model_metadata = json.load(f)
+            if model_metadata.get("multimodal", False):
+                projector_path = os.path.join(DEFAULT_MODEL_DIR, model_id + "-projector")
+                model_metadata["projector"] = projector_path
+            local_path = os.path.join(DEFAULT_MODEL_DIR, model_id)
+            model_metadata["model"] = local_path
+            model_metadata["on_demand"] = True
             configs.append(model_metadata)
 
     success = manager.start(configs, args.port, args.host)
