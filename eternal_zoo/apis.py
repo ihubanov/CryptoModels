@@ -1058,14 +1058,14 @@ async def list_models():
     models = []
 
     for ai_service in ai_services:
-        print(ai_service)
-        model_id = ai_service.get("model_id")
-        task = ai_service.get("task")
-        is_lora = ai_service.get("is_lora", False)
-        multimodal = ai_service.get("multimodal", False)
-        lora_config = ai_service.get("lora_config", None)
-        context_length = ai_service.get("context_length", None)
-        created = ai_service.get("created", int(time.time()))
+        config = ai_service.get("config", {})
+        model_id = config.get("model_id", "")
+        task = config.get("task", "")
+        is_lora = config.get("is_lora", False)
+        multimodal = config.get("multimodal", False)
+        lora_config = config.get("lora_config", None)
+        context_length = config.get("context_length", None)
+        created = config.get("created", int(time.time()))
         owned_by = ai_service.get("owned_by", "user")
         active = ai_service.get("active", False)    
 
@@ -1076,8 +1076,8 @@ async def list_models():
             owned_by=owned_by,
             active=active,
             task=task,
-            is_lora=is_lora,
-            multimodal=multimodal,
+            is_lora=bool(is_lora),
+            multimodal=bool(multimodal),
             context_length=context_length,
             lora_config=lora_config
         )

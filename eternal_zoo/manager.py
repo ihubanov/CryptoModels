@@ -136,7 +136,8 @@ class EternalZooManager:
                             preexec_fn=os.setsid
                         )
                         logger.info(f"AI logs written to {ai_log_stderr}")
-                    ai_service["last_activity"] = int(time.time())
+                    ai_service["created"] = int(time.time())
+                    ai_service["owned_by"] = "user"
                     ai_service["active"] = True
                     ai_service["pid"] = ai_process.pid
                     ai_services.append(ai_service)
