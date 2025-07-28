@@ -534,9 +534,7 @@ def handle_run(args):
             sys.exit(1)
         with open(metadata_path, "r") as f:
             lora_metadata = json.load(f)
-        print(f"lora_metadata: {lora_metadata}")
-        lora_paths = lora_metadata.get("lora_paths", [])
-        lora_scales = lora_metadata.get("lora_scales", [])
+        lora_config = {}
         base_model_hash = lora_metadata.get("base_model")
         if base_model_hash not in HASH_TO_MODEL:
             print_error(f"Base model hash {base_model_hash} not found")
@@ -550,9 +548,16 @@ def handle_run(args):
             print_error(f"Failed to download base model {base_model_hash}")
             sys.exit(1)
         local_path = base_model_local_path
-        lora_config = dict(zip(lora_paths, lora_scales))
         model_name_from_metadata = base_model_name
-
+        lora_paths = lora_metadata.get("lora_paths", [])
+        lora_scales = lora_metadata.get("lora_scales", [])
+        for i, lora_path in enumerate(lora_paths):
+            lora_name = os.path.basename(lora_path)
+            lora_config[lora_name] = {
+                "path": lora_path,
+                "scale": lora_scales[i]
+            }
+            
     # Determine projector path
     projector_candidates = [
         f"{local_path}-projector",
@@ -636,6 +641,7 @@ def load_model_metadata(model_id, is_main=False):
     is_lora = metadata.get("lora", False)
 
     if is_lora:
+        lora_config = {}
         lora_metadata_path = os.path.join(local_path, "metadata.json")
         if not os.path.exists(lora_metadata_path):
             print_error("LoRA model found but metadata.json is missing")
@@ -644,7 +650,12 @@ def load_model_metadata(model_id, is_main=False):
             lora_metadata = json.load(f)
         lora_paths = lora_metadata.get("lora_paths", [])
         lora_scales = lora_metadata.get("lora_scales", [])
-        lora_config = dict(zip(lora_paths, lora_scales))
+        for i, lora_path in enumerate(lora_paths):
+            lora_name = os.path.basename(lora_path)
+            lora_config[lora_name] = {
+                "path": lora_path,
+                "scale": lora_scales[i]
+            }
 
     config = {
         "model_id": model_id,

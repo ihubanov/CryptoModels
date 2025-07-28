@@ -889,8 +889,8 @@ class EternalZooManager:
 
         if is_lora:
             for key, value in lora_config.items():
-                lora_paths.append(key)
-                lora_scales.append(value)
+                lora_paths.append(value["path"])
+                lora_scales.append(value["scale"])
 
         command = [
             "mlx-flux",
@@ -934,7 +934,7 @@ class EternalZooManager:
         target_service_index = 0
         active_ai_service = None
         target_ai_service = None
-
+        
         for i, ai_service in enumerate(ai_services):
             if ai_service["active"]:
                 active_service_index = i
