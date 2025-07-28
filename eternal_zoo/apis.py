@@ -1083,120 +1083,35 @@ async def list_models():
     Provides a list of available models, compatible with OpenAI's /v1/models endpoint.
     Returns all models in multi-model service including main and on-demand models.
     """
-    try:
-        service_info = get_service_info()
-    except HTTPException as e:
-        if e.status_code == 503:
-            logger.info("/v1/models: Service information not available. No model loaded or /update not called.")
-            return ModelList(data=[])
-        logger.error(f"/v1/models: Unexpected HTTPException while fetching service_info: {e.detail}")
-        raise
+    service_info = get_service_info()
 
     model_cards = []
-    models = service_info.get("models", {})
+    ai_services = service_info.get("ai_services", [])
+    models = []
 
-    if models:
-        logger.info(f"/v1/models: Multi-model service detected with {len(models)} models")
-        for model_hash, model_info in models.items():
-            metadata = model_info.get("metadata", {})
-            folder_name = metadata.get("folder_name", "")
-            active = model_info.get("active", False)
-            is_on_demand = model_info.get("on_demand", False)
-            task = metadata.get("task", "chat")
-            lora_config = model_info.get("lora_config", None)
-            context_length = model_info.get("context_length", None)
-            base_model_path = model_info.get("base_model_path", None)
-            local_model_path = model_info.get("local_model_path", None)
-            local_projector_path = model_info.get("local_projector_path", None)
-            parent = model_info.get("parent", None)
-            permission = model_info.get("permission", None)
-            created = metadata.get("created", int(time.time()))
-            owned_by = metadata.get("owned_by", "user")
-            multimodal = metadata.get("multimodal", False)
+    for ai_service in ai_services:
+        model_id = ai_service.get("model_id")
+        task = ai_service.get("task")
+        is_lora = ai_service.get("is_lora", False)
+        multimodal = ai_service.get("multimodal", False)
+        lora_config = ai_service.get("lora_config", None)
+        context_length = ai_service.get("context_length", None)
+        created = ai_service.get("created", int(time.time()))
+        owned_by = ai_service.get("owned_by", "user")
+        active = ai_service.get("active", False)    
 
-            model_id = folder_name if folder_name else model_hash
-            raw_ram_value = metadata.get("ram")
-            parsed_ram_value = None
-
-            if isinstance(raw_ram_value, (int, float)):
-                parsed_ram_value = float(raw_ram_value)
-            elif isinstance(raw_ram_value, str):
-                try:
-                    parsed_ram_value = float(raw_ram_value.lower().replace("gb", "").strip())
-                except ValueError:
-                    logger.warning(f"/v1/models: Could not parse RAM value '{raw_ram_value}' to float for model {model_id}")
-
-            model_card = ModelCard(
-                id=model_hash,
-                object="model",
-                created=created,
-                owned_by=owned_by,
-                active=active,
-                root=model_id,
-                parent=parent,
-                permission=permission if permission is not None else [ModelPermission()],
-                ram=parsed_ram_value,
-                folder_name=folder_name,
-                lora_config=lora_config,
-                on_demand=is_on_demand,
-                task=task,
-                multimodal=multimodal,
-                context_length=context_length,
-                base_model_path=base_model_path,
-                local_model_path=local_model_path,
-                local_projector_path=local_projector_path
-            )
-            model_cards.append(model_card)
-            status = "🟢 Active" if active else ("🔴 On-demand" if is_on_demand else "⚪ Unknown")
-            logger.debug(f"/v1/models: Added model {model_id} ({model_hash[:16]}...) - {status}")
-    else:
-        model_hash = service_info.get("hash")
-        folder_name_from_info = service_info.get("folder_name")
-        task = service_info.get("task", "chat")
-        lora_config = service_info.get("lora_config", None)
-        context_length = service_info.get("context_length", None)
-        base_model_path = service_info.get("base_model_path", None)
-        local_model_path = service_info.get("local_model_path", None)
-        local_projector_path = service_info.get("local_projector_path", None)
-        parent = service_info.get("parent", None)
-        permission = service_info.get("permission", None)
-        created = service_info.get("created", int(time.time()))
-        owned_by = service_info.get("owned_by", "user")
-        multimodal = service_info.get("multimodal", False)
-        if not model_hash:
-            logger.warning("/v1/models: No model hash found in service_info, though service_info itself was present. Returning empty list.")
-            return ModelList(data=[])
-        model_id = folder_name_from_info if folder_name_from_info else model_hash
-        raw_ram_value = service_info.get("ram")
-        parsed_ram_value = None
-        if isinstance(raw_ram_value, (int, float)):
-            parsed_ram_value = float(raw_ram_value)
-        elif isinstance(raw_ram_value, str):
-            try:
-                parsed_ram_value = float(raw_ram_value.lower().replace("gb", "").strip())
-            except ValueError:
-                logger.warning(f"/v1/models: Could not parse RAM value '{raw_ram_value}' to float.")
         model_card = ModelCard(
-            id=model_hash,
+            id=model_id,
             object="model",
             created=created,
             owned_by=owned_by,
-            root=model_id,
-            parent=parent,
-            permission=permission if permission is not None else [ModelPermission()],
-            ram=parsed_ram_value,
-            folder_name=folder_name_from_info,
-            lora_config=lora_config,
-            on_demand=None,
+            active=active,
             task=task,
+            is_lora=is_lora,
+            multimodal=multimodal,
             context_length=context_length,
-            base_model_path=base_model_path,
-            local_model_path=local_model_path,
-            local_projector_path=local_projector_path,
-            active = True,
-            multimodal=multimodal
+            lora_config=lora_config
         )
-        model_cards.append(model_card)
-        logger.info(f"/v1/models: Single-model service - returning model {model_id}")
-    logger.info(f"/v1/models: Returning {len(model_cards)} models")
+        models.append(model_card)
+
     return ModelList(data=model_cards)

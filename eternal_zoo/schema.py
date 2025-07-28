@@ -333,19 +333,12 @@ class ModelCard(BaseModel):
     created: int = Field(default_factory=lambda: int(time.time()))
     owned_by: str = "user"
     active: bool = False
-    root: Optional[str] = None
-    parent: Optional[str] = None
-    permission: List[ModelPermission] = Field(default_factory=lambda: [ModelPermission()])
-    ram: Optional[float] = None
-    folder_name: Optional[str] = None
+    task: str
+    is_lora: bool
+    multimodal: bool
+    context_length: int
     lora_config: Optional[dict] = None
-    on_demand: Optional[bool] = None
-    task: Optional[str] = None
-    multimodal: Optional[bool] = None
-    context_length: Optional[int] = None
-    base_model_path: Optional[str] = None
-    local_model_path: Optional[str] = None
-    local_projector_path: Optional[str] = None
+
 
 class ModelList(BaseModel):
     object: str = "list"
