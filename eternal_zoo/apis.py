@@ -634,7 +634,7 @@ class RequestProcessor:
             switch_duration = time.time() - switch_start_time
             
             if success:
-                logger.info(f"[{request_id}] Successfully switched from {model_info['model_id']} to {model_requested} "
+                logger.info(f"[{request_id}] Successfully switched from {model['model_id']} to {model_requested} "
                            f"(switch time: {switch_duration:.2f}s)")
             else:
                 logger.error(f"[{request_id}] Failed to switch to model {model_requested} "
@@ -665,69 +665,6 @@ class RequestProcessor:
         logger.info(f"[{request_id}] Request completed for endpoint {endpoint} (total time: {total_time:.2f}s)")
         
         return result
-    
-    # @staticmethod
-    # async def process_direct(endpoint: str, request_data: Dict[str, Any]):
-    #     """Process a request directly without queueing for administrative endpoints."""
-    #     request_id = generate_request_id()
-    #     logger.info(f"[{request_id}] Processing direct request for endpoint {endpoint}")
-        
-    #     start_time = time.time()
-    #     if endpoint in RequestProcessor.MODEL_ENDPOINTS:
-    #         model_cls, handler = RequestProcessor.MODEL_ENDPOINTS[endpoint]
-    #         request_obj = model_cls(**request_data)
-
-    #         task = "chat"
-    #         active_model = None
-
-    #         if endpoint == "/v1/embeddings" or endpoint == "/embeddings":
-    #             task = "embed"
-    #         elif endpoint == "/v1/images/generations" or endpoint == "/images/generations":
-    #             task = "image-generation"
-    #         else:
-    #             task = "image-edit"
-            
-    #         model_id = request_obj.model
-    #         available_models = eternal_zoo_manager.get_models_by_task(task)
-
-    #         print(f"available_models: {available_models}")
-    #         if len(available_models) == 0:
-    #             raise HTTPException(status_code=404, detail=f"No {task} model found")
-            
-    #         for model in available_models:
-    #             if model["model_id"] == model_id:
-    #                 active_model = model
-    #                 break
-            
-    #         if active_model is None:
-    #             active_model = available_models[0]   
-
-    #         request_obj.model = active_model["model_id"]
-                
-    #         # Ensure model is active before processing (for direct requests)
-    #         if hasattr(request_obj, 'model') and request_obj.model:
-    #             logger.debug(f"[{request_id}] Ensuring model {request_obj.model} is active for direct request")
-                
-    #             # Use the same centralized model switching logic as the queue
-    #             if not await RequestProcessor._ensure_model_active_in_queue(request_obj.model, request_id):
-    #                 error_msg = f"Model {request_obj.model} is not available or failed to switch"
-    #                 logger.error(f"[{request_id}] {error_msg}")
-    #                 raise HTTPException(status_code=400, detail=error_msg)
-                
-    #             # Refresh service info after potential model switch
-    #             service_info = get_service_info()
-    #             logger.debug(f"[{request_id}] Model {request_obj.model} confirmed active for direct request")
-            
-    #         # Process the request with the updated service info
-    #         result = await handler(request_obj, service_info)
-            
-    #         process_time = time.time() - start_time
-    #         logger.info(f"[{request_id}] Direct request completed for endpoint {endpoint} (time: {process_time:.2f}s)")
-            
-    #         return result
-    #     else:
-    #         logger.error(f"[{request_id}] Endpoint not found: {endpoint}")
-    #         raise HTTPException(status_code=404, detail="Endpoint not found")
     
     @staticmethod
     async def worker():
