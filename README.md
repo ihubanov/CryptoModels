@@ -39,6 +39,7 @@ This guide will help you deploy your AI models using peer-to-peer infrastructure
 - **🛡️ Zero Trust Privacy**: Your prompts, responses, and model usage remain completely private
 - **🔗 OpenAI Compatibility**: Use familiar API endpoints with your existing tools
 - **👁️ Multi-Model Support**: Works with both text and vision models
+- **🚀 Model Access**: Run any GGUF model directly from Hugging Face
 - **⚡ Parallel Processing**: Efficient model compression and upload
 - **🔄 Automatic Retries**: Robust error handling for network issues
 - **📊 Metadata Management**: Comprehensive model information tracking
@@ -99,6 +100,7 @@ Eternal Zoo uses a structured command hierarchy for better organization. All mod
 # Model operations
 eai model run --hash <hash>           # Run a model server
 eai model run <model-name>            # Run a preserved model (e.g., qwen3-1.7b)
+eai model run --hf-repo <repo> --hf-file <file> --task <task>  # Run any GGUF model from Hugging Face
 eai model serve [--main-hash <hash>]  # Serve all downloaded models (with optional main model)
 eai model stop                        # Stop the running model server  
 eai model status                      # Check which model is running
@@ -113,16 +115,19 @@ eai --version                         # Show version information
 
 ```bash
 # Run a preserved model (user-friendly)
-eai model run qwen3-1.7b --port 8080
+eai model run qwen3-1.7b
 
 # Run any model by hash
-eai model run --hash bafkreiacd5mwy4a5wkdmvxsk42nsupes5uf4q3dm52k36mvbhgdrez422y --port 8080
+eai model run --hash bafkreiacd5mwy4a5wkdmvxsk42nsupes5uf4q3dm52k36mvbhgdrez422y
+
+# Run any GGUF model directly from Hugging Face
+eai model run --hf-repo dphn/Dolphin3.0-Llama3.1-8B-GGUF --hf-file Dolphin3.0-Llama3.1-8B-Q4_0.gguf --task chat
 
 # Serve all downloaded models (random main model)
 eai model serve --port 8080
 
 # Serve all downloaded models with specific main model
-eai model serve --main-hash bafkreiacd5mwy4a5wkdmvxsk42nsupes5uf4q3dm52k36mvbhgdrez422y --port 8080
+eai model serve --main-hash bafkreiacd5mwy4a5wkdmvxsk42nsupes5uf4q3dm52k36mvbhgdrez422y
 
 # Check status
 eai model status
@@ -138,6 +143,46 @@ eai model preserve --folder-path ./my-model-folder --task chat --ram 8.5
 ```
 
 ## 🚀 Running Models
+
+### 🆕 Running Any GGUF Model from Hugging Face
+
+Eternal Zoo now supports running any GGUF model directly from Hugging Face without needing to download or preserve it first. This gives you instant access to thousands of models available on Hugging Face.
+
+#### **Basic Usage**
+```bash
+# Run any GGUF model from Hugging Face
+eai model run --hf-repo <repository> --hf-file <filename> --task <task_type>
+
+# Example: Run Dolphin-3.0 model
+eai model run --hf-repo dphn/Dolphin3.0-Llama3.1-8B-GGUF --hf-file Dolphin3.0-Llama3.1-8B-Q4_0.gguf --task chat
+```
+
+#### **Parameters**
+- `--hf-repo`: Hugging Face repository (e.g., `dphn/Dolphin3.0-Llama3.1-8B-GGUF`)
+- `--hf-file`: Specific GGUF file name (e.g., `Dolphin3.0-Llama3.1-8B-Q4_0.gguf`)
+- `--task`: Task type (`chat` for text generation, `embed` for embeddings)
+
+#### **Finding Models on Hugging Face**
+1. Visit [Hugging Face](https://huggingface.co/) and search for GGUF models
+2. Navigate to the model repository
+3. Find the `.gguf` file you want to use
+4. Use the repository name and file name in your command
+
+#### **Example Models You Can Run**
+```bash
+# Chat models
+eai model run --hf-repo TheBloke/Qwen2.5-7B-GGUF --hf-file qwen2.5-7b.Q4_K_M.gguf --task chat
+eai model run --hf-repo TheBloke/Mistral-7B-Instruct-v0.2-GGUF --hf-file mistral-7b-instruct-v0.2.Q4_K_M.gguf --task chat
+
+# Embedding models
+eai model run --hf-repo TheBloke/bge-large-en-v1.5-GGUF --hf-file bge-large-en-v1.5.Q4_K_M.gguf --task embed
+```
+
+#### **Benefits**
+- **Instant Access**: No need to download or preserve models first
+- **Huge Selection**: Access to thousands of models on Hugging Face
+- **Latest Models**: Try new models as soon as they're uploaded
+- **Flexible**: Works with any GGUF-compatible model
 
 ### Available Pre-uploaded Models
 
@@ -356,6 +401,10 @@ eai model run qwen3-embedding-4b,qwen3-embedding-0.6b
 # Run with custom hashes for any task type
 eai model run --hash hash1,hash2,hash3
 # Main: hash1, On-demand: hash2, hash3
+
+# Run with Hugging Face models (new!)
+eai model run --hf-repo dphn/Dolphin3.0-Llama3.1-8B-GGUF --hf-file Dolphin3.0-Llama3.1-8B-Q4_0.gguf --task chat
+# Run a single Hugging Face model directly
 ```
 
 #### **Method 2: Serve All Downloaded Models by Task**
@@ -671,6 +720,20 @@ Use the `id` (hash) value as the `model` field in your API requests to specify w
 ### Prerequisites for Model Preservation
 1. A model in `gguf` format (compatible with `llama.cpp`)
 2. A [Lighthouse](https://lighthouse.storage/) account and API key
+
+### 🆕 Running Models Directly from Hugging Face
+
+**New Feature**: You can now run any GGUF model directly from Hugging Face without downloading or preserving it first:
+
+```bash
+# Run any GGUF model from Hugging Face
+eai model run --hf-repo <repository> --hf-file <filename> --task <task_type>
+
+# Example: Run Dolphin-3.0 model
+eai model run --hf-repo dphn/Dolphin3.0-Llama3.1-8B-GGUF --hf-file Dolphin3.0-Llama3.1-8B-Q4_0.gguf --task chat
+```
+
+This is the **easiest way** to try new models - no setup required!
 
 ### Uploading Custom Models
 
