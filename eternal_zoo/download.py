@@ -997,6 +997,10 @@ class HuggingFaceProgressTracker:
         self.pending_progress_updates = 0
         self.last_progress_log_time = 0
         self.progress_log_interval = 5.0  # Log progress every 5 seconds
+        
+        # Download progress
+        self.last_speed_mbps = 0.0
+        self.last_percentage = 0.0
 
     def set_watch_dir(self, watch_dir: str):
         self.watch_dir = watch_dir
@@ -1009,7 +1013,7 @@ class HuggingFaceProgressTracker:
     def get_current_progress(self) -> tuple[float, float]:
         """Get current download progress and speed with caching"""
         if self.watch_dir is None:
-            return 0.0, 0.0
+            return self.last_percentage, self.last_speed_mbps
         
         current_time = time.time()
         
@@ -1029,6 +1033,9 @@ class HuggingFaceProgressTracker:
         
         elapsed_time = current_time - self.start_time
         current_speed_mbps = (self.last_folder_size / (1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
+
+        self.last_percentage = percentage
+        self.last_speed_mbps = current_speed_mbps
         
         return percentage, current_speed_mbps
 
