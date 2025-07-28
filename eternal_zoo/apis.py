@@ -755,7 +755,7 @@ class RequestProcessor:
         
         while True:
             try:
-                endpoint, request_data, future, request_id, start_wait_time, service_info = await RequestProcessor.queue.get()
+                endpoint, request_data, future, request_id, start_wait_time = await RequestProcessor.queue.get()
                 
                 wait_time = time.time() - start_wait_time
                 queue_size = RequestProcessor.queue.qsize()
