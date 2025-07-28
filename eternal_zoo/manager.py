@@ -148,7 +148,7 @@ class EternalZooManager:
                     with open(self.ai_service_file, 'wb') as f:
                         msgpack.pack(ai_services, f)
                     logger.info(f"AI service metadata written to {self.ai_service_file}")
-                    if not wait_for_health(local_model_port, timeout=120):
+                    if not wait_for_health(local_model_port):
                         self.stop()
                         logger.error(f"Service failed to start within 120 seconds")
                         return False
@@ -981,6 +981,15 @@ class EternalZooManager:
             target_ai_service["port"] = local_model_port
             target_ai_service["host"] = host
             ai_services[target_service_index] = target_ai_service
+
+        with open(self.ai_service_file, 'wb') as f:
+            msgpack.pack(ai_services, f)
+            
+        # wait for the service to be healthy
+        if not wait_for_health(local_model_port):
+            self._terminate_process_safely(ai_process.pid, "EternalZoo AI Service", force=True)
+            logger.error(f"Failed to switch to model {target_model_id}")
+            return False
         
         with open(self.ai_service_file, 'wb') as f:
             msgpack.pack(ai_services, f)
