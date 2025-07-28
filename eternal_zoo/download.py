@@ -740,20 +740,14 @@ async def download_model_async_by_hash(hf_data: dict, filecoin_hash: str | None 
                     await async_rmtree(hf_res["model_path"])
                 else:
                     await async_move(hf_res["model_path"], local_path_str)
-                return True, local_path_str
-            if not success:
-                logger.error("Failed to download LoRA model, falling back to Filecoin")
             else:
-                # After successful LoRA download, load metadata to get base model hash
-                if not lora_metadata:
-                    # Try to load metadata from the downloaded LoRA model
-                    lora_metadata_path = os.path.join(local_path_str, "metadata.json")
-                    try:
-                        with open(lora_metadata_path, "r") as f:
-                            lora_metadata = json.load(f)
-                    except (FileNotFoundError, json.JSONDecodeError) as e:
-                        logger.error(f"Failed to load LoRA metadata from downloaded model: {e}")
-                        return False, None
+                lora_metadata_path = os.path.join(local_path_str, "metadata.json")
+                try:
+                    with open(lora_metadata_path, "r") as f:
+                        lora_metadata = json.load(f)
+                except (FileNotFoundError, json.JSONDecodeError) as e:
+                    logger.error(f"Failed to load LoRA metadata from downloaded model: {e}")
+                    return False, None
                 
                 base_model_hash = lora_metadata.get("base_model", None)
                 if base_model_hash is None:
