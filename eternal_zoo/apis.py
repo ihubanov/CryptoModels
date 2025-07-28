@@ -614,6 +614,7 @@ class RequestProcessor:
             # Get current service info
             service_info = get_service_info()
             ai_services = service_info.get("ai_services", [])
+            print(f"ai_services: {ai_services}")
 
             model_info = None
             for ai_service in ai_services:
