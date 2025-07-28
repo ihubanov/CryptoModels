@@ -535,6 +535,14 @@ def handle_run(args):
         with open(metadata_path, "r") as f:
             lora_metadata = json.load(f)
         lora_config = {}
+        lora_paths = lora_metadata.get("lora_paths", [])
+        lora_scales = lora_metadata.get("lora_scales", [])
+        for i, lora_path in enumerate(lora_paths):
+            lora_name = os.path.basename(lora_path)
+            lora_config[lora_name] = {
+                "path": os.path.join(local_path, lora_path),
+                "scale": lora_scales[i]
+            }
         base_model_hash = lora_metadata.get("base_model")
         if base_model_hash not in HASH_TO_MODEL:
             print_error(f"Base model hash {base_model_hash} not found")
@@ -549,14 +557,6 @@ def handle_run(args):
             sys.exit(1)
         local_path = base_model_local_path
         model_name_from_metadata = base_model_name
-        lora_paths = lora_metadata.get("lora_paths", [])
-        lora_scales = lora_metadata.get("lora_scales", [])
-        for i, lora_path in enumerate(lora_paths):
-            lora_name = os.path.basename(lora_path)
-            lora_config[lora_name] = {
-                "path": lora_path,
-                "scale": lora_scales[i]
-            }
             
     # Determine projector path
     projector_candidates = [
@@ -639,6 +639,7 @@ def load_model_metadata(model_id, is_main=False) -> tuple[bool, dict | None]:
     
     lora_config = None
     is_lora = metadata.get("lora", False)
+    model_name = metadata.get("model_name", model_id)
 
     if is_lora:
         lora_config = {}
@@ -648,18 +649,27 @@ def load_model_metadata(model_id, is_main=False) -> tuple[bool, dict | None]:
             return False, None
         with open(lora_metadata_path, "r") as f:
             lora_metadata = json.load(f)
-        lora_paths = lora_metadata.get("lora_paths", [])
-        lora_scales = lora_metadata.get("lora_scales", [])
+        lora_paths = lora_metadata["lora_paths"]
+        lora_scales = lora_metadata["lora_scales"]
         for i, lora_path in enumerate(lora_paths):
             lora_name = os.path.basename(lora_path)
             lora_config[lora_name] = {
-                "path": lora_path,
+                "path": os.path.join(local_path, lora_path),
                 "scale": lora_scales[i]
             }
+        base_model_hash = lora_metadata["base_model"]
+        if base_model_hash not in HASH_TO_MODEL:
+            print_warning(f"Base model hash {base_model_hash} not found")
+            return False, None
+        base_model_name = HASH_TO_MODEL[base_model_hash]
+        base_model_hf_data = FEATURED_MODELS[base_model_name]
+        success, base_model_local_path = asyncio.run(download_model_async(base_model_hf_data, base_model_hash))
+        local_path = base_model_local_path
+        model_name = base_model_name
 
     config = {
         "model_id": model_id,
-        "model_name": metadata.get("model_name", model_id),
+        "model_name": model_name,
         "task": metadata.get("task", "chat"),
         "model": local_path,
         "multimodal": metadata.get("multimodal", False),
