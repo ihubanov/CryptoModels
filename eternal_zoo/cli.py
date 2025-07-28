@@ -458,8 +458,8 @@ def handle_run(args):
 
         projector_path = None
         if args.mmproj:
-            model_id = model_id + "_" + args.mmproj
-            mmproj_path = local_path + "_" + args.mmproj
+            model_id = model_id
+            mmproj_path = local_path + "-projector"
             if os.path.exists(mmproj_path):
                 projector_path = mmproj_path
 

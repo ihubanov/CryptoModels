@@ -1176,16 +1176,17 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
 
                 # Download projector if specified
                 if projector:
-                    final_projector_path = os.path.join(model_dir, model + "_" + projector)
+                    final_projector_path = os.path.join(model_dir, model + "-projector")
                     if os.path.exists(final_projector_path):
                         res["projector_path"] = final_projector_path
-                        return True, res
-                    await loop.run_in_executor(
-                        None,
-                        lambda: run_hf_download_with_pty(repo_id, projector, model_dir, token= os.getenv("HF_TOKEN", None))
-                    )
-                    await async_move(os.path.join(model_dir, projector), final_projector_path)
-                    res["projector_path"] = final_projector_path
+                        logger.info(f"Projector file {final_projector_path} already exists")
+                    else:
+                        await loop.run_in_executor(
+                            None,
+                            lambda: run_hf_download_with_pty(repo_id, projector, model_dir, token= os.getenv("HF_TOKEN", None))
+                        )
+                        await async_move(os.path.join(model_dir, projector), final_projector_path)
+                        res["projector_path"] = final_projector_path
             
             logger.info(f"Successfully downloaded model: {model_dir}")
             return True, res
