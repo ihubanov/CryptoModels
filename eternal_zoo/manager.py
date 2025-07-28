@@ -141,6 +141,10 @@ class EternalZooManager:
                     ai_service["owned_by"] = "user"
                     ai_service["active"] = True
                     ai_service["pid"] = ai_process.pid
+                    ai_services.append(ai_service)
+                    with open(self.ai_service_file, 'wb') as f:
+                        msgpack.pack(ai_services, f)
+                    logger.info(f"AI service metadata written to {self.ai_service_file}")
                     if not wait_for_health(local_model_port, timeout=120):
                         self.stop()
                         logger.error(f"Service failed to start within 120 seconds")
@@ -149,13 +153,17 @@ class EternalZooManager:
                     self.stop()
                     logger.error(f"Error starting EternalZoo service: {str(e)}", exc_info=True)
                     return False
-            
-            ai_services.append(ai_service)
+            else:
+                ai_service["created"] = int(time.time())
+                ai_service["owned_by"] = "user"
+                ai_service["active"] = False
+                ai_services.append(ai_service)
+                with open(self.ai_service_file, 'wb') as f:
+                    msgpack.pack(ai_services, f)
+                logger.info(f"AI service metadata written to {self.ai_service_file}")
                 
             logger.info(f"[ETERNALZOO] Model service started on port {local_model_port}")
-
-        with open(self.ai_service_file, 'wb') as f:
-            msgpack.pack(ai_services, f)
+       
         # Start the FastAPI app
         uvicorn_command = [
             "uvicorn",
