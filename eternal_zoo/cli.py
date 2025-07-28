@@ -458,10 +458,10 @@ def handle_run(args):
 
         projector_path = None
         if args.mmproj:
-            mmproj_path = os.path.join(local_path, args.mmproj)
+            model_id = model_id + "_" + args.mmproj
+            mmproj_path = os.path.join(local_path, model_id)
             if os.path.exists(mmproj_path):
                 projector_path = mmproj_path
-                model_id = f"{model_id}_{args.mmproj}"
 
         config = {
             "model_id": model_id,
