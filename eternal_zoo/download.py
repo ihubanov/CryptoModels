@@ -598,7 +598,7 @@ async def fetch_model_metadata_async(filecoin_hash: str, max_attempts: int = 10)
     Returns:
         dict: Model metadata JSON, or None if all attempts fail
     """
-    metadata_path = DEFAULT_MODEL_DIR / f"{filecoin_hash}.json"
+    metadata_path = DEFAULT_MODEL_DIR / f"{filecoin_hash}{POSTFIX_MODEL_PATH}.json"
     if os.path.exists(metadata_path):
         with open(metadata_path, "r") as f:
             return True, json.load(f)
