@@ -217,8 +217,8 @@ class EternalZooManager:
             with open(self.ai_service_file, 'rb') as f:
                 ai_services = msgpack.unpack(f)
             for ai_service in ai_services:
-                pid = ai_service.get("pid")
-                if psutil.pid_exists(pid):
+                pid = ai_service.get("pid", None)
+                if pid and psutil.pid_exists(pid):
                     ai_service_stop = self._terminate_process_safely(pid, "EternalZoo AI Service", force=True)
             
             if ai_service_stop:
@@ -232,9 +232,8 @@ class EternalZooManager:
             with open(self.api_service_file, 'rb') as f:
                 api_service = msgpack.unpack(f)
             pid = api_service.get("pid", None)
-            if pid is not None:
-                if psutil.pid_exists(pid):
-                    api_service_stop = self._terminate_process_safely(pid, "EternalZoo API Service", force=True)
+            if pid and psutil.pid_exists(pid):
+                api_service_stop = self._terminate_process_safely(pid, "EternalZoo API Service", force=True)
             
             if api_service_stop:
                 os.remove(self.api_service_file)
