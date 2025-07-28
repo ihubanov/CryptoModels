@@ -52,7 +52,7 @@ PROGRESS_BATCH_SIZE = 10 * 1024 * 1024  # Batch progress updates for 10MB chunks
 # Set MAX_CONCURRENT_DOWNLOADS dynamically based on CPU cores and available RAM (capped at 32)
 cpu_limit = cpu_cores * 2
 ram_limit = 32  # Default if psutil is not available
-if psutil is not None:
+if psutil:
     total_ram_gb = psutil.virtual_memory().total / (1024 ** 3)
     ram_limit = int(total_ram_gb * 4)  # Estimate: 4 downloads per GB RAM
 MAX_CONCURRENT_DOWNLOADS = min(32, cpu_limit, ram_limit)
@@ -177,7 +177,7 @@ async def download_single_file_async(session: aiohttp.ClientSession, file_info: 
         # Print which URL will be used for downloading
         logger.info(f"[download_single_file_async] Attempt {attempts+1}/{max_attempts}: Downloading from URL: {url} ---> {file_path}")
         # Update the current URL and file name in the progress tracker
-        if progress_tracker is not None:
+        if progress_tracker:
             progress_tracker.current_url = url
             progress_tracker.current_file_name = file_name
 
@@ -1118,7 +1118,7 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
     model = data.get("model", None)
     projector = data.get("projector", None)
     pattern = data.get("pattern", None)
-    model_dir = str(output_dir) if output_dir is not None else tempfile.mkdtemp(prefix=f"hf_download_{repo_id.replace('/', '_')}_")
+    model_dir = str(output_dir) if output_dir else tempfile.mkdtemp(prefix=f"hf_download_{repo_id.replace('/', '_')}_")
         
     attempt = 1
     while True:  # Infinite loop until success or user cancellation
@@ -1134,7 +1134,7 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
 
                 progress_tracker.set_watch_dir(model_dir)
     
-                if pattern is not None:
+                if pattern:
                     # Download only the files that match the allow_patterns
                     await loop.run_in_executor(
                         None,
@@ -1175,12 +1175,15 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
                 res["model_path"] = os.path.join(model_dir, model)
 
                 # Download projector if specified
-                if projector is not None:
+                if projector:
+                    final_projector_path = os.path.join(model_dir, model + "_" + projector)
+                    if os.path.exists(final_projector_path):
+                        res["projector_path"] = final_projector_path
+                        return True, res
                     await loop.run_in_executor(
                         None,
                         lambda: run_hf_download_with_pty(repo_id, projector, model_dir, token= os.getenv("HF_TOKEN", None))
                     )
-                    final_projector_path = os.path.join(model_dir, model + "_" + projector)
                     await async_move(os.path.join(model_dir, projector), final_projector_path)
                     res["projector_path"] = final_projector_path
             
@@ -1208,7 +1211,7 @@ def run_hf_download_with_pty(repo_id: str, model: str, local_dir: str, token: st
     Only works on Linux/macOS.
     """
 
-    if token is not None:
+    if token:
         script = f'''
 from huggingface_hub import hf_hub_download
 hf_hub_download(repo_id="{repo_id}", filename="{model}", local_dir="{local_dir}", token="{token}")
@@ -1267,8 +1270,7 @@ hf_hub_download(repo_id="{repo_id}", filename="{model}", local_dir="{local_dir}"
     os.close(master_fd)
     if process.returncode != 0:
         raise Exception(f"HuggingFace download failed with return code {process.returncode}")
-
-
+    
 async def download_model_async(hf_data: dict, filecoin_hash: str | None = None) -> tuple[bool, str | None]:
     logger.info(f"Downloading model: {hf_data}")
     logger.info(f"Filecoin hash: {filecoin_hash}")

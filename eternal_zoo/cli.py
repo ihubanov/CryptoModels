@@ -483,11 +483,16 @@ def handle_run(args):
         if not success:
             print_error(f"Failed to start model {model_id}")
             sys.exit(1)
-        
+        model_metadata = {
+            "task": args.task,
+            "folder_name": folder_name,
+            "lora": False,
+            "multimodal": bool(projector_path),
+        }
         model_metadata_path = os.path.join(DEFAULT_MODEL_DIR, model_id + ".json")
         if not os.path.exists(model_metadata_path):
             with open(model_metadata_path, "w") as f:
-                json.dump(config, f)
+                json.dump(model_metadata, f)
             print_success(f"Model metadata file {model_metadata_path} created")
         else:
             print_warning(f"Model metadata file {model_metadata_path} already exists")
@@ -589,10 +594,16 @@ def handle_run(args):
         print_error(f"Failed to start model {model_id}")
         sys.exit(1)
 
+    model_metadata = {
+        "task": task,
+        "folder_name": model_name_from_metadata,
+        "lora": is_lora,
+        "multimodal": bool(projector_path),
+    }
     model_metadata_path = os.path.join(DEFAULT_MODEL_DIR, model_id + ".json")
     if not os.path.exists(model_metadata_path):
         with open(model_metadata_path, "w") as f:
-            json.dump(config, f)
+            json.dump(model_metadata, f)
         print_success(f"Model metadata file {model_metadata_path} created")
     else:
         print_warning(f"Model metadata file {model_metadata_path} already exists")
