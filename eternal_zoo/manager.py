@@ -794,19 +794,15 @@ class EternalZooManager:
     def update_lora(self, request: Dict[str, Any]) -> bool:
         """Update the LoRA for a given model hash."""
         try:
-            with open(self.msgpack_file, "rb") as f:
-                service_info = msgpack.load(f)
-            models = service_info.get("models", {})
-            if request["model_hash"] not in models:
-                return False
-            model_info = models[request["model_hash"]]
-            if model_info.get("lora_config", None) is None:
-                return False
-            model_info["lora_config"] = request["lora_config"]
-            models[request["model_hash"]] = model_info
-            service_info["models"] = models
-            with open(self.msgpack_file, "wb") as f:
-                msgpack.dump(service_info, f)
+            service_info = self.get_service_info()
+            ai_services = service_info.get("ai_services", [])
+            for ai_service in ai_services:
+                if ai_service["model_id"] == request["model_id"]:
+                    ai_service["lora_config"] = request["lora_config"]
+                    break
+            self.update_service_info({
+                "ai_services": ai_services, 
+            })
             return True
         except Exception as e:
             logger.error(f"Error updating LoRA: {str(e)}")
