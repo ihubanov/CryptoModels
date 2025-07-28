@@ -735,40 +735,39 @@ async def download_model_async_by_hash(hf_data: dict, filecoin_hash: str | None 
 
         if is_lora:
             success, hf_res = await download_model_from_hf(hf_data)
-            if success:
-                if hf_res["is_folder"]:
-                    await async_move(hf_res["model_path"], local_path_str)
-                    await async_rmtree(hf_res["model_path"])
-                else:
-                    await async_move(hf_res["model_path"], local_path_str)
-            else:
-                lora_metadata_path = os.path.join(local_path_str, "metadata.json")
-                try:
-                    with open(lora_metadata_path, "r") as f:
-                        lora_metadata = json.load(f)
-                except (FileNotFoundError, json.JSONDecodeError) as e:
-                    logger.error(f"Failed to load LoRA metadata from downloaded model: {e}")
-                    return False, None
-                
-                base_model_hash = lora_metadata.get("base_model", None)
-                if base_model_hash is None:
-                    logger.error("No base_model found in LoRA metadata")
-                    return False, None
+            if not success:
+                logger.error("Failed to download LoRA model, falling back to Filecoin")
+                return False, None
+            if hf_res["is_folder"]:
+                await async_move(hf_res["model_path"], local_path_str)
+                await async_rmtree(hf_res["model_path"])
+            lora_metadata_path = os.path.join(local_path_str, "metadata.json")
+            try:
+                with open(lora_metadata_path, "r") as f:
+                    lora_metadata = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError) as e:
+                logger.error(f"Failed to load LoRA metadata from downloaded model: {e}")
+                return False, None
+            
+            base_model_hash = lora_metadata.get("base_model", None)
+            if base_model_hash is None:
+                logger.error("No base_model found in LoRA metadata")
+                return False, None
 
-                base_model_hf_data = None
+            base_model_hf_data = None
 
-                if base_model_hash in HASH_TO_MODEL:
-                    base_model_hf_data = FEATURED_MODELS[HASH_TO_MODEL[base_model_hash]]
+            if base_model_hash in HASH_TO_MODEL:
+                base_model_hf_data = FEATURED_MODELS[HASH_TO_MODEL[base_model_hash]]
 
-                print(f"base_model_hf_data: {base_model_hf_data}")
-                print(f"base_model_hash: {base_model_hash}")
+            print(f"base_model_hf_data: {base_model_hf_data}")
+            print(f"base_model_hash: {base_model_hash}")
 
-                success, base_model_path = await download_model_async_by_hash(base_model_hf_data, base_model_hash)
-                if not success:
-                    logger.error(f"Failed to download base model: {base_model_hash}")
-                    return False, None
-                logger.info(f"Successfully downloaded LoRA model and base model: {local_path_str}")
-                return True, local_path_str
+            success, base_model_path = await download_model_async_by_hash(base_model_hf_data, base_model_hash)
+            if not success:
+                logger.error(f"Failed to download base model: {base_model_hash}")
+                return False, None
+            logger.info(f"Successfully downloaded LoRA model and base model: {local_path_str}")
+            return True, local_path_str
         else:
             success, hf_res = await download_model_from_hf(hf_data)
             if success:
