@@ -636,6 +636,7 @@ class RequestProcessor:
             if success:
                 logger.info(f"[{request_id}] Successfully switched from {model['model_id']} to {model_requested} "
                            f"(switch time: {switch_duration:.2f}s)")
+                return True
             else:
                 logger.error(f"[{request_id}] Failed to switch to model {model_requested} "
                            f"(attempted for {switch_duration:.2f}s)")
