@@ -145,34 +145,27 @@ class ServiceHandler:
     @staticmethod
     async def generate_text_response(request: ChatCompletionRequest):
         """Generate a response for chat completion requests, supporting both streaming and non-streaming."""
-        model_id = request.model
         chat_models = eternal_zoo_manager.get_models_by_task("chat")
         if len(chat_models) == 0:
             raise HTTPException(status_code=404, detail=f"No chat model found")
         
-        model_id = request.model
-        port = None
-
-        active_model = None
-
+        model = None
         for chat_model in chat_models:
-            if chat_model["active"]:
-                active_model = chat_model
-                break
-
-        # Find the active model
-        for chat_model in chat_models:
-            if chat_model["model_id"] == model_id:
-                active_model = chat_model
+            if request.model == chat_model["model_id"]:
+                model = chat_model
                 break
         
-        if active_model is None:
-            port = chat_models[0]["port"]
-        else:
-            port = active_model["port"]
+        if model is None:
+            model = chat_models[0]
         
+        port = model.get("port", None)
+        if port is None:
+            raise HTTPException(status_code=500, detail=f"Model {model.get('model_id', 'unknown')} has no port")
+        
+        host = model.get("host", "0.0.0.0")
+
         if request.is_vision_request():
-            if not active_model.get("multimodal", False):
+            if not model.get("multimodal", False):
                 content = "Unfortunately, I'm not equipped to interpret images at this time. Please provide a text description if possible."
                 return ServiceHandler._create_vision_error_response(request, content)
                 
@@ -194,7 +187,7 @@ class ServiceHandler:
 
         # Make a non-streaming API call
         logger.debug(f"Making non-streaming request for model {request.model}")
-        response_data = await ServiceHandler._make_api_call(port, "/v1/chat/completions", request_dict)
+        response_data = await ServiceHandler._make_api_call(host, port, "/v1/chat/completions", request_dict)
         return ChatCompletionResponse(
             id=response_data.get("id", generate_chat_completion_id()),
             object=response_data.get("object", "chat.completion"),
@@ -204,14 +197,30 @@ class ServiceHandler:
         )
     
     @staticmethod
-    async def generate_embeddings_response(request: EmbeddingRequest, service_info: Optional[Dict[str, Any]] = None):
+    async def generate_embeddings_response(request: EmbeddingRequest):
         """Generate a response for embedding requests."""
-        # Use provided service_info or get it if not provided
-        if service_info is None:
-            service_info = get_service_info()
+        
+        embedding_models = eternal_zoo_manager.get_models_by_task("embed")
+        if len(embedding_models) == 0:
+            raise HTTPException(status_code=404, detail=f"No embedding model found")
+        
+        model = None
+        for embedding_model in embedding_models:
+            if request.model == embedding_model["model_id"]:
+                model = embedding_model
+                break
+        
+        if model is None:
+            model = embedding_models[0]
+        
+        port = model.get("port", None)
+        if port is None:
+            raise HTTPException(status_code=500, detail=f"Model {model.get('model_id', 'unknown')} has no port")
+        
+        host = model.get("host", "0.0.0.0")
         
         request_dict = convert_request_to_dict(request)
-        response_data = await ServiceHandler._make_api_call(port, "/v1/embeddings", request_dict)
+        response_data = await ServiceHandler._make_api_call(host, port, "/v1/embeddings", request_dict)
         return EmbeddingResponse(
             object=response_data.get("object", "list"),
             data=response_data.get("data", []),
@@ -219,25 +228,39 @@ class ServiceHandler:
         )
     
     @staticmethod
-    async def generate_image_response(request: ImageGenerationRequest, service_info: Optional[Dict[str, Any]] = None):
+    async def generate_image_response(request: ImageGenerationRequest):
         """Generate a response for image generation requests."""
-        # Use provided service_info or get it if not provided
-        if service_info is None:
-            service_info = get_service_info()
+        image_generation_models = eternal_zoo_manager.get_models_by_task("image-generation")
+        if len(image_generation_models) == 0:
+            raise HTTPException(status_code=404, detail=f"No image generation model found")
         
+        model = None
+        for image_generation_model in image_generation_models:
+            if request.model == image_generation_model["model_id"]:
+                model = image_generation_model
+                break
+
+        if model is None:
+            model = image_generation_models[0]
+        
+        port = model.get("port", None)
+        if port is None:
+            raise HTTPException(status_code=500, detail=f"Model {model.get('model_id', 'unknown')} has no port")
+        
+        host = model.get("host", "0.0.0.0")
         request_dict = convert_request_to_dict(request)
-        response_data = await ServiceHandler._make_api_call(port, "/v1/images/generations", request_dict)
+        response_data = await ServiceHandler._make_api_call(host, port, "/v1/images/generations", request_dict)
         return ImageGenerationResponse(
             created=response_data.get("created", int(time.time())),
             data=response_data.get("data", [])
         )
     
     @staticmethod
-    async def _make_api_call(port: int, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    async def _make_api_call(host: str, port: int, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """Make a non-streaming API call to the specified endpoint and return the JSON response."""
         try:
             response = await app.state.client.post(
-                f"http://localhost:{port}{endpoint}", 
+                f"http://{host}:{port}{endpoint}", 
                 json=data,
                 timeout=HTTP_TIMEOUT
             )
@@ -590,17 +613,20 @@ class RequestProcessor:
         try:
             # Get current service info
             service_info = get_service_info()
-            models = service_info.get("models", {})
+            ai_services = service_info.get("ai_services", [])
+
+            model_info = None
+            for ai_service in ai_services:
+                if ai_service["model_id"] == model_requested:
+                    model_info = ai_service
+                    break
             
-            # Check if the requested model exists
-            if model_requested not in models:
+            if model_info is None:
                 logger.error(f"[{request_id}] Requested model {model_requested} not found in available models")
                 return False
             
-            model_info = models[model_requested]
-            
             # Check if model is already active
-            if model_info.get("active", False):
+            if model_info["active"]:
                 logger.debug(f"[{request_id}] Model {model_requested} is already active")
                 return True
                 
@@ -620,33 +646,14 @@ class RequestProcessor:
             logger.info(f"[{request_id}] Switching to model {model_requested}")
             switch_start_time = time.time()
             
-            # Get current active model for logging
-            active_model = eternal_zoo_manager.get_active_model()
-            
             # Perform the model switch
             success = await eternal_zoo_manager.switch_model(model_requested)
             
             switch_duration = time.time() - switch_start_time
             
             if success:
-                logger.info(f"[{request_id}] Successfully switched from {active_model} to {model_requested} "
+                logger.info(f"[{request_id}] Successfully switched from {model_info['model_id']} to {model_requested} "
                            f"(switch time: {switch_duration:.2f}s)")
-                
-                # Update app state with new service info and verify the switch
-                try:
-                    # Use the new verification method with retry logic
-                    if await RequestProcessor._verify_model_switch(model_requested, request_id):
-                        # Update app state with new service info after successful verification
-                        updated_service_info = eternal_zoo_manager.get_service_info()
-                        app.state.service_info = updated_service_info
-                        return True
-                    else:
-                        logger.error(f"[{request_id}] Model switch verification failed - model not active after switch")
-                        return False
-                        
-                except Exception as e:
-                    logger.error(f"[{request_id}] Error verifying model switch: {str(e)}")
-                    return False
             else:
                 logger.error(f"[{request_id}] Failed to switch to model {model_requested} "
                            f"(attempted for {switch_duration:.2f}s)")
@@ -662,16 +669,11 @@ class RequestProcessor:
         request_id = generate_request_id()
         queue_size = RequestProcessor.queue.qsize()
         
-        # Validate that model field is present and get service info
-        service_info, validated_model = validate_model_field(request_data)
-        request_data["model"] = validated_model
-        
         logger.info(f"[{request_id}] Adding request to queue for endpoint {endpoint} (queue size: {queue_size})")
         
         start_wait_time = time.time()
         future = asyncio.Future()
-        # Pass service_info to avoid redundant lookups
-        queue_item = (endpoint, request_data, future, request_id, start_wait_time, service_info)
+        queue_item = (endpoint, request_data, future, request_id, start_wait_time)
         await RequestProcessor._add_to_queue_with_backpressure(queue_item)
         
         logger.info(f"[{request_id}] Waiting for result from endpoint {endpoint}")
