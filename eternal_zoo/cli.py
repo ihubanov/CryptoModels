@@ -555,11 +555,14 @@ def handle_run(args):
         base_model_name = HASH_TO_MODEL[base_model_hash]
         base_model_hf_data = FEATURED_MODELS[base_model_name]
         success, base_model_local_path = asyncio.run(download_model_async(base_model_hf_data, base_model_hash))
+
+        print(f"base_model_local_path: {base_model_local_path}")
         if not success:
             print_error(f"Failed to download base model {base_model_hash}")
             sys.exit(1)
         local_path = base_model_local_path
         lora_config = dict(zip(lora_paths, lora_scales))
+        print(f"lora_config: {lora_config}")
 
     # Determine projector path
     projector_candidates = [
