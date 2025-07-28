@@ -605,7 +605,7 @@ def handle_run(args):
     return success
 
 
-def load_model_metadata(model_id, is_main=False):
+def load_model_metadata(model_id, is_main=False) -> tuple[bool, dict | None]:
     """Load model metadata from JSON file and prepare configuration.
 
     Args:
@@ -621,17 +621,17 @@ def load_model_metadata(model_id, is_main=False):
             metadata = json.load(f)
     except FileNotFoundError:
         print_error(f"Metadata file not found for model {model_id}")
-        sys.exit(1)
+        return False, None
     except json.JSONDecodeError:
         print_error(f"Invalid JSON in metadata file for model {model_id}")
-        sys.exit(1)
+        return False, None
 
     local_path = os.path.join(DEFAULT_MODEL_DIR, model_id)
     if not os.path.exists(local_path):
         local_path = local_path + POSTFIX_MODEL_PATH
         if not os.path.exists(local_path):
             print_error(f"Model file not found for model {model_id}")
-            sys.exit(1)
+            return False, None
 
     projector_path = None
     if metadata.get("multimodal", False):
@@ -669,7 +669,7 @@ def load_model_metadata(model_id, is_main=False):
         "lora_config": lora_config,
         "context_length": DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH,
     }
-    return config
+    return True, config
 
 def handle_serve(args):
     """Handle model serve command - run all downloaded models with specified main model.
@@ -702,14 +702,19 @@ def handle_serve(args):
         sys.exit(1)
 
     # Prepare configurations
-    main_config = load_model_metadata(main_model_id, is_main=True)
+    success, main_config = load_model_metadata(main_model_id, is_main=True)
+    if not success:
+        print_error(f"Failed to load main model {main_model_id}")
+        sys.exit(1)
     configs = [main_config]
 
     other_models = [model_id for model_id in downloaded_models if model_id != main_model_id]
     for model_id in other_models:
-        config = load_model_metadata(model_id, is_main=False)
+        success, config = load_model_metadata(model_id, is_main=False)
+        if not success:
+            print_warning(f"Failed to load model {model_id}")
+            continue
         configs.append(config)
-
     # Start the model server
     success = manager.start(configs, args.port, args.host)
 
