@@ -117,7 +117,7 @@ class EternalZooManager:
                 logger.info(f"Starting image generation model: {config}")
                 if not shutil.which("mlx-flux"):
                     raise EternalZooServiceError("mlx-flux command not found in PATH")
-                running_ai_command = self._build_image_generation_command(config, local_model_port)
+                running_ai_command = self._build_image_generation_command(config)
             elif task == "image-edit":
                 raise NotImplementedError("Image edit is not implemented yet")
             else:
