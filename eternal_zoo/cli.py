@@ -628,6 +628,12 @@ def load_model_metadata(model_id, is_main=False):
         sys.exit(1)
 
     local_path = os.path.join(DEFAULT_MODEL_DIR, model_id)
+    if not os.path.exists(local_path):
+        local_path = local_path + POSTFIX_MODEL_PATH
+        if not os.path.exists(local_path):
+            print_error(f"Model file not found for model {model_id}")
+            sys.exit(1)
+
     projector_path = None
     if metadata.get("multimodal", False):
         projector_path = os.path.join(DEFAULT_MODEL_DIR, f"{model_id}-projector")
