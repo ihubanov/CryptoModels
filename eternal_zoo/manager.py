@@ -101,9 +101,7 @@ class EternalZooManager:
 
             task = config.get("task", "chat")
             running_ai_command = None
-            ai_service = {
-                "config": config,
-            }
+            ai_service = config.copy()
 
             local_model_port = self._get_free_port()    
 
@@ -940,7 +938,8 @@ class EternalZooManager:
             if ai_service["active"]:
                 active_service_index = i
                 active_ai_service = ai_service
-            if ai_service["model_id"] == target_model_id:
+
+            if ai_service.get("model_id", None) == target_model_id:
                 target_service_index = i
                 target_ai_service = ai_service
         

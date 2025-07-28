@@ -617,9 +617,8 @@ class RequestProcessor:
 
             model_info = None
             for ai_service in ai_services:
-                ai_service_config = ai_service.get("config", {})
-                if ai_service_config.get("model_id", None) == model_requested:
-                    model_info = ai_service_config
+                if ai_service.get("model_id", None) == model_requested:
+                    model_info = ai_service
                     break
             
             if model_info is None:
@@ -1059,17 +1058,13 @@ async def list_models():
     models = []
 
     for ai_service in ai_services:
-        if "config" not in ai_service:
-            logger.warning(f"AI service {ai_service} has no config")
-            continue
-        config = ai_service["config"]
-        model_id = config.get("model_id", "default-chat-model")
-        task = config.get("task", "chat")
-        is_lora = config.get("is_lora", False)
-        multimodal = config.get("multimodal", False)
-        lora_config = config.get("lora_config", None)
-        context_length = config.get("context_length", None)
-        created = config.get("created", int(time.time()))
+        model_id = ai_service.get("model_id", "default-chat-model")
+        task = ai_service.get("task", "chat")
+        is_lora = ai_service.get("is_lora", False)
+        multimodal = ai_service.get("multimodal", False)
+        lora_config = ai_service.get("lora_config", None)
+        context_length = ai_service.get("context_length", None)
+        created = ai_service.get("created", int(time.time()))
         owned_by = ai_service.get("owned_by", "user")
         active = ai_service.get("active", False)    
 
