@@ -210,7 +210,6 @@ class ServiceHandler:
         if service_info is None:
             service_info = get_service_info()
         
-        port = get_service_port()
         request_dict = convert_request_to_dict(request)
         response_data = await ServiceHandler._make_api_call(port, "/v1/embeddings", request_dict)
         return EmbeddingResponse(
@@ -226,7 +225,6 @@ class ServiceHandler:
         if service_info is None:
             service_info = get_service_info()
         
-        port = get_service_port()
         request_dict = convert_request_to_dict(request)
         response_data = await ServiceHandler._make_api_call(port, "/v1/images/generations", request_dict)
         return ImageGenerationResponse(
