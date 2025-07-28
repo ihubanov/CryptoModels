@@ -1054,11 +1054,11 @@ async def list_models():
     """
     service_info = get_service_info()
 
-    model_cards = []
     ai_services = service_info.get("ai_services", [])
     models = []
 
     for ai_service in ai_services:
+        print(ai_service)
         model_id = ai_service.get("model_id")
         task = ai_service.get("task")
         is_lora = ai_service.get("is_lora", False)
@@ -1083,4 +1083,4 @@ async def list_models():
         )
         models.append(model_card)
 
-    return ModelList(data=model_cards)
+    return ModelList(data=models)
