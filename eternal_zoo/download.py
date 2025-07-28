@@ -733,7 +733,7 @@ async def download_model_async_by_hash(hf_data: dict, filecoin_hash: str | None 
                 return False, None
 
         if is_lora:
-            success, hf_res = await download_model_from_hf(hf_data, DEFAULT_MODEL_DIR)
+            success, hf_res = await download_model_from_hf(hf_data)
             if success:
                 if hf_res["is_folder"]:
                     await async_move(hf_res["model_path"], local_path_str)
