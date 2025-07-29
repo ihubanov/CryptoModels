@@ -12,7 +12,7 @@ import json
 import uuid
 # Import configuration settings
 from json_repair import repair_json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from eternal_zoo.config import DEFAULT_CONFIG
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
