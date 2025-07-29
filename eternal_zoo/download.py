@@ -1224,7 +1224,8 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                     )
 
                     res["tmp_dir"] = tmp_dir
-                    res["model_path"] = pattern_dir
+                    await async_move(pattern_dir, final_path)
+                    res["model_path"] = final_path
                 
                 else:
 
@@ -1238,7 +1239,8 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                     )
 
                     res["tmp_dir"] = tmp_dir
-                    res["model_path"] = tmp_dir
+                    await async_move(tmp_dir, final_path)
+                    res["model_path"] = final_path
 
             else:
 
@@ -1376,7 +1378,9 @@ async def download_model_async(hf_data: dict, filecoin_hash: str | None = None) 
         success, hf_res = await download_model_from_hf(hf_data, final_dir)
 
         tmp_dir = hf_res.get("tmp_dir", None)
+        
         if tmp_dir:
+
             await async_rmtree(tmp_dir)
 
         print(hf_res)
