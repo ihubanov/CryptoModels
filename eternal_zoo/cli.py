@@ -576,8 +576,6 @@ def handle_run(args):
     model_id = args.hash if hasattr(args, 'hash') else model_name
     pattern = hf_data.get("pattern", None)
     if pattern:
-        model_id = model_id + "_" + pattern
-
         if not os.path.isdir(local_path):
             print_error(f"Path {local_path} is not a folder")
             sys.exit(1)
