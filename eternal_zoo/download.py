@@ -1218,7 +1218,7 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                         lambda: snapshot_download(
                             repo_id=repo_id,
                             local_dir=tmp_dir,
-                            allow_patterns=[f"*{pattern}*"],
+                            allow_patterns=[f"*-{pattern}-*"],
                             token=os.getenv("HF_TOKEN")
                         )
                     )
