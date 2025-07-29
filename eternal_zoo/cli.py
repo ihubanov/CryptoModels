@@ -293,35 +293,29 @@ def parse_args():
     )
     check_command.add_argument(
         "--model-name",
-        required=True,
         help="🏷️  Model name(s) - single: qwen3-1.7b or multi: qwen3-14b,qwen3-4b (first is main, others on-demand)",
         metavar="MODEL"
     )
     check_command.add_argument(
         "--hash",
-        required=True,
         help="🔗 IPFS hash of the model to check",
         metavar="HASH"
     )
     check_command.add_argument(
         "--hf-repo",
-        required=True,
         help="🤗 Hugging Face model repository",
         metavar="REPO"
     )
     check_command.add_argument(
         "--hf-file",
-        required=True,
     )
     check_command.add_argument(
         "--mmproj",
-        required=True,
         help="🔍 Multimodal Projector File",
         metavar="MMProj"
     )
     check_command.add_argument(
         "--pattern",
-        required=True,
         help="🔍 Pattern to download from Hugging Face",
         metavar="PATTERN"
     )
@@ -813,56 +807,50 @@ def handle_preserve(args):
 
 def handle_check(args):
     """Handle model check with beautiful output"""
-    print_info(f"Checking if model is downloaded for hash: {args.hash}")
-    try:
-        local_path = DEFAULT_MODEL_DIR / f"{args.hash}{POSTFIX_MODEL_PATH}"
-        is_downloaded = local_path.exists()
+    local_path = DEFAULT_MODEL_DIR / f"{args.hash}{POSTFIX_MODEL_PATH}"
+    is_downloaded = local_path.exists()
 
-        if is_downloaded:
-            # For LoRA models, we need to do additional validation
-            if local_path.is_dir():
-                # This is likely a LoRA model - check if it has valid metadata and base model
-                metadata_path = local_path / "metadata.json"
-                if metadata_path.exists():
-                    try:
-                        with open(metadata_path, 'r') as f:
-                            lora_metadata = json.load(f)
+    if is_downloaded:
+        # For LoRA models, we need to do additional validation
+        if local_path.is_dir():
+            # This is likely a LoRA model - check if it has valid metadata and base model
+            metadata_path = local_path / "metadata.json"
+            if metadata_path.exists():
+                try:
+                    with open(metadata_path, 'r') as f:
+                        lora_metadata = json.load(f)
 
-                        # Check if base model is available
-                        base_model_hash = lora_metadata.get("base_model")
-                        if base_model_hash:
-                            base_model_path = DEFAULT_MODEL_DIR / f"{base_model_hash}{POSTFIX_MODEL_PATH}"
-                            if not base_model_path.exists():
-                                print_warning(f"LoRA model found but base model missing: {base_model_hash}")
-                                print_info("False")
-                                return
+                    # Check if base model is available
+                    base_model_hash = lora_metadata.get("base_model")
+                    if base_model_hash:
+                        base_model_path = DEFAULT_MODEL_DIR / f"{base_model_hash}{POSTFIX_MODEL_PATH}"
+                        if not base_model_path.exists():
+                            print_warning(f"LoRA model found but base model missing: {base_model_hash}")
+                            print_info("False")
+                            return
 
-                        # Check if LoRA files exist
-                        lora_paths = lora_metadata.get("lora_paths", [])
-                        for lora_path in lora_paths:
-                            if not os.path.isabs(lora_path):
-                                lora_path = os.path.join(local_path, lora_path)
-                            if not os.path.exists(lora_path):
-                                print_warning(f"LoRA model found but LoRA file missing: {lora_path}")
-                                print_info("False")
-                                return
+                    # Check if LoRA files exist
+                    lora_paths = lora_metadata.get("lora_paths", [])
+                    for lora_path in lora_paths:
+                        if not os.path.isabs(lora_path):
+                            lora_path = os.path.join(local_path, lora_path)
+                        if not os.path.exists(lora_path):
+                            print_warning(f"LoRA model found but LoRA file missing: {lora_path}")
+                            print_info("False")
+                            return
 
-                        print_success("True")
-                    except (json.JSONDecodeError, KeyError, Exception) as e:
-                        print_warning(f"LoRA model found but metadata is invalid: {str(e)}")
-                        print_info("False")
-                else:
-                    print_warning("LoRA model directory found but metadata.json is missing")
+                    print_success("True")
+                except (json.JSONDecodeError, KeyError, Exception) as e:
+                    print_warning(f"LoRA model found but metadata is invalid: {str(e)}")
                     print_info("False")
             else:
-                # Regular model file
-                print_success("True")
+                print_warning("LoRA model directory found but metadata.json is missing")
+                print_info("False")
         else:
-            print_info("False")
-    except Exception as e:
-        print_error(f"Check failed: {str(e)}")
+            # Regular model file
+            print_success("True")
+    else:
         print_info("False")
-        sys.exit(1)
 
 def main():
     """Main CLI entry point with enhanced error handling"""
