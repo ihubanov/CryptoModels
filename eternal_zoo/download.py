@@ -1221,8 +1221,7 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
                             None,
                             lambda: run_hf_download_with_pty(repo_id, projector, model_dir, token= os.getenv("HF_TOKEN", None))
                         )
-                        await async_move(os.path.join(model_dir, projector), final_projector_path)
-                        res["projector_path"] = final_projector_path
+                        res["projector_path"] = os.path.join(model_dir, projector)
             
             logger.info(f"Successfully downloaded model: {model_dir}")
             return True, res
@@ -1332,6 +1331,11 @@ async def download_model_async(hf_data: dict, filecoin_hash: str | None = None) 
 
         model_path = hf_res["model_path"]
         await async_move(model_path, final_dir)
+
+        projector_path = hf_res.get("projector_path", None)
+        if projector_path:
+            await async_move(projector_path, final_dir + "-projector")
+
         await async_rmtree(tmp_dir)
 
         path = final_dir
