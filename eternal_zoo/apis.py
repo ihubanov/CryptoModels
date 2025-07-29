@@ -685,15 +685,14 @@ class RequestProcessor:
                 wait_time = time.time() - start_wait_time
                 queue_size = RequestProcessor.queue.qsize()
                 processed_count += 1
+                tasks = []
                 
                 logger.info(f"[{request_id}] Processing request from queue for endpoint {endpoint} "
                            f"(wait time: {wait_time:.2f}s, queue size: {queue_size}, processed: {processed_count})")
                 
                 # Process the request within the lock to ensure sequential execution
                 async with RequestProcessor.processing_lock:
-                    processing_start = time.time()
-                    tasks = ["chat"]
-                    
+                    processing_start = time.time()                    
                     if endpoint in RequestProcessor.MODEL_ENDPOINTS:
                         model_cls, handler = RequestProcessor.MODEL_ENDPOINTS[endpoint]
 
@@ -705,6 +704,9 @@ class RequestProcessor:
                             tasks = ["image-generation"]
                         else:
                             raise HTTPException(status_code=404, detail="Task not found")
+                        
+                    
+                        print(f"tasks: {tasks}")
                         
                         try:
                             request_obj = model_cls(**request_data)
