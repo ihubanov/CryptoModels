@@ -1159,7 +1159,6 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
                             local_dir=model_dir,
                             allow_patterns=[f"*{pattern}*"],
                             token=os.getenv("HF_TOKEN")                       
-                            
                         )
                     )
                     res["is_folder"] = True
