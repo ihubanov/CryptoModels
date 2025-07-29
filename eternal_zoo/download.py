@@ -967,28 +967,47 @@ def clear_repo_size_cache():
     _repo_size_cache.clear()
     logger.debug("Repository size cache cleared")
 
-def calculate_folder_size_fast(folder_path: Path) -> int:
-    """Calculate folder size using os.walk for better performance, excluding .cache directories"""
+def calculate_folder_size(folder_path: Path, exclude_dirs=None) -> int:
+    """
+    Calculate the total disk usage of a folder in bytes, similar to `du -h`.
+    Includes all files and directories, with an option to exclude specific directories.
+    
+    Args:
+        folder_path (Path): Path to the folder.
+        exclude_dirs (list): List of directory names to exclude (e.g., ['.cache']). Defaults to None.
+    
+    Returns:
+        int: Total size in bytes (disk usage).
+    """
     total_size = 0
-    try:
-        if folder_path.exists() and folder_path.is_dir():
-            for dirpath, dirnames, filenames in os.walk(str(folder_path)):
-                for filename in filenames:
-                    try:
-                        file_path = Path(dirpath) / filename
-                        if file_path.is_file():
-                            total_size += file_path.stat().st_size
-                    except (OSError, PermissionError):
-                        # Skip files we can't access
-                        continue
-    except Exception as e:
-        logger.warning(f"Error calculating folder size for {folder_path}: {e}")
-    return total_size
+    exclude_dirs = exclude_dirs or []  # Default to empty list, meaning include all dirs
+    seen_inodes = set()  # Track inodes to avoid double-counting hard links
 
-# Keep the original function for backward compatibility
-def calculate_folder_size(folder_path: Path) -> int:
-    """Calculate the total size of a folder and all its contents in bytes"""
-    return calculate_folder_size_fast(folder_path)
+    for dirpath, dirnames, filenames in os.walk(str(folder_path)):
+        # Only exclude directories specified in exclude_dirs
+        dirnames[:] = [d for d in dirnames if d not in exclude_dirs]
+
+        # Add size of the current directory
+        try:
+            dir_stat = Path(dirpath).lstat()  # Use lstat to not follow symlinks
+            if dir_stat.st_ino not in seen_inodes:
+                total_size += dir_stat.st_blocks * 512  # Disk usage in bytes
+                seen_inodes.add(dir_stat.st_ino)
+        except OSError:
+            continue  # Skip if inaccessible
+
+        # Add size of each file
+        for filename in filenames:
+            file_path = Path(dirpath) / filename
+            try:
+                file_stat = file_path.lstat()  # Use lstat for symlinks
+                if file_stat.st_ino not in seen_inodes:
+                    total_size += file_stat.st_blocks * 512  # Disk usage in bytes
+                    seen_inodes.add(file_stat.st_ino)
+            except OSError:
+                continue  # Skip if inaccessible
+
+    return total_size
 
 class HuggingFaceProgressTracker:
     """Track HuggingFace download progress by monitoring actual folder size with optimizations"""
@@ -1044,8 +1063,7 @@ class HuggingFaceProgressTracker:
         # Cache folder size checks to avoid excessive filesystem operations
         if current_time - self.last_size_check_time >= self.size_cache_duration:
             try:
-                self.last_folder_size = calculate_folder_size_fast(Path(self.watch_dir))
-                print(self.last_folder_size)
+                self.last_folder_size = calculate_folder_size(Path(self.watch_dir))
                 self.last_size_check_time = current_time
             except Exception as e:
                 logger.debug(f"Error calculating folder size: {e}")
@@ -1182,8 +1200,7 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
                             repo_id=repo_id,
                             local_dir=model_dir,
                             allow_patterns=[f"*{pattern}*"],
-                            token=os.getenv("HF_TOKEN"),
-                            cache_dir=model_dir                    
+                            token=os.getenv("HF_TOKEN")
                         )
                     )
 
