@@ -1133,7 +1133,7 @@ class HuggingFaceProgressTracker:
         except RuntimeError:
             # If no event loop is running, just log without async
             elapsed_time = time.time() - self.start_time
-            final_folder_size = calculate_folder_size_fast(Path(self.watch_dir)) if self.watch_dir else 0
+            final_folder_size = calculate_folder_size(Path(self.watch_dir)) if self.watch_dir else 0
             actual_speed_mbps = (final_folder_size / (1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
             
             logger.info("[HuggingFaceProgressTracker]")
@@ -1154,7 +1154,7 @@ class HuggingFaceProgressTracker:
             except asyncio.CancelledError:
                 pass
 
-async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> tuple[bool, dict | None]:
+async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tuple[bool, dict | None]:
     """
     Download model from HuggingFace Hub with infinite retry logic and exponential backoff.
     Downloads forever until finished or canceled by user.
@@ -1171,10 +1171,22 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
     model = data.get("model", None)
     projector = data.get("projector", None)
     pattern = data.get("pattern", None)
-    tmp_dir = None if output_dir else str(DEFAULT_MODEL_DIR/f"tmp_{repo_id.replace('/', '_')}")
-    model_dir = str(output_dir) if output_dir else tmp_dir
+    tmp_dir = str(DEFAULT_MODEL_DIR/f"tmp_{repo_id.replace('/', '_')}")   
 
-    os.makedirs(model_dir, exist_ok=True)
+    final_path = None
+    final_projector_path = None
+
+    if final_dir:
+        
+        final_path = os.path.join(final_dir, repo_id.replace("/", "_"))
+
+        if model:
+            final_path = os.path.join(final_dir, model)
+        
+        if pattern:
+            final_path = os.path.join(final_dir, repo_id.replace("/", "_") + "_" + pattern)
+
+    os.makedirs(tmp_dir, exist_ok=True)
         
     attempt = 1
     while True:  # Infinite loop until success or user cancellation
@@ -1185,20 +1197,27 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
             loop = asyncio.get_event_loop()
             
             if model is None:
+                
+                if final_path:
+                    if os.path.exists(final_path):
+                        logger.info(f"Model {final_path} already exists")
+                        return True, {"model_path": final_path, "tmp_dir": tmp_dir}
+
+                
                 progress_tracker = HuggingFaceProgressTracker(repo_id)
                 progress_tracker.start_progress_tracking()
 
-                progress_tracker.set_watch_dir(model_dir)
+                progress_tracker.set_watch_dir(tmp_dir)
     
                 if pattern:
                     # Download only the files that match the allow_patterns
-                    pattern_dir = os.path.join(model_dir, pattern)
+                    pattern_dir = os.path.join(tmp_dir, pattern)
                     
                     await loop.run_in_executor(
                         None,
                         lambda: snapshot_download(
                             repo_id=repo_id,
-                            local_dir=model_dir,
+                            local_dir=tmp_dir,
                             allow_patterns=[f"*{pattern}*"],
                             token=os.getenv("HF_TOKEN")
                         )
@@ -1213,38 +1232,52 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
                         None,
                         lambda: snapshot_download(
                             repo_id=repo_id,
-                            local_dir=model_dir,
+                            local_dir=tmp_dir,
                             token=os.getenv("HF_TOKEN")  
                         )                     
                     )
 
                     res["tmp_dir"] = tmp_dir
-                    res["model_path"] = model_dir
+                    res["model_path"] = tmp_dir
 
             else:
 
-                await loop.run_in_executor(
-                    None,
-                    lambda: run_hf_download_with_pty(repo_id, model, model_dir, token= os.getenv("HF_TOKEN", None))
-                )
+                if not final_path or not os.path.exists(final_path):
+                    await loop.run_in_executor(
+                        None,
+                        lambda: run_hf_download_with_pty(repo_id, model, tmp_dir, token = os.getenv("HF_TOKEN", None))
+                    )
 
-                res["model_path"] = os.path.join(model_dir, model)
-                res["tmp_dir"] = tmp_dir
+                    res["model_path"] = os.path.join(tmp_dir, model)
+                    res["tmp_dir"] = tmp_dir
+
+                    if final_path:
+                        await async_move(res["model_path"], final_path)
+                        res["model_path"] = final_path
+                        res["tmp_dir"] = tmp_dir
+                else:
+                    res["model_path"] = final_path
+                    logger.info(f"Model {final_path} already exists")
 
                 # Download projector if specified
                 if projector:
-                    final_projector_path = os.path.join(model_dir, model + "-projector")
-                    if os.path.exists(final_projector_path):
-                        res["projector_path"] = final_projector_path
-                        logger.info(f"Projector file {final_projector_path} already exists")
-                    else:
+                    if final_path:
+                        final_projector_path = final_path + "-projector"
+
+                    if not final_projector_path or not os.path.exists(final_projector_path):
                         await loop.run_in_executor(
                             None,
-                            lambda: run_hf_download_with_pty(repo_id, projector, model_dir, token= os.getenv("HF_TOKEN", None))
+                            lambda: run_hf_download_with_pty(repo_id, projector, tmp_dir, token= os.getenv("HF_TOKEN", None))
                         )
-                        res["projector_path"] = os.path.join(model_dir, projector)
-            
-            logger.info(f"Successfully downloaded model: {model_dir}")
+                        res["projector_path"] = os.path.join(tmp_dir, projector)
+                        if final_projector_path:
+                            await async_move(res["projector_path"], final_projector_path)
+                            res["projector_path"] = final_projector_path
+                            res["tmp_dir"] = tmp_dir
+                    else:
+                        res["projector_path"] = final_projector_path
+                        logger.info(f"Projector {final_projector_path} already exists")
+
             return True, res
         
         except KeyboardInterrupt:
@@ -1338,29 +1371,18 @@ async def download_model_async(hf_data: dict, filecoin_hash: str | None = None) 
             logger.error("Failed to download model")
             return False, None
     else:
-        final_dir = DEFAULT_MODEL_DIR
-        model = hf_data.get("model", None)
+        final_dir = str(DEFAULT_MODEL_DIR)
 
-        if model is None:
-            final_dir = final_dir / hf_data["repo"].replace("/", "_")
+        success, hf_res = await download_model_from_hf(hf_data, final_dir)
 
-        final_dir = str(final_dir)
+        tmp_dir = hf_res.get("tmp_dir", None)
+        if tmp_dir:
+            await async_rmtree(tmp_dir)
 
-        success, hf_res = await download_model_from_hf(hf_data)
-        tmp_dir = hf_res["tmp_dir"]
-        if not success:
-            logger.error("Failed to download model")
-            return False, None
+        print(hf_res)
 
-        model_path = hf_res["model_path"]
-        await async_move(model_path, final_dir)
+        path = hf_res["model_path"]
 
-        projector_path = hf_res.get("projector_path", None)
-        if projector_path:
-            await async_move(projector_path, final_dir + "-projector")
-
-        await async_rmtree(tmp_dir)
-
-        path = final_dir
         logger.info(f"Downloaded model to {path}")
+
     return True, path

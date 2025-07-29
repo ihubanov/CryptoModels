@@ -454,16 +454,8 @@ def handle_run(args):
         if not success:
             print_error(f"Failed to download model {args.hf_repo}")
             sys.exit(1)
-
-        folder_name = os.path.basename(local_path)
-        model_id = folder_name.replace("/", "_")
-        if args.hf_file:
-            local_path = os.path.join(local_path, args.hf_file)
-            if os.path.exists(local_path):
-                model_id = args.hf_file
-            else:
-                print_error(f"File {args.hf_file} not found in {local_path}")
-                sys.exit(1)
+        
+        model_id = os.path.basename(local_path)
 
         projector_path = None
         if args.mmproj:
@@ -485,7 +477,7 @@ def handle_run(args):
             "model_id": model_id,
             "model": local_path,
             "context_length": args.context_length,
-            "model_name": folder_name,
+            "model_name": model_id,
             "task": args.task,
             "on_demand": False,
             "is_lora": False,
@@ -502,7 +494,7 @@ def handle_run(args):
         model_metadata = {
             "task": args.task,
             "model_id": model_id,
-            "model_name": folder_name,
+            "model_name": model_id,
             "multimodal": bool(projector_path),
         }
         model_metadata_path = os.path.join(DEFAULT_MODEL_DIR, model_id + ".json")
