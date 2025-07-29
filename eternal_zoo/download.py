@@ -1005,13 +1005,12 @@ class HuggingFaceProgressTracker:
         self.total_size_bytes = get_repo_size(repo_id) * random.uniform(1.1, 1.5)
 
         self.total_size_mb = self.total_size_bytes / (1024 * 1024)
-        print(self.total_size_mb)
         
         # Progress tracking with caching
         self.progress_task = None
         self.last_folder_size = 0
         self.last_size_check_time = 0
-        self.size_cache_duration = 2.0  # Cache folder size for 2 seconds
+        self.size_cache_duration = 0.5 
         
         # Batch progress updates to reduce logging overhead
         self.pending_progress_updates = 0
@@ -1023,6 +1022,10 @@ class HuggingFaceProgressTracker:
         self.last_percentage = 0.0
 
     def set_watch_dir(self, watch_dir: str):
+        path = Path(watch_dir)
+        if not path.exists() or not path.is_dir():
+            logger.error(f"Invalid watch_dir: {watch_dir} does not exist or is not a directory")
+            raise ValueError(f"watch_dir must be a valid directory: {watch_dir}")
         self.watch_dir = watch_dir
         
     def start_progress_tracking(self):
@@ -1033,6 +1036,7 @@ class HuggingFaceProgressTracker:
     def get_current_progress(self) -> tuple[float, float]:
         """Get current download progress and speed with caching"""
         if self.watch_dir is None:
+            logger.warning("watch_dir is not set; cannot track progress")
             return self.last_percentage, self.last_speed_mbps
         
         current_time = time.time()
@@ -1151,6 +1155,8 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
     pattern = data.get("pattern", None)
     tmp_dir = None if output_dir else str(DEFAULT_MODEL_DIR/f"tmp_{repo_id.replace('/', '_')}")
     model_dir = str(output_dir) if output_dir else tmp_dir
+
+    os.makedirs(model_dir, exist_ok=True)
         
     attempt = 1
     while True:  # Infinite loop until success or user cancellation
@@ -1169,14 +1175,15 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
                 if pattern:
                     # Download only the files that match the allow_patterns
                     pattern_dir = os.path.join(model_dir, pattern)
-                    progress_tracker.set_watch_dir(pattern_dir)
+                    
                     await loop.run_in_executor(
                         None,
                         lambda: snapshot_download(
                             repo_id=repo_id,
                             local_dir=model_dir,
                             allow_patterns=[f"*{pattern}*"],
-                            token=os.getenv("HF_TOKEN")                       
+                            token=os.getenv("HF_TOKEN"),
+                            cache_dir=model_dir                    
                         )
                     )
 
@@ -1198,9 +1205,6 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
                     res["model_path"] = model_dir
 
             else:
-                # For single file downloads, we can't easily track progress by folder size
-                # since the file is downloaded directly to output_dir, not a temp folder
-                # The PTY-based download already provides progress output
 
                 await loop.run_in_executor(
                     None,

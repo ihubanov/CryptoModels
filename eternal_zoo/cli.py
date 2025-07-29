@@ -292,10 +292,38 @@ def parse_args():
         description="Check if a model with the specified hash has been downloaded"
     )
     check_command.add_argument(
+        "--model-name",
+        required=True,
+        help="🏷️  Model name(s) - single: qwen3-1.7b or multi: qwen3-14b,qwen3-4b (first is main, others on-demand)",
+        metavar="MODEL"
+    )
+    check_command.add_argument(
         "--hash",
         required=True,
         help="🔗 IPFS hash of the model to check",
         metavar="HASH"
+    )
+    check_command.add_argument(
+        "--hf-repo",
+        required=True,
+        help="🤗 Hugging Face model repository",
+        metavar="REPO"
+    )
+    check_command.add_argument(
+        "--hf-file",
+        required=True,
+    )
+    check_command.add_argument(
+        "--mmproj",
+        required=True,
+        help="🔍 Multimodal Projector File",
+        metavar="MMProj"
+    )
+    check_command.add_argument(
+        "--pattern",
+        required=True,
+        help="🔍 Pattern to download from Hugging Face",
+        metavar="PATTERN"
     )
 
     # Model preserve command
