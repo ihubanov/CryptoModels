@@ -145,7 +145,7 @@ class ServiceHandler:
     @staticmethod
     async def generate_text_response(request: ChatCompletionRequest):
         """Generate a response for chat completion requests, supporting both streaming and non-streaming."""
-        chat_models = eternal_zoo_manager.get_models_by_task("chat")
+        chat_models = eternal_zoo_manager.get_models_by_task(["chat"])
         if len(chat_models) == 0:
             raise HTTPException(status_code=404, detail=f"No chat model found")
         
@@ -200,7 +200,7 @@ class ServiceHandler:
     async def generate_embeddings_response(request: EmbeddingRequest):
         """Generate a response for embedding requests."""
         
-        embedding_models = eternal_zoo_manager.get_models_by_task("embed")
+        embedding_models = eternal_zoo_manager.get_models_by_task(["embed"])
         if len(embedding_models) == 0:
             raise HTTPException(status_code=404, detail=f"No embedding model found")
         
@@ -230,7 +230,7 @@ class ServiceHandler:
     @staticmethod
     async def generate_image_response(request: ImageGenerationRequest):
         """Generate a response for image generation requests."""
-        image_generation_models = eternal_zoo_manager.get_models_by_task("image-generation")
+        image_generation_models = eternal_zoo_manager.get_models_by_task(["image-generation"])
         if len(image_generation_models) == 0:
             raise HTTPException(status_code=404, detail=f"No image generation model found")
         
@@ -578,7 +578,7 @@ class RequestProcessor:
             )
     
     @staticmethod
-    async def _ensure_model_active_in_queue(task: str, model_requested: str, request_id: str) -> bool:
+    async def _ensure_model_active_in_queue(tasks: List[str], model_requested: str, request_id: str) -> bool:
         """
         Ensure the requested model is active within the queue processing context.
         This method is called within the processing lock to ensure atomic model switching.
@@ -593,10 +593,10 @@ class RequestProcessor:
         """
         try:
             # Get current service info
-            available_models = eternal_zoo_manager.get_models_by_task(task)
+            available_models = eternal_zoo_manager.get_models_by_task(tasks)
 
             if len(available_models) == 0:
-                logger.error(f"[{request_id}] No {task} models found")
+                logger.error(f"[{request_id}] No {tasks} models found")
                 return False
 
             model = None
@@ -692,17 +692,17 @@ class RequestProcessor:
                 # Process the request within the lock to ensure sequential execution
                 async with RequestProcessor.processing_lock:
                     processing_start = time.time()
-                    task = "chat"
+                    tasks = ["chat"]
                     
                     if endpoint in RequestProcessor.MODEL_ENDPOINTS:
                         model_cls, handler = RequestProcessor.MODEL_ENDPOINTS[endpoint]
 
                         if endpoint == "/v1/chat/completions" or endpoint == "/chat/completions":
-                            task = "chat"
+                            tasks = ["chat"]
                         elif endpoint == "/v1/embeddings" or endpoint == "/embeddings":
-                            task = "embed"
+                            tasks = ["chat", "embed"]
                         elif endpoint == "/v1/images/generations" or endpoint == "/images/generations":
-                            task = "image-generation"
+                            tasks = ["image-generation"]
                         else:
                             raise HTTPException(status_code=404, detail="Task not found")
                         
@@ -723,7 +723,7 @@ class RequestProcessor:
                                 if active_stream_count > 0:
                                     logger.info(f"[{request_id}] Found {active_stream_count} active streams before model check")
                                 
-                                if not await RequestProcessor._ensure_model_active_in_queue(task, request_obj.model, request_id):
+                                if not await RequestProcessor._ensure_model_active_in_queue(tasks, request_obj.model, request_id):
                                     error_msg = f"Model {request_obj.model} is not available or failed to switch"
                                     logger.error(f"[{request_id}] {error_msg}")
                                     future.set_exception(HTTPException(status_code=400, detail=error_msg))
