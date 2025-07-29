@@ -1208,6 +1208,7 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
                 )
 
                 res["model_path"] = os.path.join(model_dir, model)
+                res["tmp_dir"] = tmp_dir
 
                 # Download projector if specified
                 if projector:
