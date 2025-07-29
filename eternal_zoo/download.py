@@ -1323,6 +1323,8 @@ async def download_model_async(hf_data: dict, filecoin_hash: str | None = None) 
         if model is None:
             final_dir = final_dir / hf_data["repo"].replace("/", "_")
 
+        final_dir = str(final_dir)
+
         success, hf_res = await download_model_from_hf(hf_data)
         tmp_dir = hf_res["tmp_dir"]
         if not success:
