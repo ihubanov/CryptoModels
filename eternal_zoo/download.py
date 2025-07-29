@@ -661,7 +661,6 @@ async def fetch_model_metadata_async(filecoin_hash: str, max_attempts: int = 10)
     logger.error("All metadata fetch attempts failed")
     return False, None
 
-
 async def download_model_async_by_hash(hf_data: dict, filecoin_hash: str | None = None) -> tuple[bool, str | None]:
     """
     Asynchronously download a model from Filecoin using its IPFS hash.
@@ -675,209 +674,227 @@ async def download_model_async_by_hash(hf_data: dict, filecoin_hash: str | None 
         tuple[bool, str | None]: (success, local_path) - True and path if successful, False and None if failed
     """
     # Ensure output directory exists
+
     DEFAULT_MODEL_DIR.mkdir(exist_ok=True, parents=True)
     local_path = DEFAULT_MODEL_DIR / f"{filecoin_hash}{POSTFIX_MODEL_PATH}"
     local_path_str = str(local_path.absolute())
 
-    try:
-        # Fetch model metadata using the dedicated async function
-        success, data = await fetch_model_metadata_async(filecoin_hash)
-        if not success:
-            logger.error("Failed to fetch model metadata")
-            return False, None
-            
-        data["filecoin_hash"] = filecoin_hash
-        data["local_path"] = local_path_str
-        is_lora = data.get("lora", False)
-        lora_metadata = {}
+    # Fetch model metadata using the dedicated async function
+    success, data = await fetch_model_metadata_async(filecoin_hash)
 
-        if is_lora:
-            # First, try to load metadata from local LoRA model if it exists
-            if os.path.exists(local_path_str):
-                metadata_path = os.path.join(local_path_str, "metadata.json")
-                try:
-                    with open(metadata_path, "r") as f:
-                        lora_metadata = json.load(f)
-                except (FileNotFoundError, json.JSONDecodeError) as e:
-                    logger.warning(f"Failed to load local LoRA metadata: {e}")
-                    lora_metadata = {}
-            
-                base_model_hash = lora_metadata["base_model"]
-                lora_base_model_path_str = str(DEFAULT_MODEL_DIR / f"{base_model_hash}{POSTFIX_MODEL_PATH}")
-                if os.path.exists(lora_base_model_path_str):
-                    logger.info(f"Using existing LoRA model at {local_path_str}")
-                    logger.info(f"Using existing base model at {lora_base_model_path_str}")
-                    return True, local_path_str
-                else:
-                    logger.warning(f"LoRA model exists but base model not found at {lora_base_model_path_str}")
-                    logger.info(f"Downloading missing base model: {base_model_hash}")
-                    base_model_hf_data = None
-                    if base_model_hash in HASH_TO_MODEL:
-                        base_model_hf_data = FEATURED_MODELS[HASH_TO_MODEL[base_model_hash]]
-                    success, base_model_path = await download_model_async_by_hash(base_model_hf_data, base_model_hash)
-                    if not success:
-                        logger.error(f"Failed to download base model: {base_model_hash}")
-                        return False, None
-                    logger.info(f"Successfully downloaded base model and using existing LoRA model")
-                    return True, local_path_str
-        else:
-            if os.path.exists(local_path_str):
-                logger.info(f"Using existing model at {local_path_str}")
-                return True, local_path_str
+    if not success:
+        logger.error("Failed to fetch model metadata")
+        return False, None
+        
+    data["filecoin_hash"] = filecoin_hash
+    data["local_path"] = local_path_str
+    is_lora = data.get("lora", False)
+    lora_metadata = {}
 
-        # More accurate disk space check after metadata is fetched
-        if "files" in data:
-            total_size_mb = sum(f.get("size_mb", 512) for f in data["files"])
-            data["total_size_mb"] = total_size_mb
-            required_space_bytes = int(total_size_mb * EXTRACTION_BUFFER_FACTOR * 1024 * 1024)
+    if is_lora:
+        # First, try to load metadata from local LoRA model if it exists
+        if os.path.exists(local_path_str):
+            metadata_path = os.path.join(local_path_str, "metadata.json")
             try:
-                check_disk_space(DEFAULT_MODEL_DIR, required_bytes=required_space_bytes)
-            except Exception as e:
-                logger.error(f"Insufficient disk space for model extraction: {e}")
-                return False, None
-
-        if is_lora:
-            success, hf_res = await download_model_from_hf(hf_data)
-            if not success:
-                logger.error("Failed to download LoRA model, falling back to Filecoin")
-                return False, None
-            if hf_res["is_folder"]:
-                await async_move(hf_res["model_path"], local_path_str)
-                await async_rmtree(hf_res["model_path"])
-            lora_metadata_path = os.path.join(local_path_str, "metadata.json")
-            try:
-                with open(lora_metadata_path, "r") as f:
+                with open(metadata_path, "r") as f:
                     lora_metadata = json.load(f)
             except (FileNotFoundError, json.JSONDecodeError) as e:
-                logger.error(f"Failed to load LoRA metadata from downloaded model: {e}")
-                return False, None
-            
-            base_model_hash = lora_metadata.get("base_model", None)
-            if base_model_hash is None:
-                logger.error("No base_model found in LoRA metadata")
-                return False, None
-
-            base_model_hf_data = None
-
-            if base_model_hash in HASH_TO_MODEL:
-                base_model_hf_data = FEATURED_MODELS[HASH_TO_MODEL[base_model_hash]]
-
-            print(f"base_model_hf_data: {base_model_hf_data}")
-            print(f"base_model_hash: {base_model_hash}")
-
-            success, base_model_path = await download_model_async_by_hash(base_model_hf_data, base_model_hash)
-            if not success:
-                logger.error(f"Failed to download base model: {base_model_hash}")
-                return False, None
-            logger.info(f"Successfully downloaded LoRA model and base model: {local_path_str}")
-            return True, local_path_str
-        else:
-            success, hf_res = await download_model_from_hf(hf_data)
-            if success:
-                logger.info(f"Successfully downloaded: {hf_res}")
-                if hf_res["is_folder"]:
-                    await async_move(hf_res["model_path"], local_path_str)
-                    await async_rmtree(hf_res["model_path"])
-                else:
-                    await async_move(hf_res["model_path"], local_path_str)
+                logger.warning(f"Failed to load local LoRA metadata: {e}")
+                lora_metadata = {}
+        
+            base_model_hash = lora_metadata["base_model"]
+            lora_base_model_path_str = str(DEFAULT_MODEL_DIR / f"{base_model_hash}{POSTFIX_MODEL_PATH}")
+            if os.path.exists(lora_base_model_path_str):
+                logger.info(f"Using existing LoRA model at {local_path_str}")
+                logger.info(f"Using existing base model at {lora_base_model_path_str}")
                 return True, local_path_str
             else:
-                logger.info("Download failed, falling back to Filecoin")
-        
-        # Prepare for Filecoin download
-        folder_path = Path(tempfile.mkdtemp(prefix=f"filecoin_download_{data['folder_name']}_"))
-
-        # Download and process model with exponential backoff
-        for attempt in range(1, MAX_ATTEMPTS + 1):
-            backoff = _calculate_backoff(attempt)
-            
-            try:
-                logger.info(f"Download attempt {attempt}/{MAX_ATTEMPTS}")
-                
-                # Download files from Filecoin
-                paths = await download_files_from_lighthouse_async(data)
-                if not paths:
-                    if attempt < MAX_ATTEMPTS:
-                        logger.warning(f"Download failed, retrying in {backoff}s")
-                        await asyncio.sleep(backoff)
-                        continue
-                    else:
-                        logger.error("All download attempts failed")
-                        await _cleanup_on_failure(folder_path, local_path_str)
-                        return False, None
-
-                # Extract downloaded files
-                try:
-                    logger.info("Extracting downloaded files...")
-                    await async_extract_zip(paths)
-                except Exception as e:
-                    # Don't retry if disk space issue
-                    if "Not enough disk space" in str(e):
-                        logger.error(f"Extraction failed due to insufficient disk space: {e}")
-                        await _cleanup_on_failure(folder_path, local_path_str)
-                        return False, None
-                    
-                    if attempt < MAX_ATTEMPTS:
-                        logger.warning(f"Extraction failed, retrying in {backoff}s: {e}")
-                        await asyncio.sleep(backoff)
-                        continue
-                    else:
-                        logger.error(f"Extraction failed after {MAX_ATTEMPTS} attempts: {e}")
-                        await _cleanup_on_failure(folder_path, local_path_str)
-                        return False, None
-
-                # Move files to final location
-                final_path = await _move_model_to_final_location(data, folder_path, local_path_str)
-                if final_path:
-                    logger.info(f"Model download complete: {final_path}")
-                    return True, final_path
-                
-                # If move failed, retry
-                if attempt < MAX_ATTEMPTS:
-                    logger.warning(f"Move failed, retrying in {backoff}s")
-                    await asyncio.sleep(backoff)
-                    continue
-                else:
-                    logger.error(f"Move failed after {MAX_ATTEMPTS} attempts")
-                    await _cleanup_on_failure(folder_path, local_path_str)
+                logger.warning(f"LoRA model exists but base model not found at {lora_base_model_path_str}")
+                logger.info(f"Downloading missing base model: {base_model_hash}")
+                base_model_hf_data = None
+                if base_model_hash in HASH_TO_MODEL:
+                    base_model_hf_data = FEATURED_MODELS[HASH_TO_MODEL[base_model_hash]]
+                success, base_model_path = await download_model_async_by_hash(base_model_hf_data, base_model_hash)
+                if not success:
+                    logger.error(f"Failed to download base model: {base_model_hash}")
                     return False, None
+                logger.info(f"Successfully downloaded base model and using existing LoRA model")
+                return True, local_path_str
+    else:
+        if os.path.exists(local_path_str):
+            logger.info(f"Using existing model at {local_path_str}")
+            return True, local_path_str
 
-            except aiohttp.ClientError as e:
-                logger.warning(f"HTTP error on attempt {attempt}: {e}")
-                if attempt < MAX_ATTEMPTS:
-                    logger.warning(f"Retrying in {backoff}s")
-                    await asyncio.sleep(backoff)
-                    continue
-                else:
-                    logger.error(f"HTTP error after {MAX_ATTEMPTS} attempts: {e}")
-                    await _cleanup_on_failure(folder_path, local_path_str)
-                    return False, None
-                    
-            except Exception as e:
-                # Don't retry if disk space issue
-                if "Not enough disk space" in str(e):
-                    logger.error(f"Download failed due to insufficient disk space: {e}")
-                    await _cleanup_on_failure(folder_path, local_path_str)
-                    return False, None
-                
-                logger.warning(f"Download attempt {attempt} failed: {e}")
-                if attempt < MAX_ATTEMPTS:
-                    logger.warning(f"Retrying in {backoff}s")
-                    await asyncio.sleep(backoff)
-                    continue
-                else:
-                    logger.error(f"Download failed after {MAX_ATTEMPTS} attempts: {e}")
-                    await _cleanup_on_failure(folder_path, local_path_str)
-                    return False, None
-
-    except Exception as e:
-        logger.error(f"Download failed: {e}")
-        # Clean up on unexpected failure
+    # More accurate disk space check after metadata is fetched
+    if "files" in data:
+        total_size_mb = sum(f.get("size_mb", 512) for f in data["files"])
+        data["total_size_mb"] = total_size_mb
+        required_space_bytes = int(total_size_mb * EXTRACTION_BUFFER_FACTOR * 1024 * 1024)
         try:
-            await _cleanup_on_failure(folder_path, local_path_str)
-        except:
-            pass  # Ignore cleanup errors
+            check_disk_space(DEFAULT_MODEL_DIR, required_bytes=required_space_bytes)
+        except Exception as e:
+            logger.error(f"Insufficient disk space for model extraction: {e}")
+            return False, None
+
+    if is_lora:
+        success, hf_res = await download_model_from_hf(hf_data)
+        
+        if not success:
+            logger.error("Failed to download LoRA model")
+            return False, None
+        
+        tmp_dir = hf_res["tmp_dir"]
+        model_path = hf_res["model_path"]
+
+        await async_move(model_path, local_path_str)
+        await async_rmtree(tmp_dir)
+            
+        lora_metadata_path = os.path.join(local_path_str, "metadata.json")
+        try:
+            with open(lora_metadata_path, "r") as f:
+                lora_metadata = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            logger.error(f"Failed to load LoRA metadata from downloaded model: {e}")
+            return False, None
+        
+        base_model_hash = lora_metadata.get("base_model", None)
+        if base_model_hash is None:
+            logger.error("No base_model found in LoRA metadata")
+            return False, None
+
+        base_model_hf_data = None
+
+        if base_model_hash in HASH_TO_MODEL:
+            base_model_hf_data = FEATURED_MODELS[HASH_TO_MODEL[base_model_hash]]
+
+        print(f"base_model_hf_data: {base_model_hf_data}")
+        print(f"base_model_hash: {base_model_hash}")
+
+        success, base_model_path = await download_model_async_by_hash(base_model_hf_data, base_model_hash)
+        if not success:
+            logger.error(f"Failed to download base model: {base_model_hash}")
+            return False, None
+        logger.info(f"Successfully downloaded LoRA model and base model: {local_path_str}")
+        return True, local_path_str
+
+    success, hf_res = await download_model_from_hf(hf_data)
+    if not success:
+        logger.error("Failed to download model")
         return False, None
+
+    tmp_dir = hf_res["tmp_dir"]
+    model_path = hf_res["model_path"]
+    projector_path = hf_res.get("projector_path", None)
+
+    if projector_path:
+        await async_move(projector_path, local_path_str + "-projector")
+
+    await async_move(model_path, local_path_str)
+    await async_rmtree(tmp_dir)
+
+    return True, local_path_str
+        
+# async def download_from_lighthouse_async(data: dict, local_path_str: str) -> tuple[bool, str | None]:
+#     """
+#     Download model from Filecoin using lighthouse data with retry logic and exponential backoff.
+    
+#     Args:
+#         data (dict): Model metadata dictionary containing folder_name, files, num_of_files, and filecoin_hash
+#         local_path_str (str): Final destination path for the model
+        
+#     Returns:
+#         tuple[bool, str | None]: (success, local_path) - True and path if successful, False and None if failed
+#     """
+#     # Prepare for Filecoin download
+#     folder_path = Path(tempfile.mkdtemp(prefix=f"filecoin_download_{data['folder_name']}_"))
+
+#     # Download and process model with exponential backoff
+#     for attempt in range(1, MAX_ATTEMPTS + 1):
+#         backoff = _calculate_backoff(attempt)
+        
+#         try:
+#             logger.info(f"Download attempt {attempt}/{MAX_ATTEMPTS}")
+            
+#             # Download files from Filecoin
+#             paths = await download_files_from_lighthouse_async(data)
+#             if not paths:
+#                 if attempt < MAX_ATTEMPTS:
+#                     logger.warning(f"Download failed, retrying in {backoff}s")
+#                     await asyncio.sleep(backoff)
+#                     continue
+#                 else:
+#                     logger.error("All download attempts failed")
+#                     await _cleanup_on_failure(folder_path, local_path_str)
+#                     return False, None
+
+#             # Extract downloaded files
+#             try:
+#                 logger.info("Extracting downloaded files...")
+#                 await async_extract_zip(paths)
+#             except Exception as e:
+#                 # Don't retry if disk space issue
+#                 if "Not enough disk space" in str(e):
+#                     logger.error(f"Extraction failed due to insufficient disk space: {e}")
+#                     await _cleanup_on_failure(folder_path, local_path_str)
+#                     return False, None
+                
+#                 if attempt < MAX_ATTEMPTS:
+#                     logger.warning(f"Extraction failed, retrying in {backoff}s: {e}")
+#                     await asyncio.sleep(backoff)
+#                     continue
+#                 else:
+#                     logger.error(f"Extraction failed after {MAX_ATTEMPTS} attempts: {e}")
+#                     await _cleanup_on_failure(folder_path, local_path_str)
+#                     return False, None
+
+#             # Move files to final location
+#             final_path = await _move_model_to_final_location(data, folder_path, local_path_str)
+#             if final_path:
+#                 logger.info(f"Model download complete: {final_path}")
+#                 return True, final_path
+            
+#             # If move failed, retry
+#             if attempt < MAX_ATTEMPTS:
+#                 logger.warning(f"Move failed, retrying in {backoff}s")
+#                 await asyncio.sleep(backoff)
+#                 continue
+#             else:
+#                 logger.error(f"Move failed after {MAX_ATTEMPTS} attempts")
+#                 await _cleanup_on_failure(folder_path, local_path_str)
+#                 return False, None
+
+#         except aiohttp.ClientError as e:
+#             logger.warning(f"HTTP error on attempt {attempt}: {e}")
+#             if attempt < MAX_ATTEMPTS:
+#                 logger.warning(f"Retrying in {backoff}s")
+#                 await asyncio.sleep(backoff)
+#                 continue
+#             else:
+#                 logger.error(f"HTTP error after {MAX_ATTEMPTS} attempts: {e}")
+#                 await _cleanup_on_failure(folder_path, local_path_str)
+#                 return False, None
+                
+#         except Exception as e:
+#             # Don't retry if disk space issue
+#             if "Not enough disk space" in str(e):
+#                 logger.error(f"Download failed due to insufficient disk space: {e}")
+#                 await _cleanup_on_failure(folder_path, local_path_str)
+#                 return False, None
+            
+#             logger.warning(f"Download attempt {attempt} failed: {e}")
+#             if attempt < MAX_ATTEMPTS:
+#                 logger.warning(f"Retrying in {backoff}s")
+#                 await asyncio.sleep(backoff)
+#                 continue
+#             else:
+#                 logger.error(f"Download failed after {MAX_ATTEMPTS} attempts: {e}")
+#                 await _cleanup_on_failure(folder_path, local_path_str)
+#                 return False, None
+
+#     # This should never be reached, but just in case
+#     logger.error("Download failed after all attempts")
+#     await _cleanup_on_failure(folder_path, local_path_str)
+#     return False, None
 
 
 async def _move_model_to_final_location(data: dict, folder_path: Path, local_path_str: str) -> str | None:
@@ -1132,7 +1149,8 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
     model = data.get("model", None)
     projector = data.get("projector", None)
     pattern = data.get("pattern", None)
-    model_dir = str(output_dir) if output_dir else str(DEFAULT_MODEL_DIR/f"tmp_{repo_id.replace('/', '_')}")
+    tmp_dir = None if output_dir else str(DEFAULT_MODEL_DIR/f"tmp_{repo_id.replace('/', '_')}")
+    model_dir = str(output_dir) if output_dir else tmp_dir
         
     attempt = 1
     while True:  # Infinite loop until success or user cancellation
@@ -1161,7 +1179,8 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
                             token=os.getenv("HF_TOKEN")                       
                         )
                     )
-                    res["is_folder"] = True
+
+                    res["tmp_dir"] = tmp_dir
                     res["model_path"] = pattern_dir
                 
                 else:
@@ -1174,8 +1193,10 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
                             token=os.getenv("HF_TOKEN")  
                         )                     
                     )
-                    res["is_folder"] = True
+
+                    res["tmp_dir"] = tmp_dir
                     res["model_path"] = model_dir
+
             else:
                 # For single file downloads, we can't easily track progress by folder size
                 # since the file is downloaded directly to output_dir, not a temp folder
@@ -1186,7 +1207,6 @@ async def download_model_from_hf(data: dict, output_dir: Path | None = None) -> 
                     lambda: run_hf_download_with_pty(repo_id, model, model_dir, token= os.getenv("HF_TOKEN", None))
                 )
 
-                res["is_folder"] = False
                 res["model_path"] = os.path.join(model_dir, model)
 
                 # Download projector if specified
@@ -1303,9 +1323,16 @@ async def download_model_async(hf_data: dict, filecoin_hash: str | None = None) 
         if model is None:
             final_dir = final_dir / hf_data["repo"].replace("/", "_")
 
-        success, hf_res = await download_model_from_hf(hf_data, final_dir)
+        success, hf_res = await download_model_from_hf(hf_data)
+        tmp_dir = hf_res["tmp_dir"]
         if not success:
             logger.error("Failed to download model")
             return False, None
+
+        model_path = hf_res["model_path"]
+        await async_move(model_path, final_dir)
+        await async_rmtree(tmp_dir)
+
         path = final_dir
+        logger.info(f"Downloaded model to {path}")
     return True, path
