@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 from lighthouseweb3 import Lighthouse
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from crypto_models.utils import compute_file_hash, compress_folder, extract_zip
+from eternal_zoo.utils import compute_file_hash, compress_folder, extract_zip
 
 def upload_to_lighthouse(file_path: Path):
     """

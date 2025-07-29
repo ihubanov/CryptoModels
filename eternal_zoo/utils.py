@@ -161,7 +161,7 @@ async def async_extract_zip(paths: list) -> None:
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, extract_zip, paths)  # Assuming extract_zip is defined
 
-def wait_for_health(port: int, timeout: int = 300) -> bool:
+def wait_for_health(port: int, timeout: int = 120) -> bool:
     """
     Wait for the service to become healthy with optimized retry logic.
     """

@@ -1,5 +1,5 @@
 """
-Configuration management for CryptoModels.
+Configuration management for EternalZoo.
 
 This module provides centralized configuration management with support for:
 - Environment variables
@@ -96,9 +96,10 @@ class FilePathConfig:
     """File path and directory configuration."""
     
     # Service files
-    RUNNING_SERVICE_FILE: str = os.getenv("RUNNING_SERVICE_FILE", "running_service.msgpack")
-    START_LOCK_FILE: str = os.getenv("START_LOCK_FILE", "start_lock.lock")
-    
+    AI_SERVICE_FILE: str = os.getenv("AI_SERVICE_FILE", "ai_service.msgpack")
+    API_SERVICE_FILE: str = os.getenv("API_SERVICE_FILE", "api_service.msgpack")
+    SERVICE_INFO_FILE: str = os.getenv("SERVICE_INFO_FILE", "service_info.msgpack")
+
     # Directories
     LOGS_DIR: str = os.getenv("CRYPTO_LOGS_DIR", "logs")
     
@@ -166,9 +167,9 @@ class Config:
     def print_config(cls) -> None:
         """Print current configuration for debugging."""
         import json
-        print("Current CryptoModels Configuration:")
+        print("Current EternalZoo Configuration:")
         print(json.dumps(cls.get_env_summary(), indent=2, default=str))
 
 
 # Create a global config instance
-config = Config() 
+DEFAULT_CONFIG = Config() 

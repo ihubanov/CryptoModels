@@ -39,6 +39,7 @@ This guide will help you deploy your AI models using peer-to-peer infrastructure
 - **🛡️ Zero Trust Privacy**: Your prompts, responses, and model usage remain completely private
 - **🔗 OpenAI Compatibility**: Use familiar API endpoints with your existing tools
 - **👁️ Multi-Model Support**: Works with both text and vision models
+- **🚀 Model Access**: Run any GGUF model directly from Hugging Face
 - **⚡ Parallel Processing**: Efficient model compression and upload
 - **🔄 Automatic Retries**: Robust error handling for network issues
 - **📊 Metadata Management**: Comprehensive model information tracking
@@ -58,6 +59,7 @@ In an era of increasing AI centralization, Eternal Zoo puts you back in control:
 - macOS or Linux operating system
 - Sufficient RAM for your chosen model (see model specifications below)
 - Stable internet connection for model uploads
+
 
 ## 🛠️ Getting Started
 
@@ -82,9 +84,9 @@ bash jetson.sh
 
 1. Activate the virtual environment:
 ```bash
-source cryptomodels/bin/activate
+source activate.sh
 ```
-> **Remember**: Activate this environment each time you use the CryptoModels (`eai`) tools
+> **Remember**: Activate this environment each time you use the Eternal Zoo (`eai`) tools
 
 2. Verify your installation:
 ```bash
@@ -99,6 +101,7 @@ Eternal Zoo uses a structured command hierarchy for better organization. All mod
 # Model operations
 eai model run --hash <hash>           # Run a model server
 eai model run <model-name>            # Run a preserved model (e.g., qwen3-1.7b)
+eai model run --hf-repo <repo> --hf-file <file> --task <task>  # Run any GGUF model from Hugging Face
 eai model serve [--main-hash <hash>]  # Serve all downloaded models (with optional main model)
 eai model stop                        # Stop the running model server  
 eai model status                      # Check which model is running
@@ -113,16 +116,16 @@ eai --version                         # Show version information
 
 ```bash
 # Run a preserved model (user-friendly)
-eai model run qwen3-1.7b --port 8080
+eai model run qwen3-1.7b
 
 # Run any model by hash
-eai model run --hash bafkreiacd5mwy4a5wkdmvxsk42nsupes5uf4q3dm52k36mvbhgdrez422y --port 8080
+eai model run --hash bafkreiacd5mwy4a5wkdmvxsk42nsupes5uf4q3dm52k36mvbhgdrez422y
 
-# Serve all downloaded models (random main model)
-eai model serve --port 8080
+# Run any GGUF model directly from Hugging Face
+eai model run --hf-repo dphn/Dolphin3.0-Llama3.1-8B-GGUF --hf-file Dolphin3.0-Llama3.1-8B-Q4_0.gguf --task chat
 
 # Serve all downloaded models with specific main model
-eai model serve --main-hash bafkreiacd5mwy4a5wkdmvxsk42nsupes5uf4q3dm52k36mvbhgdrez422y --port 8080
+eai model serve --main-hash bafkreiacd5mwy4a5wkdmvxsk42nsupes5uf4q3dm52k36mvbhgdrez422y
 
 # Check status
 eai model status
@@ -138,6 +141,48 @@ eai model preserve --folder-path ./my-model-folder --task chat --ram 8.5
 ```
 
 ## 🚀 Running Models
+
+### 🆕 Running Any GGUF Model from Hugging Face
+
+Eternal Zoo now supports running any GGUF model directly from Hugging Face without needing to download or preserve it first. This gives you instant access to thousands of models available on Hugging Face.
+
+#### **Basic Usage**
+```bash
+# Run any GGUF model from Hugging Face
+eai model run --hf-repo <repository> --hf-file <filename> --task <task_type>
+
+# Example: Run Dolphin-3.0 model
+eai model run --hf-repo dphn/Dolphin3.0-Llama3.1-8B-GGUF --hf-file Dolphin3.0-Llama3.1-8B-Q4_0.gguf --task chat
+```
+
+#### **Parameters**
+- `--hf-repo`: Hugging Face repository (e.g., `dphn/Dolphin3.0-Llama3.1-8B-GGUF`)
+- `--hf-file`: Specific GGUF file name (e.g., `Dolphin3.0-Llama3.1-8B-Q4_0.gguf`)
+- `--task`: Task type (`chat` for text generation, `embed` for embeddings)
+
+#### **Finding Models on Hugging Face**
+1. Visit [Hugging Face](https://huggingface.co/) and search for GGUF models
+2. Navigate to the model repository
+3. Find the `.gguf` file you want to use
+4. Use the repository name and file name in your command
+
+#### **Example Models You Can Run**
+```bash
+# Language Model
+eai model run --hf-repo bartowski/phi-4-GGUF --hf-file phi-4-Q4_K_M.gguf --task chat
+
+# Vision Language Model
+eai model run --hf-repo unsloth/Qwen2.5-VL-7B-Instruct-GGUF --hf-file Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf --mmproj mmproj-F16.gguf --task chat
+
+# Embedding Model
+eai model run --hf-repo jinaai/jina-embeddings-v4-text-matching-GGUF --hf-file jina-embeddings-v4-text-matching-Q4_K_M.gguf --task embed
+```
+
+#### **Benefits**
+- **Instant Access**: No need to download or preserve models first
+- **Huge Selection**: Access to thousands of models on Hugging Face
+- **Latest Models**: Try new models as soon as they're uploaded
+- **Flexible**: Works with any GGUF-compatible model
 
 ### Available Pre-uploaded Models
 
@@ -328,64 +373,46 @@ Check Model Field
     ↓
 Model Field Present?
     ├─ NO → Use Main Model (immediate)
-    └─ YES → Is Requested Model Valid?
-        ├─ NO → Use Main Model (fallback)
-        └─ YES → Is Requested Model Active?
-            ├─ YES → Process Request Immediately
-            └─ NO → Check for Active Streams
-                ├─ Streams Active → Wait for Completion
-                └─ No Streams → Switch Model → Process Request
+    └─ YES → Validate Model ID
+        ├─ Invalid ID/Folder Name → Use Main Model (fallback)
+        └─ Valid ID → Check Task Compatibility
+            ├─ Task Mismatch → Use First Compatible Model (fallback)
+            └─ Task Compatible → Is Requested Model Active?
+                ├─ YES → Process Request Immediately
+                └─ NO → Check for Active Streams
+                    ├─ Streams Active → Wait for Completion
+                    └─ No Streams → Switch Model → Process Request
 ```
+
+**Key Validation Steps:**
+- **Model ID Format**: Only valid model IDs (from `/v1/models` `id` field) work for switching
+- **Task Compatibility**: Models must support the requested endpoint type (chat/embed/image-generation)
+- **Model Availability**: Requested model must exist in the available models list
+- **Resource Validation**: Sufficient resources must be available for model switching
+
+**Fallback Behavior:**
+- **Silent Fallbacks**: Invalid models, task mismatches, and missing model fields default to main model without errors
+- **No Error Messages**: The server gracefully handles invalid requests by using the main model
+- **Performance Impact**: Fallback requests use main model (fastest response, no switching delay)
+- **Client Responsibility**: Applications should validate models using `/v1/models` before making requests
+
+**Best Practices for Model Switching:**
+- **Always Use Model IDs**: Use the `id` field from `/v1/models` as the `model` field in requests
+- **Validate Before Requests**: Check `/v1/models` to ensure your requested model exists and supports the task
+- **Handle Fallbacks Gracefully**: Implement client-side validation to detect when fallbacks occur
+- **Monitor Performance**: Track switching delays and fallback rates in your applications
+- **Group Similar Tasks**: Keep models of the same task type together for faster switching
+- **Choose Main Model Wisely**: Select your most frequently used model as the main model for optimal performance
 
 ### **Running Multi-Model Setups**
 
-#### **Method 1: Specify Multiple Models by Task**
+Serve all models with a specific main model by running:
 ```bash
-# Mix different task types for comprehensive AI service
-eai model run qwen3-8b,qwen3-embedding-4b,flux-dev
-# Main: qwen3-8b (chat), On-demand: qwen3-embedding-4b (embed), flux-dev (image-generation)
-
-# Chat-focused setup with multiple chat models
-eai model run qwen3-1.7b,qwen3-8b,gemma-3-4b
-# Main: qwen3-1.7b (chat), On-demand: qwen3-8b (chat), gemma-3-4b (chat with vision)
-
-# Embedding-focused setup
-eai model run qwen3-embedding-4b,qwen3-embedding-0.6b
-# Main: qwen3-embedding-4b (embed), On-demand: qwen3-embedding-0.6b (embed)
-
-# Run with custom hashes for any task type
-eai model run --hash hash1,hash2,hash3
-# Main: hash1, On-demand: hash2, hash3
+eai model serve --main-model <main-model-id>
 ```
-
-#### **Method 2: Serve All Downloaded Models by Task**
+or
 ```bash
-# Auto-discover and serve all downloaded models (any mix of tasks)
-eai model serve
-# Randomly selects main model from available models of any task type
-
-# Serve all with specific main model
-eai model serve --main-hash <specific_hash>
-# Uses specified hash as main (could be chat, embed, or image-generation)
-```
-
-#### **Task-Specific Server Examples**
-```bash
-# Multi-task AI server (recommended for versatility)
-eai model run qwen3-8b,qwen3-embedding-4b,flux-dev
-# Provides: chat completion, text embeddings, and image generation
-
-# Vision-enabled chat server
-eai model run gemma-3-4b,qwen3-8b
-# Provides: vision chat (main) and text-only chat (on-demand)
-
-# Embedding service with fallback
-eai model run qwen3-embedding-4b,qwen3-embedding-0.6b
-# Provides: high-quality embeddings (main) and fast embeddings (on-demand)
-
-# Image generation studio
-eai model run flux-dev,flux-schnell
-# Provides: high-quality images (main) and fast images (on-demand)
+eai model serve --main-hash <main-model-hash>
 ```
 
 ### **API Usage with Multi-Model**
@@ -403,34 +430,19 @@ curl http://localhost:8080/v1/models
 **Example Response:**
 ```json
 {
+  "object": "list",
   "data": [
     {
-      "id": "bafkreid5z4lddvv4qbgdlz2nqo6eumxwetwmkpesrumisx72k3ahq73zpy",
-      "root": "qwen3-8b", 
-      "ram": 12.0,
-      "folder_name": "qwen3-8b",
-      "task": "chat"
-    },
-    {
-      "id": "bafkreiaevddz5ssjnbkmdrl6dzw5sugwirzi7wput7z2ttcwnvj2wiiw5q",
-      "root": "qwen3-embedding-4b",
-      "ram": 5.13, 
-      "folder_name": "qwen3-embedding-4b",
-      "task": "embed"
-    },
-    {
-      "id": "bafkreiaha3sjfmv4affmi5kbu6bnayenf2avwafp3cthhar3latmfi632u",
-      "root": "flux-dev",
-      "ram": 20.0,
-      "folder_name": "flux-dev", 
-      "task": "image-generation"
-    },
-    {
-      "id": "bafkreicr66zguzdldiqal4jdyrcd6y26lfaiy4glkah7n3hdve2ailptue",
-      "root": "devstral-small",
-      "ram": 31.71,
-      "folder_name": "devstral-small",
-      "task": "chat"
+      "id": "bafkreie4uj3gluik5ob2ib3cm2pt6ww7n4vqpmjnq6pas4gkkor42yuysa",
+      "object": "model",
+      "created": 1753757438,
+      "owned_by": "user",
+      "active": true,
+      "task": "chat",
+      "is_lora": false,
+      "multimodal": false,
+      "context_length": 32768,
+      "lora_config": null
     }
   ]
 }
@@ -438,25 +450,17 @@ curl http://localhost:8080/v1/models
 
 #### **Using the Model Field in Requests**
 
-Use the `id` (hash) from `/v1/models` as the `model` field in your requests:
+Use the `id` from `/v1/models` as the `model` field in your requests:
 
 ##### **Chat Models (task: "chat")**
 
 ```bash
-# Request using main chat model (immediate response)
+# Request using the available chat model
 curl -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "bafkreib6pws5dx5ur6exbhulmf35twfcizdkxvup4cklzprlvaervfz5zy",
+    "model": "bafkreie4uj3gluik5ob2ib3cm2pt6ww7n4vqpmjnq6pas4gkkor42yuysa",
     "messages": [{"role": "user", "content": "Hello!"}]
-}'
-
-# Switch to a different chat model (may have brief delay on first use)
-curl -X POST http://localhost:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "bafkreid5z4lddvv4qbgdlz2nqo6eumxwetwmkpesrumisx72k3ahq73zpy",
-    "messages": [{"role": "user", "content": "Complex reasoning task"}]
 }'
 ```
 
@@ -470,37 +474,19 @@ curl -X POST http://localhost:8080/v1/embeddings \
     "model": "bafkreiacd5mwy4a5wkdmvxsk42nsupes5uf4q3dm52k36mvbhgdrez422y",
     "input": ["Hello, world!", "How are you?"]
 }'
-
-# Switch to a larger embedding model
-curl -X POST http://localhost:8080/v1/embeddings \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "bafkreia7nzedkxlr6tebfxvo552zq7cba6sncloxwyivfl3tpj7hl5dz5u",
-    "input": ["Complex document text for better embeddings"]
-}'
 ```
 
 ##### **Image Generation Models (task: "image-generation")**
 
 ```bash
-# Generate images using Flux model
-curl -X POST http://localhost:8080/v1/images/generations \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "bafkreiaha3sjfmv4affmi5kbu6bnayenf2avwafp3cthhar3latmfi632u",
-    "prompt": "A serene landscape with mountains and a lake at sunset",
-    "n": 1,
-    "steps": 25,
-    "size": "1024x1024"
-}'
-
-# Switch to different image generation model
+# Generate images using available model
 curl -X POST http://localhost:8080/v1/images/generations \
   -H "Content-Type: application/json" \
   -d '{
     "model": "bafkreibks5pmc777snbo7dwk26sympe2o24tpqfedjq6gmgghwwu7iio34",
-    "prompt": "A futuristic city skyline at night",
+    "prompt": "A serene landscape with mountains and a lake at sunset",
     "n": 1,
+    "steps": 25,
     "size": "1024x1024"
 }'
 ```
@@ -512,7 +498,7 @@ curl -X POST http://localhost:8080/v1/images/generations \
 curl -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "bafkreiaevddz5ssjnbkmdrl6dzw5sugwirzi7wput7z2ttcwnvj2wiiw5q",
+    "model": "medgemma-27b-it-Q4_K_M.gguf",
     "messages": [{
       "role": "user",
       "content": [
@@ -527,17 +513,18 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 
 **Important**: The server uses the following logic for model selection:
 
-1. **Explicit Model Request**: When you specify `"model": "<model_hash>"` → switches to that model
+1. **Explicit Model Request**: When you specify `"model": "<model_id>"` → switches to that model
 2. **No Model Field**: When you omit the `"model"` field → uses the main model  
-3. **Invalid Model**: When you specify a non-existent model → falls back to main model
+3. **Invalid Model ID**: When you specify a non-existent or invalid model ID → falls back to main model
+4. **Task Mismatch**: When you request a model that doesn't support the endpoint task → uses first compatible model
 
 ```bash
-# ✅ Correct: Switch to specific model using hash
+# ✅ Correct: Switch to specific model using model ID
 curl -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "bafkreib6pws5dx5ur6exbhulmf35twfcizdkxvup4cklzprlvaervfz5zy",
-    "messages": [{"role": "user", "content": "Use specific model hash"}]
+    "model": "bafkreie4uj3gluik5ob2ib3cm2pt6ww7n4vqpmjnq6pas4gkkor42yuysa",
+    "messages": [{"role": "user", "content": "Use specific model ID"}]
 }'
 
 # ⚠️ Fallback: No model specified → uses main model
@@ -547,18 +534,17 @@ curl -X POST http://localhost:8080/v1/chat/completions \
     "messages": [{"role": "user", "content": "Uses main model"}]
 }'
 
-# ⚠️ Fallback: Invalid model hash → uses main model
+# ⚠️ Fallback: Invalid model ID → uses main model
 curl -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "invalid-hash-12345",
+    "model": "invalid-model-id-12345",
     "messages": [{"role": "user", "content": "Falls back to main model"}]
 }'
 ```
 
 **Key Points:**
-- **Model Hash Required**: To switch models, always use valid hash identifiers (the `id` field) from `/v1/models`
-- **Folder Names Don't Work**: Using folder names like `"qwen3-8b"` in the model field will cause fallback to main model
+- **Model ID Required**: To switch models, always use valid model identifiers (the `id` field) from `/v1/models`
 - **Graceful Fallback**: Invalid or missing model specifications default to the main model
 - **No Errors**: The server won't throw errors for invalid models, it silently uses the main model
 - **Performance**: Main model requests are always fastest (no switching delay)
@@ -566,44 +552,24 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 #### **Model Identifier Options**
 
 You can use the following as the `model` field:
-- **Hash (Required for Switching)**: `"bafkreib6pws5dx5ur6exbhulmf35twfcizdkxvup4cklzprlvaervfz5zy"` (from `id` field in `/v1/models`)
+- **Model ID (Required for Switching)**: `"bafkreie4uj3gluik5ob2ib3cm2pt6ww7n4vqpmjnq6pas4gkkor42yuysa"` (from `id` field in `/v1/models`)
 - **Generic Fallback**: `"local-model"` (uses currently active model - not recommended)
 
-**Important**: Only model hashes work for switching between models. Folder names or other identifiers will cause the server to fall back to the main model.
+**Important**: Only model IDs work for switching between models. Other identifiers will cause the server to fall back to the main model.
 
-#### **Task-Based Model Selection**
+**Troubleshooting Model Switching:**
 
-When running multi-model setups, you can serve different models for different tasks:
+**Common Issues:**
+- **Unexpected Model Used**: Check if you're using the correct model ID from `/v1/models`
+- **Slow Response Times**: Verify the requested model is compatible with the endpoint task
+- **Fallback Behavior**: Monitor logs to see when fallbacks occur and why
+- **Task Mismatch**: Ensure chat models are used with `/v1/chat/completions`, embedding models with `/v1/embeddings`, etc.
 
-```bash
-# Example: Serve chat, embedding, and image generation models together
-eai model run qwen3-8b,qwen3-embedding-4b,flux-dev
-
-# Then use different endpoints with appropriate model hashes:
-# - Chat: /v1/chat/completions with hash of qwen3-8b
-# - Embeddings: /v1/embeddings with hash of qwen3-embedding-4b  
-# - Images: /v1/images/generations with hash of flux-dev
-```
-
-#### **Recommended Workflow for Model Requests**
-
-```bash
-# 1. Start your multi-model server
-eai model run qwen3-8b,qwen3-embedding-4b,flux-dev
-
-# 2. Discover available models and their hash IDs
-curl http://localhost:8080/v1/models
-
-# 3. Make requests with explicit model hash specification (use "id" field from step 2)
-curl -X POST http://localhost:8080/v1/embeddings \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "bafkreia7nzedkxlr6tebfxvo552zq7cba6sncloxwyivfl3tpj7hl5dz5u",
-    "input": ["Text to embed"]
-}'
-```
-
-**Warning**: If you omit the `"model"` field or use an invalid model hash, the server will silently fall back to the main model (first model in the startup list), which may not be appropriate for your task type.
+**Debugging Steps:**
+1. Check available models: `curl http://localhost:8080/v1/models`
+2. Verify model ID format (should be valid identifier from the `id` field)
+3. Confirm task compatibility between model and endpoint
+4. Monitor server logs for switching and fallback messages
 
 ### **Performance Considerations**
 
@@ -635,6 +601,9 @@ curl -X POST http://localhost:8080/v1/embeddings \
   - **Vision Models**: Account for image processing overhead
 - **Mixed-Task Servers**: When serving multiple task types, start with the most resource-intensive model as main
 - **Model Switching**: Keep similar task types together for faster switching
+- **Model ID Validation**: Always use model IDs from `/v1/models` instead of folder names
+- **Fallback Monitoring**: Track when fallbacks occur to optimize model selection
+- **Stream Management**: Be aware that active streams prevent model switching
 
 ### **Model Management**
 
@@ -651,26 +620,61 @@ eai model status
 # List all available models with detailed information
 curl http://localhost:8080/v1/models
 
-# Returns model IDs, names, RAM requirements, task types, and status
+# Returns model IDs, task types, and status information
 ```
 
 **Key Information Returned:**
-- **`id`**: Model hash (unique identifier)
-- **`root`**: Folder name (user-friendly name)
-- **`ram`**: Memory requirement in GB
-- **`folder_name`**: Original folder name
+- **`id`**: Model identifier (unique identifier for API requests)
+- **`object`**: Always "model" for model objects
+- **`created`**: Unix timestamp when the model was created
+- **`owned_by`**: Model owner (typically "user")
+- **`active`**: Whether the model is currently active
 - **`task`**: Model type and compatible endpoints:
   - **`"chat"`**: Use with `/v1/chat/completions` (includes vision models)
   - **`"embed"`**: Use with `/v1/embeddings`
   - **`"image-generation"`**: Use with `/v1/images/generations`
+- **`is_lora`**: Whether the model uses LoRA (Low-Rank Adaptation)
+- **`multimodal`**: Whether the model supports multimodal inputs (images + text)
+- **`context_length`**: Maximum context length supported by the model
+- **`lora_config`**: LoRA configuration (null if not a LoRA model)
 
-Use the `id` (hash) value as the `model` field in your API requests to specify which model to use. Note that using `root` (folder name) values will cause fallback to the main model. Match the model's `task` type with the appropriate API endpoint for optimal results.
+Use the `id` value as the `model` field in your API requests to specify which model to use. Match the model's `task` type with the appropriate API endpoint for optimal results.
 
 ## Advanced Usage
 
 ### Prerequisites for Model Preservation
 1. A model in `gguf` format (compatible with `llama.cpp`)
 2. A [Lighthouse](https://lighthouse.storage/) account and API key
+
+### 🆕 Running Models Directly from Hugging Face
+
+**New Feature**: You can now run any GGUF model directly from Hugging Face without downloading or preserving it first:
+
+```bash
+# Run any GGUF model from Hugging Face
+eai model run --hf-repo <repository> --hf-file <filename> --task <task_type>
+
+# Example: Run Dolphin-3.0 model
+eai model run --hf-repo dphn/Dolphin3.0-Llama3.1-8B-GGUF --hf-file Dolphin3.0-Llama3.1-8B-Q4_0.gguf --task chat
+```
+
+This is the **easiest way** to try new models - no setup required!
+
+#### **Setting Up Hugging Face Token**
+
+For models that require authentication or to access gated models, you can set up your Hugging Face token:
+
+```bash
+export HF_TOKEN=your_hugging_face_token_here
+```
+
+**To get your Hugging Face token:**
+1. Visit [Hugging Face Settings](https://huggingface.co/settings/tokens)
+2. Click "New token"
+3. Give it a name and select appropriate permissions
+4. Copy the token and export it in your terminal
+
+**Note**: The token is optional for public models but required for gated/private models.
 
 ### Uploading Custom Models
 
@@ -777,7 +781,7 @@ eai model preserve \
   --folder-path qwen3-embedding-0.6b-q8 \
   --task embed \
   --ram 1.16 \
-  --hf-repo Qwen/Qwen3-Embedding-0.6B-GGUF \
+  --`hf`-repo Qwen/Qwen3-Embedding-0.6B-GGUF \
   --hf-file Qwen3-Embedding-0.6B-Q8_0.gguf
 ```
 

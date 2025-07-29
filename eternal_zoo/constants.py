@@ -1,6 +1,6 @@
 from pathlib import Path
 
-DEFAULT_MODEL_DIR = Path.cwd() / "llms-storage"
+DEFAULT_MODEL_DIR = Path.home() / ".eternal-zoo" / "models"
 POSTFIX_MODEL_PATH = ".gguf"
 GATEWAY_URLS = [
     # Lighthouse's own gateway (recommended for files stored on Lighthouse)

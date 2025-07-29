@@ -10,23 +10,21 @@ import asyncio
 import time
 import json
 import uuid
-import psutil
 # Import configuration settings
-from crypto_models.config import config
 from json_repair import repair_json
 from typing import Dict, Any, Optional
-from crypto_models.core import CryptoModelsManager, CryptoAgentsServiceError
+from eternal_zoo.config import DEFAULT_CONFIG
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from eternal_zoo.manager import EternalZooManager, EternalZooServiceError
 
 # Import schemas from schema.py
-from crypto_models.schema import (
+from eternal_zoo.schema import (
     Choice,
     Message,
     ModelCard,
     ModelList,
-    ModelPermission,
     LoraConfigRequest,
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -57,86 +55,49 @@ app.add_middleware(
     allow_headers=["*"],  # Allow all headers
 )
 
-# Initialize CryptoModels Manager for service management
-crypto_models_manager = CryptoModelsManager()
+# Initialize EternalZoo Manager for service management
+eternal_zoo_manager = EternalZooManager()
 
 
 # Performance constants from config
-IDLE_TIMEOUT = config.performance.IDLE_TIMEOUT
-UNLOAD_CHECK_INTERVAL = config.performance.UNLOAD_CHECK_INTERVAL
-UNLOAD_LOG_INTERVAL = config.performance.UNLOAD_LOG_INTERVAL
-UNLOAD_MAX_CONSECUTIVE_ERRORS = config.performance.UNLOAD_MAX_CONSECUTIVE_ERRORS
-UNLOAD_ERROR_SLEEP_MULTIPLIER = config.performance.UNLOAD_ERROR_SLEEP_MULTIPLIER
-STREAM_CLEANUP_INTERVAL = config.performance.STREAM_CLEANUP_INTERVAL
-STREAM_CLEANUP_ERROR_SLEEP = config.performance.STREAM_CLEANUP_ERROR_SLEEP
-STREAM_STALE_TIMEOUT = config.performance.STREAM_STALE_TIMEOUT
-MODEL_SWITCH_VERIFICATION_DELAY = config.performance.MODEL_SWITCH_VERIFICATION_DELAY
-MODEL_SWITCH_MAX_RETRIES = config.performance.MODEL_SWITCH_MAX_RETRIES
-MODEL_SWITCH_STREAM_TIMEOUT = config.performance.MODEL_SWITCH_STREAM_TIMEOUT
-QUEUE_BACKPRESSURE_TIMEOUT = config.performance.QUEUE_BACKPRESSURE_TIMEOUT
-PROCESS_CHECK_INTERVAL = config.performance.PROCESS_CHECK_INTERVAL
-SHUTDOWN_TASK_TIMEOUT = config.performance.SHUTDOWN_TASK_TIMEOUT
-SHUTDOWN_SERVER_TIMEOUT = config.performance.SHUTDOWN_SERVER_TIMEOUT
-SHUTDOWN_CLIENT_TIMEOUT = config.performance.SHUTDOWN_CLIENT_TIMEOUT
-SERVICE_START_TIMEOUT = config.performance.SERVICE_START_TIMEOUT
-POOL_CONNECTIONS = config.performance.POOL_CONNECTIONS
-POOL_KEEPALIVE = config.performance.POOL_KEEPALIVE
-HTTP_TIMEOUT = config.performance.HTTP_TIMEOUT
-STREAM_TIMEOUT = config.performance.STREAM_TIMEOUT
-MAX_RETRIES = config.performance.MAX_RETRIES
-RETRY_DELAY = config.performance.RETRY_DELAY
-MAX_QUEUE_SIZE = config.performance.MAX_QUEUE_SIZE
-HEALTH_CHECK_INTERVAL = config.performance.HEALTH_CHECK_INTERVAL
-STREAM_CHUNK_SIZE = config.performance.STREAM_CHUNK_SIZE
+IDLE_TIMEOUT = DEFAULT_CONFIG.performance.IDLE_TIMEOUT
+UNLOAD_CHECK_INTERVAL = DEFAULT_CONFIG.performance.UNLOAD_CHECK_INTERVAL
+UNLOAD_LOG_INTERVAL = DEFAULT_CONFIG.performance.UNLOAD_LOG_INTERVAL
+UNLOAD_MAX_CONSECUTIVE_ERRORS = DEFAULT_CONFIG.performance.UNLOAD_MAX_CONSECUTIVE_ERRORS
+UNLOAD_ERROR_SLEEP_MULTIPLIER = DEFAULT_CONFIG.performance.UNLOAD_ERROR_SLEEP_MULTIPLIER
+STREAM_CLEANUP_INTERVAL = DEFAULT_CONFIG.performance.STREAM_CLEANUP_INTERVAL
+STREAM_CLEANUP_ERROR_SLEEP = DEFAULT_CONFIG.performance.STREAM_CLEANUP_ERROR_SLEEP
+STREAM_STALE_TIMEOUT = DEFAULT_CONFIG.performance.STREAM_STALE_TIMEOUT
+MODEL_SWITCH_VERIFICATION_DELAY = DEFAULT_CONFIG.performance.MODEL_SWITCH_VERIFICATION_DELAY
+MODEL_SWITCH_MAX_RETRIES = DEFAULT_CONFIG.performance.MODEL_SWITCH_MAX_RETRIES
+MODEL_SWITCH_STREAM_TIMEOUT = DEFAULT_CONFIG.performance.MODEL_SWITCH_STREAM_TIMEOUT
+QUEUE_BACKPRESSURE_TIMEOUT = DEFAULT_CONFIG.performance.QUEUE_BACKPRESSURE_TIMEOUT
+PROCESS_CHECK_INTERVAL = DEFAULT_CONFIG.performance.PROCESS_CHECK_INTERVAL
+SHUTDOWN_TASK_TIMEOUT = DEFAULT_CONFIG.performance.SHUTDOWN_TASK_TIMEOUT
+SHUTDOWN_SERVER_TIMEOUT = DEFAULT_CONFIG.performance.SHUTDOWN_SERVER_TIMEOUT
+SHUTDOWN_CLIENT_TIMEOUT = DEFAULT_CONFIG.performance.SHUTDOWN_CLIENT_TIMEOUT
+SERVICE_START_TIMEOUT = DEFAULT_CONFIG.performance.SERVICE_START_TIMEOUT
+POOL_CONNECTIONS = DEFAULT_CONFIG.performance.POOL_CONNECTIONS
+POOL_KEEPALIVE = DEFAULT_CONFIG.performance.POOL_KEEPALIVE
+HTTP_TIMEOUT = DEFAULT_CONFIG.performance.HTTP_TIMEOUT
+STREAM_TIMEOUT = DEFAULT_CONFIG.performance.STREAM_TIMEOUT
+MAX_RETRIES = DEFAULT_CONFIG.performance.MAX_RETRIES
+RETRY_DELAY = DEFAULT_CONFIG.performance.RETRY_DELAY
+MAX_QUEUE_SIZE = DEFAULT_CONFIG.performance.MAX_QUEUE_SIZE
+HEALTH_CHECK_INTERVAL = DEFAULT_CONFIG.performance.HEALTH_CHECK_INTERVAL
+STREAM_CHUNK_SIZE = DEFAULT_CONFIG.performance.STREAM_CHUNK_SIZE
 
 # Utility functions
 def get_service_info() -> Dict[str, Any]:
-    """Get service info from CryptoModelsManager with error handling."""
+    """Get service info from EternalZooManager with error handling."""
     try:
-        return crypto_models_manager.get_service_info()
-    except CryptoAgentsServiceError as e:
+        return eternal_zoo_manager.get_service_info()
+    except EternalZooServiceError as e:
         raise HTTPException(status_code=503, detail=str(e))
-
-def get_service_port() -> int:
-    """Get service port with caching and error handling."""
-    service_info = get_service_info()
-    if "port" not in service_info:
-        raise HTTPException(status_code=503, detail="Service port not configured")
-    return service_info["port"]
 
 def convert_request_to_dict(request) -> Dict[str, Any]:
     """Convert request object to dictionary, supporting both Pydantic v1 and v2."""
     return request.model_dump() if hasattr(request, "model_dump") else request.dict()
-
-def validate_model_field(request_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Validate that the model field is present and matches one of the available model hashes."""
-
-    requested_model = request_data["model"]
-    
-    try:
-        service_info = get_service_info()
-        models = list(service_info.get("models", {}).keys())
-        
-        # Check if the requested model hash is in the models dictionary
-        if requested_model not in models:
-            logger.warning(f"Requested model '{requested_model}' not found in available models: {models}. Using model {models[0]} instead.")
-            return service_info, models[0] 
-        
-        logger.debug(f"Model validation passed for '{requested_model}'")
-        
-        # Return the service info to avoid redundant calls
-        return service_info, requested_model
-            
-    except HTTPException as e:
-        # If we can't get service info (503), it means no model is running
-        if e.status_code == 503:
-            logger.warning(f"Service info not available, requested model '{requested_model}' cannot be validated")
-            raise HTTPException(
-                status_code=400,
-                detail="Service is not running"
-            )
-        # Re-raise other HTTPExceptions
-        raise
 
 def generate_request_id() -> str:
     """Generate a short request ID for tracking."""
@@ -182,16 +143,29 @@ class ServiceHandler:
             )
     
     @staticmethod
-    async def generate_text_response(request: ChatCompletionRequest, service_info: Optional[Dict[str, Any]] = None):
+    async def generate_text_response(request: ChatCompletionRequest):
         """Generate a response for chat completion requests, supporting both streaming and non-streaming."""
-        # Use provided service_info or get it if not provided
-        if service_info is None:
-            service_info = get_service_info()
+        chat_models = eternal_zoo_manager.get_models_by_task("chat")
+        if len(chat_models) == 0:
+            raise HTTPException(status_code=404, detail=f"No chat model found")
         
-        port = get_service_port()
+        model = None
+        for chat_model in chat_models:
+            if request.model == chat_model["model_id"]:
+                model = chat_model
+                break
         
+        if model is None:
+            model = chat_models[0]
+        
+        port = model.get("port", None)
+        if port is None:
+            raise HTTPException(status_code=500, detail=f"Model {model.get('model_id', 'unknown')} has no port")
+        
+        host = model.get("host", "0.0.0.0")
+
         if request.is_vision_request():
-            if not service_info.get("multimodal", False):
+            if not model.get("multimodal", False):
                 content = "Unfortunately, I'm not equipped to interpret images at this time. Please provide a text description if possible."
                 return ServiceHandler._create_vision_error_response(request, content)
                 
@@ -213,7 +187,7 @@ class ServiceHandler:
 
         # Make a non-streaming API call
         logger.debug(f"Making non-streaming request for model {request.model}")
-        response_data = await ServiceHandler._make_api_call(port, "/v1/chat/completions", request_dict)
+        response_data = await ServiceHandler._make_api_call(host, port, "/v1/chat/completions", request_dict)
         return ChatCompletionResponse(
             id=response_data.get("id", generate_chat_completion_id()),
             object=response_data.get("object", "chat.completion"),
@@ -223,15 +197,30 @@ class ServiceHandler:
         )
     
     @staticmethod
-    async def generate_embeddings_response(request: EmbeddingRequest, service_info: Optional[Dict[str, Any]] = None):
+    async def generate_embeddings_response(request: EmbeddingRequest):
         """Generate a response for embedding requests."""
-        # Use provided service_info or get it if not provided
-        if service_info is None:
-            service_info = get_service_info()
         
-        port = get_service_port()
+        embedding_models = eternal_zoo_manager.get_models_by_task("embed")
+        if len(embedding_models) == 0:
+            raise HTTPException(status_code=404, detail=f"No embedding model found")
+        
+        model = None
+        for embedding_model in embedding_models:
+            if request.model == embedding_model["model_id"]:
+                model = embedding_model
+                break
+        
+        if model is None:
+            model = embedding_models[0]
+        
+        port = model.get("port", None)
+        if port is None:
+            raise HTTPException(status_code=500, detail=f"Model {model.get('model_id', 'unknown')} has no port")
+        
+        host = model.get("host", "0.0.0.0")
+        
         request_dict = convert_request_to_dict(request)
-        response_data = await ServiceHandler._make_api_call(port, "/v1/embeddings", request_dict)
+        response_data = await ServiceHandler._make_api_call(host, port, "/v1/embeddings", request_dict)
         return EmbeddingResponse(
             object=response_data.get("object", "list"),
             data=response_data.get("data", []),
@@ -239,26 +228,39 @@ class ServiceHandler:
         )
     
     @staticmethod
-    async def generate_image_response(request: ImageGenerationRequest, service_info: Optional[Dict[str, Any]] = None):
+    async def generate_image_response(request: ImageGenerationRequest):
         """Generate a response for image generation requests."""
-        # Use provided service_info or get it if not provided
-        if service_info is None:
-            service_info = get_service_info()
+        image_generation_models = eternal_zoo_manager.get_models_by_task("image-generation")
+        if len(image_generation_models) == 0:
+            raise HTTPException(status_code=404, detail=f"No image generation model found")
         
-        port = get_service_port()
+        model = None
+        for image_generation_model in image_generation_models:
+            if request.model == image_generation_model["model_id"]:
+                model = image_generation_model
+                break
+
+        if model is None:
+            model = image_generation_models[0]
+        
+        port = model.get("port", None)
+        if port is None:
+            raise HTTPException(status_code=500, detail=f"Model {model.get('model_id', 'unknown')} has no port")
+        
+        host = model.get("host", "0.0.0.0")
         request_dict = convert_request_to_dict(request)
-        response_data = await ServiceHandler._make_api_call(port, "/v1/images/generations", request_dict)
+        response_data = await ServiceHandler._make_api_call(host, port, "/v1/images/generations", request_dict)
         return ImageGenerationResponse(
             created=response_data.get("created", int(time.time())),
             data=response_data.get("data", [])
         )
     
     @staticmethod
-    async def _make_api_call(port: int, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    async def _make_api_call(host: str, port: int, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """Make a non-streaming API call to the specified endpoint and return the JSON response."""
         try:
             response = await app.state.client.post(
-                f"http://localhost:{port}{endpoint}", 
+                f"http://{host}:{port}{endpoint}", 
                 json=data,
                 timeout=HTTP_TIMEOUT
             )
@@ -559,26 +561,6 @@ class RequestProcessor:
                 logger.info(f"No stale streams found, {len(RequestProcessor.active_streams)} active streams are healthy")
     
     @staticmethod
-    async def _verify_model_switch(model_requested: str, request_id: str, max_retries: int = MODEL_SWITCH_MAX_RETRIES) -> bool:
-        """Verify model switch with retry logic."""
-        for attempt in range(max_retries):
-            try:
-                await asyncio.sleep(MODEL_SWITCH_VERIFICATION_DELAY)
-                
-                updated_service_info = crypto_models_manager.get_service_info()
-                updated_models = updated_service_info.get("models", {})
-                
-                if model_requested in updated_models and updated_models[model_requested].get("active", False):
-                    logger.debug(f"[{request_id}] Model switch verification successful (attempt {attempt + 1})")
-                    return True
-                    
-            except Exception as e:
-                logger.warning(f"[{request_id}] Verification attempt {attempt + 1} failed: {e}")
-        
-        logger.error(f"[{request_id}] Model switch verification failed after {max_retries} attempts")
-        return False
-    
-    @staticmethod
     async def _add_to_queue_with_backpressure(item, timeout: float = QUEUE_BACKPRESSURE_TIMEOUT):
         """Add item to queue with timeout and backpressure handling."""
         try:
@@ -596,12 +578,13 @@ class RequestProcessor:
             )
     
     @staticmethod
-    async def _ensure_model_active_in_queue(model_requested: str, request_id: str) -> bool:
+    async def _ensure_model_active_in_queue(task: str, model_requested: str, request_id: str) -> bool:
         """
         Ensure the requested model is active within the queue processing context.
         This method is called within the processing lock to ensure atomic model switching.
         
         Args:
+            task (str): The task type (chat, embed, image-generation)
             model_requested (str): The model hash requested by the client
             request_id (str): The request ID for logging
             
@@ -610,18 +593,25 @@ class RequestProcessor:
         """
         try:
             # Get current service info
-            service_info = get_service_info()
-            models = service_info.get("models", {})
-            
-            # Check if the requested model exists
-            if model_requested not in models:
-                logger.error(f"[{request_id}] Requested model {model_requested} not found in available models")
+            available_models = eternal_zoo_manager.get_models_by_task(task)
+
+            if len(available_models) == 0:
+                logger.error(f"[{request_id}] No {task} models found")
                 return False
+
+            model = None
+            for available_model in available_models:
+                if available_model.get("model_id", None) == model_requested:
+                    model = available_model
+                    break
             
-            model_info = models[model_requested]
+            if model is None:
+                model = available_models[0]
+                logger.info(f"[{request_id}] No model {model_requested} found, using {model['model_id']} instead")
+                model_requested = model["model_id"]
             
             # Check if model is already active
-            if model_info.get("active", False):
+            if model["active"]:
                 logger.debug(f"[{request_id}] Model {model_requested} is already active")
                 return True
                 
@@ -641,33 +631,15 @@ class RequestProcessor:
             logger.info(f"[{request_id}] Switching to model {model_requested}")
             switch_start_time = time.time()
             
-            # Get current active model for logging
-            active_model = crypto_models_manager.get_active_model()
-            
             # Perform the model switch
-            success = await crypto_models_manager.switch_model(model_requested)
+            success = await eternal_zoo_manager.switch_model(model_requested)
             
             switch_duration = time.time() - switch_start_time
             
             if success:
-                logger.info(f"[{request_id}] Successfully switched from {active_model} to {model_requested} "
+                logger.info(f"[{request_id}] Successfully switched from {model['model_id']} to {model_requested} "
                            f"(switch time: {switch_duration:.2f}s)")
-                
-                # Update app state with new service info and verify the switch
-                try:
-                    # Use the new verification method with retry logic
-                    if await RequestProcessor._verify_model_switch(model_requested, request_id):
-                        # Update app state with new service info after successful verification
-                        updated_service_info = crypto_models_manager.get_service_info()
-                        app.state.service_info = updated_service_info
-                        return True
-                    else:
-                        logger.error(f"[{request_id}] Model switch verification failed - model not active after switch")
-                        return False
-                        
-                except Exception as e:
-                    logger.error(f"[{request_id}] Error verifying model switch: {str(e)}")
-                    return False
+                return True
             else:
                 logger.error(f"[{request_id}] Failed to switch to model {model_requested} "
                            f"(attempted for {switch_duration:.2f}s)")
@@ -678,82 +650,16 @@ class RequestProcessor:
             return False
     
     @staticmethod
-    async def _ensure_server_running(request_id: str) -> bool:
-        """
-        Optimized server state checking and reloading with better error handling.
-        """
-        try:
-            service_info = get_service_info()
-            pid = service_info.get("pid")
-            
-            # Quick validation checks
-            if not pid:
-                logger.info(f"[{request_id}] No PID found, reloading CryptoModels server...")
-                return await crypto_models_manager.reload_ai_server()
-        
-            # Efficient process existence and status check
-            if not psutil.pid_exists(pid):
-                logger.info(f"[{request_id}] PID {pid} not found, reloading CryptoModels server...")
-                return await crypto_models_manager.reload_ai_server()
-            
-            # Check process status in a single call
-            try:
-                process = psutil.Process(pid)
-                status = process.status()
-                
-                # Check for non-running states
-                if status in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD, psutil.STATUS_STOPPED]:
-                    logger.info(f"[{request_id}] Process {pid} status is {status}, reloading CryptoModels server...")
-                    return await crypto_models_manager.reload_ai_server()
-                
-                # Additional check for processes that might be hung
-                try:
-                    # Quick responsiveness check - verify process is actually doing something
-                    cpu_percent = process.cpu_percent(interval=PROCESS_CHECK_INTERVAL)
-                    memory_info = process.memory_info()
-                    
-                    logger.debug(f"[{request_id}] CryptoModels server PID {pid} is healthy "
-                               f"(status: {status}, memory: {memory_info.rss // 1024 // 1024}MB)")
-                    
-                except psutil.AccessDenied:
-                    # Process exists but we can't get detailed info - assume it's running
-                    logger.debug(f"[{request_id}] CryptoModels server PID {pid} running (limited access)")
-                    
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                logger.info(f"[{request_id}] Process {pid} not accessible, reloading CryptoModels server...")
-                return await crypto_models_manager.reload_ai_server()
-            
-            return True
-            
-        except HTTPException:
-            logger.info(f"[{request_id}] Service info not available, attempting reload...")
-            return await crypto_models_manager.reload_ai_server()
-        except Exception as e:
-            logger.error(f"[{request_id}] Unexpected error in _ensure_server_running: {str(e)}")
-            return False
-    
-    @staticmethod
     async def process_request(endpoint: str, request_data: Dict[str, Any]):
         """Process a request by adding it to the queue and waiting for the result."""
         request_id = generate_request_id()
         queue_size = RequestProcessor.queue.qsize()
         
-        # Validate that model field is present and get service info
-        service_info, validated_model = validate_model_field(request_data)
-        request_data["model"] = validated_model
-        
         logger.info(f"[{request_id}] Adding request to queue for endpoint {endpoint} (queue size: {queue_size})")
-        
-        # Update the last request time
-        app.state.last_request_time = time.time()
-        
-        # Check if we need to reload the CryptoModels server
-        await RequestProcessor._ensure_server_running(request_id)
         
         start_wait_time = time.time()
         future = asyncio.Future()
-        # Pass service_info to avoid redundant lookups
-        queue_item = (endpoint, request_data, future, request_id, start_wait_time, service_info)
+        queue_item = (endpoint, request_data, future, request_id, start_wait_time)
         await RequestProcessor._add_to_queue_with_backpressure(queue_item)
         
         logger.info(f"[{request_id}] Waiting for result from endpoint {endpoint}")
@@ -765,49 +671,6 @@ class RequestProcessor:
         return result
     
     @staticmethod
-    async def process_direct(endpoint: str, request_data: Dict[str, Any]):
-        """Process a request directly without queueing for administrative endpoints."""
-        request_id = generate_request_id()
-        logger.info(f"[{request_id}] Processing direct request for endpoint {endpoint}")
-        
-        # Validate that model field is present and get service info
-        service_info, validated_model = validate_model_field(request_data)
-        request_data["model"] = validated_model
-        
-        app.state.last_request_time = time.time()
-        await RequestProcessor._ensure_server_running(request_id)
-        
-        start_time = time.time()
-        if endpoint in RequestProcessor.MODEL_ENDPOINTS:
-            model_cls, handler = RequestProcessor.MODEL_ENDPOINTS[endpoint]
-            request_obj = model_cls(**request_data)
-            
-            # Ensure model is active before processing (for direct requests)
-            if hasattr(request_obj, 'model') and request_obj.model:
-                logger.debug(f"[{request_id}] Ensuring model {request_obj.model} is active for direct request")
-                
-                # Use the same centralized model switching logic as the queue
-                if not await RequestProcessor._ensure_model_active_in_queue(request_obj.model, request_id):
-                    error_msg = f"Model {request_obj.model} is not available or failed to switch"
-                    logger.error(f"[{request_id}] {error_msg}")
-                    raise HTTPException(status_code=400, detail=error_msg)
-                
-                # Refresh service info after potential model switch
-                service_info = get_service_info()
-                logger.debug(f"[{request_id}] Model {request_obj.model} confirmed active for direct request")
-            
-            # Process the request with the updated service info
-            result = await handler(request_obj, service_info)
-            
-            process_time = time.time() - start_time
-            logger.info(f"[{request_id}] Direct request completed for endpoint {endpoint} (time: {process_time:.2f}s)")
-            
-            return result
-        else:
-            logger.error(f"[{request_id}] Endpoint not found: {endpoint}")
-            raise HTTPException(status_code=404, detail="Endpoint not found")
-    
-    @staticmethod
     async def worker():
         """Enhanced worker function with better error recovery."""
         logger.info("Request processor worker started")
@@ -817,7 +680,7 @@ class RequestProcessor:
         
         while True:
             try:
-                endpoint, request_data, future, request_id, start_wait_time, service_info = await RequestProcessor.queue.get()
+                endpoint, request_data, future, request_id, start_wait_time = await RequestProcessor.queue.get()
                 
                 wait_time = time.time() - start_wait_time
                 queue_size = RequestProcessor.queue.qsize()
@@ -829,9 +692,20 @@ class RequestProcessor:
                 # Process the request within the lock to ensure sequential execution
                 async with RequestProcessor.processing_lock:
                     processing_start = time.time()
+                    task = "chat"
                     
                     if endpoint in RequestProcessor.MODEL_ENDPOINTS:
                         model_cls, handler = RequestProcessor.MODEL_ENDPOINTS[endpoint]
+
+                        if endpoint == "/v1/chat/completions" or endpoint == "/chat/completions":
+                            task = "chat"
+                        elif endpoint == "/v1/embeddings" or endpoint == "/embeddings":
+                            task = "embed"
+                        elif endpoint == "/v1/images/generations" or endpoint == "/images/generations":
+                            task = "image-generation"
+                        else:
+                            raise HTTPException(status_code=404, detail="Task not found")
+                        
                         try:
                             request_obj = model_cls(**request_data)
                             
@@ -849,18 +723,17 @@ class RequestProcessor:
                                 if active_stream_count > 0:
                                     logger.info(f"[{request_id}] Found {active_stream_count} active streams before model check")
                                 
-                                if not await RequestProcessor._ensure_model_active_in_queue(request_obj.model, request_id):
+                                if not await RequestProcessor._ensure_model_active_in_queue(task, request_obj.model, request_id):
                                     error_msg = f"Model {request_obj.model} is not available or failed to switch"
                                     logger.error(f"[{request_id}] {error_msg}")
                                     future.set_exception(HTTPException(status_code=400, detail=error_msg))
                                     continue
                                 
                                 # Refresh service info after potential model switch
-                                service_info = get_service_info()
                                 logger.debug(f"[{request_id}] Model {request_obj.model} confirmed active, proceeding with request")
                             
                             # Process the request with the updated service info
-                            result = await handler(request_obj, service_info)
+                            result = await handler(request_obj)
                             future.set_result(result)
                             
                             processing_time = time.time() - processing_start
@@ -910,96 +783,6 @@ class RequestProcessor:
                 except ValueError:
                     # task_done() called more times than items in queue
                     pass
-
-# Background Tasks
-# TEMPORARILY DISABLED: Dynamic unload functionality
-# async def unload_checker():
-#     """
-#     Optimized unload checker that periodically checks if the CryptoModels server has been idle 
-#     for too long and unloads it if needed.
-#     """
-#     logger.info("Unload checker task started")
-#     consecutive_errors = 0
-#     max_consecutive_errors = UNLOAD_MAX_CONSECUTIVE_ERRORS
-#     last_log_time = 0  # Track when we last logged idle status
-#     
-#     while True:
-#         try:
-#             await asyncio.sleep(UNLOAD_CHECK_INTERVAL)
-#             
-#             try:
-#                 service_info = get_service_info()
-#                 
-#                 # Check if we have both PID and last request time
-#                 if "pid" not in service_info:
-#                     logger.debug("No PID found in service info, skipping unload check")
-#                     consecutive_errors = 0  # Reset error counter
-#                     continue
-#                 
-#                 if not hasattr(app.state, "last_request_time"):
-#                     logger.debug("No last request time available, skipping unload check")
-#                     consecutive_errors = 0
-#                     continue
-#                 
-#                 # Calculate idle time
-#                 current_time = time.time()
-#                 idle_time = current_time - app.state.last_request_time
-#                 
-#                 # Log idle status periodically - Fixed timing logic
-#                 if current_time - last_log_time >= UNLOAD_LOG_INTERVAL:
-#                     logger.info(f"CryptoModels server idle time: {idle_time:.1f}s (threshold: {IDLE_TIMEOUT}s)")
-#                     last_log_time = current_time
-#                 
-#                 # Check if server should be unloaded
-#                 if idle_time > IDLE_TIMEOUT:
-#                     pid = service_info.get("pid")
-#                     logger.info(f"CryptoModels server (PID: {pid}) has been idle for {idle_time:.2f}s, initiating unload...")
-#                     
-#                     # Check for active streams before unloading
-#                     if await RequestProcessor.has_active_streams():
-#                         active_stream_count = len(RequestProcessor.active_streams)
-#                         logger.info(f"Skipping unload due to {active_stream_count} active streams")
-#                         # Reset last request time to prevent immediate retries
-#                         app.state.last_request_time = current_time
-#                         continue
-#                     
-#                     # Use the optimized kill method from CryptoModelsManager
-#                     unload_success = await crypto_models_manager.kill_ai_server()
-#                     
-#                     if unload_success:
-#                         logger.info("CryptoModels server unloaded successfully due to inactivity")
-#                         # Don't update last_request_time here to avoid race conditions
-#                         # The next request will naturally update it when it arrives
-#                     else:
-#                         logger.warning("Failed to unload CryptoModels server")
-#                         # Update last request time to prevent immediate retries
-#                         app.state.last_request_time = current_time
-#                 
-#                 # Reset error counter on successful check
-#                 consecutive_errors = 0
-#                 
-#             except HTTPException as e:
-#                 # Service info not available - this is expected when no service is running
-#                 consecutive_errors = 0  # Don't count this as an error
-#                 logger.debug(f"Service info not available (expected when no service running): {e}")
-#                 
-#             except Exception as e:
-#                 consecutive_errors += 1
-#                 logger.error(f"Error in unload checker (attempt {consecutive_errors}/{max_consecutive_errors}): {str(e)}")
-#                 
-#                 # If we have too many consecutive errors, wait longer before next attempt
-#                 if consecutive_errors >= max_consecutive_errors:
-#                     logger.error(f"Too many consecutive errors in unload checker, extending sleep interval")
-#                     await asyncio.sleep(UNLOAD_CHECK_INTERVAL * UNLOAD_ERROR_SLEEP_MULTIPLIER)
-#                     consecutive_errors = 0  # Reset counter after extended wait
-#             
-#         except asyncio.CancelledError:
-#             logger.info("Unload checker task cancelled")
-#             break
-#         except Exception as e:
-#             logger.error(f"Critical error in unload checker task: {str(e)}", exc_info=True)
-#             # Wait a bit longer before retrying on critical errors
-#             await asyncio.sleep(UNLOAD_CHECK_INTERVAL * UNLOAD_ERROR_SLEEP_MULTIPLIER)
 
 async def stream_cleanup_task():
     """Periodic cleanup of stale streams."""
@@ -1094,32 +877,32 @@ async def shutdown_event():
         except Exception as e:
             logger.error(f"Error during background task cancellation: {str(e)}")
     
-    # Phase 2: Clean up CryptoModels server
+    # Phase 2: Clean up EternalZoo server
     try:
         service_info = get_service_info()
         if "pid" in service_info:
             pid = service_info.get("pid")
-            logger.info(f"Terminating CryptoModels server (PID: {pid}) during shutdown...")
+            logger.info(f"Terminating EternalZoo server (PID: {pid}) during shutdown...")
             
             # Use the optimized kill method with timeout
             kill_success = await asyncio.wait_for(
-                crypto_models_manager.kill_ai_server(),
+                eternal_zoo_manager.kill_ai_server(),
                 timeout=SHUTDOWN_SERVER_TIMEOUT
             )
             
             if kill_success:
-                logger.info("CryptoModels server terminated successfully during shutdown")
+                logger.info("EternalZoo server terminated successfully during shutdown")
             else:
-                logger.warning("CryptoModels server termination failed during shutdown")
+                logger.warning("EternalZoo server termination failed during shutdown")
         else:
-            logger.debug("No CryptoModels server PID found, skipping termination")
+            logger.debug("No EternalZoo server PID found, skipping termination")
             
     except HTTPException:
         logger.debug("Service info not available during shutdown (expected)")
     except asyncio.TimeoutError:
-        logger.error("CryptoModels server termination timed out during shutdown")
+        logger.error("EternalZoo server termination timed out during shutdown")
     except Exception as e:
-        logger.error(f"Error terminating CryptoModels server during shutdown: {str(e)}")
+        logger.error(f"Error terminating EternalZoo server during shutdown: {str(e)}")
     
     # Phase 3: Close HTTP client connections
     if hasattr(app.state, "client"):
@@ -1166,20 +949,12 @@ async def shutdown_event():
 async def health():
     """Health check endpoint that bypasses the request queue for immediate response."""
     return {"status": "ok"}
-
-@app.post("/update")
-async def update(request: Dict[str, Any]):
-    """Update the service information in the CryptoModelsManager."""
-    if crypto_models_manager.update_service_info(request):
-        return {"status": "ok", "message": "Service info updated successfully"}
-    else:
-        return {"status": "error", "message": "Failed to update service info"}
     
 @app.post("/update/lora")
 async def update_lora(request: LoraConfigRequest):
     """Update the LoRA for a given model hash."""
     request_dict = convert_request_to_dict(request)
-    if crypto_models_manager.update_lora(request_dict):
+    if eternal_zoo_manager.update_lora(request_dict):
         return {"status": "ok", "message": "LoRA updated successfully"}
     else:
         return {"status": "error", "message": "Failed to update LoRA"}
@@ -1212,120 +987,34 @@ async def list_models():
     Provides a list of available models, compatible with OpenAI's /v1/models endpoint.
     Returns all models in multi-model service including main and on-demand models.
     """
-    try:
-        service_info = get_service_info()
-    except HTTPException as e:
-        if e.status_code == 503:
-            logger.info("/v1/models: Service information not available. No model loaded or /update not called.")
-            return ModelList(data=[])
-        logger.error(f"/v1/models: Unexpected HTTPException while fetching service_info: {e.detail}")
-        raise
+    service_info = get_service_info()
 
-    model_cards = []
-    models = service_info.get("models", {})
+    ai_services = service_info.get("ai_services", [])
+    models = []
 
-    if models:
-        logger.info(f"/v1/models: Multi-model service detected with {len(models)} models")
-        for model_hash, model_info in models.items():
-            metadata = model_info.get("metadata", {})
-            folder_name = metadata.get("folder_name", "")
-            active = model_info.get("active", False)
-            is_on_demand = model_info.get("on_demand", False)
-            task = metadata.get("task", "chat")
-            lora_config = model_info.get("lora_config", None)
-            context_length = model_info.get("context_length", None)
-            base_model_path = model_info.get("base_model_path", None)
-            local_model_path = model_info.get("local_model_path", None)
-            local_projector_path = model_info.get("local_projector_path", None)
-            parent = model_info.get("parent", None)
-            permission = model_info.get("permission", None)
-            created = metadata.get("created", int(time.time()))
-            owned_by = metadata.get("owned_by", "user")
-            multimodal = metadata.get("multimodal", False)
+    for ai_service in ai_services:
+        model_id = ai_service.get("model_id", "default-chat-model")
+        task = ai_service.get("task", "chat")
+        is_lora = ai_service.get("is_lora", False)
+        multimodal = ai_service.get("multimodal", False)
+        lora_config = ai_service.get("lora_config", None)
+        context_length = ai_service.get("context_length", None)
+        created = ai_service.get("created", int(time.time()))
+        owned_by = ai_service.get("owned_by", "user")
+        active = ai_service.get("active", False)    
 
-            model_id = folder_name if folder_name else model_hash
-            raw_ram_value = metadata.get("ram")
-            parsed_ram_value = None
-
-            if isinstance(raw_ram_value, (int, float)):
-                parsed_ram_value = float(raw_ram_value)
-            elif isinstance(raw_ram_value, str):
-                try:
-                    parsed_ram_value = float(raw_ram_value.lower().replace("gb", "").strip())
-                except ValueError:
-                    logger.warning(f"/v1/models: Could not parse RAM value '{raw_ram_value}' to float for model {model_id}")
-
-            model_card = ModelCard(
-                id=model_hash,
-                object="model",
-                created=created,
-                owned_by=owned_by,
-                active=active,
-                root=model_id,
-                parent=parent,
-                permission=permission if permission is not None else [ModelPermission()],
-                ram=parsed_ram_value,
-                folder_name=folder_name,
-                lora_config=lora_config,
-                on_demand=is_on_demand,
-                task=task,
-                multimodal=multimodal,
-                context_length=context_length,
-                base_model_path=base_model_path,
-                local_model_path=local_model_path,
-                local_projector_path=local_projector_path
-            )
-            model_cards.append(model_card)
-            status = "🟢 Active" if active else ("🔴 On-demand" if is_on_demand else "⚪ Unknown")
-            logger.debug(f"/v1/models: Added model {model_id} ({model_hash[:16]}...) - {status}")
-    else:
-        model_hash = service_info.get("hash")
-        folder_name_from_info = service_info.get("folder_name")
-        task = service_info.get("task", "chat")
-        lora_config = service_info.get("lora_config", None)
-        context_length = service_info.get("context_length", None)
-        base_model_path = service_info.get("base_model_path", None)
-        local_model_path = service_info.get("local_model_path", None)
-        local_projector_path = service_info.get("local_projector_path", None)
-        parent = service_info.get("parent", None)
-        permission = service_info.get("permission", None)
-        created = service_info.get("created", int(time.time()))
-        owned_by = service_info.get("owned_by", "user")
-        multimodal = service_info.get("multimodal", False)
-        if not model_hash:
-            logger.warning("/v1/models: No model hash found in service_info, though service_info itself was present. Returning empty list.")
-            return ModelList(data=[])
-        model_id = folder_name_from_info if folder_name_from_info else model_hash
-        raw_ram_value = service_info.get("ram")
-        parsed_ram_value = None
-        if isinstance(raw_ram_value, (int, float)):
-            parsed_ram_value = float(raw_ram_value)
-        elif isinstance(raw_ram_value, str):
-            try:
-                parsed_ram_value = float(raw_ram_value.lower().replace("gb", "").strip())
-            except ValueError:
-                logger.warning(f"/v1/models: Could not parse RAM value '{raw_ram_value}' to float.")
         model_card = ModelCard(
-            id=model_hash,
+            id=model_id,
             object="model",
             created=created,
             owned_by=owned_by,
-            root=model_id,
-            parent=parent,
-            permission=permission if permission is not None else [ModelPermission()],
-            ram=parsed_ram_value,
-            folder_name=folder_name_from_info,
-            lora_config=lora_config,
-            on_demand=None,
+            active=active,
             task=task,
+            is_lora=bool(is_lora),
+            multimodal=bool(multimodal),
             context_length=context_length,
-            base_model_path=base_model_path,
-            local_model_path=local_model_path,
-            local_projector_path=local_projector_path,
-            active = True,
-            multimodal=multimodal
+            lora_config=lora_config
         )
-        model_cards.append(model_card)
-        logger.info(f"/v1/models: Single-model service - returning model {model_id}")
-    logger.info(f"/v1/models: Returning {len(model_cards)} models")
-    return ModelList(data=model_cards)
+        models.append(model_card)
+
+    return ModelList(data=models)

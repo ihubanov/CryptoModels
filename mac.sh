@@ -275,7 +275,7 @@ show_package_status() {
 # 1. Edit the variables below to specify exact tags/versions
 # 2. Or set environment variables before running the script:
 #    export MLX_FLUX_TAG="v1.0.0"
-#    export CRYPTOMODELS_TAG="v0.1.0"
+#    export ETERNAL_ZOO_TAG="v0.1.0"
 #    ./mac.sh
 # 3. Or modify the script to call list_available_tags() to see available versions
 #
@@ -287,11 +287,11 @@ show_package_status() {
 
 # Use environment variable if set, otherwise use default (empty means latest)
 : "${MLX_FLUX_TAG:=}"         # Leave empty for latest, or set specific tag
-: "${CRYPTOMODELS_TAG:=}"     # Leave empty for latest, or set specific tag
+: "${ETERNAL_ZOO_TAG:=}"     # Leave empty for latest, or set specific tag
 
 # Uncomment the lines below to see available tags before installation
 # list_available_tags "https://github.com/0x9334/mlx-flux.git" "mlx-flux"
-# list_available_tags "https://github.com/eternalai-org/EternalZoo.git" "cryptomodels"
+# list_available_tags "https://github.com/eternalai-org/eternal-zoo.git" "eternal-zoo"
 
 # Display current configuration
 if [ -n "$MLX_FLUX_TAG" ]; then
@@ -300,16 +300,16 @@ else
     log_message "Will install mlx-flux from latest version"
 fi
 
-if [ -n "$CRYPTOMODELS_TAG" ]; then
-    log_message "Will install cryptomodels from tag: $CRYPTOMODELS_TAG"
+if [ -n "$ETERNAL_ZOO_TAG" ]; then
+    log_message "Will install eternal-zoo from tag: $ETERNAL_ZOO_TAG"
 else
-    log_message "Will install cryptomodels from latest version"
+    log_message "Will install eternal-zoo from latest version"
 fi
 
 # Show current installation status
 log_message "Current installation status:"
 show_package_status "mlx-flux" "$MLX_FLUX_TAG"
-show_package_status "cryptomodels" "$CRYPTOMODELS_TAG"
+show_package_status "eternal-zoo" "$ETERNAL_ZOO_TAG"
 
 # Error handling function
 handle_error() {
@@ -434,11 +434,13 @@ log_message "llama.cpp setup complete."
 
 
 # Step 6: Create and activate virtual environment
-log_message "Creating virtual environment 'cryptomodels'..."
-"$PYTHON_CMD" -m venv cryptomodels || handle_error $? "Failed to create virtual environment"
+
+VENV_PATH="$HOME/.eternal-zoo/venv"
+log_message "Creating virtual environment 'eternal-zoo'..."
+"$PYTHON_CMD" -m venv $VENV_PATH || handle_error $? "Failed to create virtual environment"
 
 log_message "Activating virtual environment..."
-source cryptomodels/bin/activate || handle_error $? "Failed to activate virtual environment"
+source $VENV_PATH/bin/activate || handle_error $? "Failed to activate virtual environment"
 log_message "Virtual environment activated."
 
 
@@ -460,9 +462,9 @@ if [ "$PYTHON_VERSION_MAJOR_MINOR" = "3.13" ]; then
     fi
 fi
 
-# Step 8: Install cryptomodels toolkit
-log_message "Setting up cryptomodels toolkit..."
-update_package "cryptomodels" "https://github.com/eternalai-org/EternalZoo.git" "https://raw.githubusercontent.com/eternalai-org/EternalZoo/main/crypto_models/__init__.py" "__version__ = \"[0-9.]*\"" "pip install -q git+https://github.com/eternalai-org/EternalZoo.git" "$CRYPTOMODELS_TAG"
+# Step 8: Install eternal-zoo toolkit
+log_message "Setting up eternal-zoo toolkit..."
+update_package "eternal-zoo" "https://github.com/eternalai-org/EternalZoo.git" "https://raw.githubusercontent.com/eternalai-org/EternalZoo/main/eternal_zoo/__init__.py" "__version__ = \"[0-9.]*\"" "pip install -q git+https://github.com/eternalai-org/eternal-zoo.git" "$ETERNAL_ZOO_TAG"
 
 log_message "Setup completed successfully."
 log_message "Setup completed successfully."
