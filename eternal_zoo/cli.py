@@ -158,10 +158,10 @@ def parse_args():
         metavar="MMProj"
     )
     run_command.add_argument(
-        "--mmproj-url",
+        "--pattern",
         type=str,
-        help="🌐 URL to a multimodal projector file",
-        metavar="URL"
+        help="🔍 Pattern to download from Hugging Face",
+        metavar="PATTERN"
     )
     run_command.add_argument(
         "--port",
