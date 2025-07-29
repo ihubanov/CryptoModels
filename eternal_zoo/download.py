@@ -1112,7 +1112,7 @@ class HuggingFaceProgressTracker:
             async with self.lock:
                 self.is_running = False
                 elapsed_time = time.time() - self.start_time
-                final_folder_size = calculate_folder_size_fast(Path(self.watch_dir)) if self.watch_dir else 0
+                final_folder_size = calculate_folder_size(Path(self.watch_dir)) if self.watch_dir else 0
                 actual_speed_mbps = (final_folder_size / (1024 * 1024)) / elapsed_time if elapsed_time > 0 else 0
                 
                 logger.info("[HuggingFaceProgressTracker]")
