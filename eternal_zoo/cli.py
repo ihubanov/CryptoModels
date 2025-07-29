@@ -470,8 +470,6 @@ def handle_run(args):
                 sys.exit(1)
             files_in_folder = sorted(os.listdir(local_path))
             local_path = os.path.join(local_path, files_in_folder[0])
-            model_id = model_id + "_" + args.pattern
-            
 
         config = {
             "model_id": model_id,
