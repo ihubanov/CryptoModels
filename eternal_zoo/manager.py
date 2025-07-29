@@ -1007,6 +1007,7 @@ class EternalZooManager:
         service_info = self.get_service_info()
         ai_services = service_info.get("ai_services", [])
         for ai_service in ai_services:
+            print(f"ai_service: {ai_service}")
             if ai_service["task"] in tasks:
                 models.append(ai_service)
         return models
