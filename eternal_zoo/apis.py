@@ -200,7 +200,7 @@ class ServiceHandler:
     async def generate_embeddings_response(request: EmbeddingRequest):
         """Generate a response for embedding requests."""
         
-        embedding_models = eternal_zoo_manager.get_models_by_task(["embed"])
+        embedding_models = eternal_zoo_manager.get_models_by_task(["chat", "embed"])
         if len(embedding_models) == 0:
             raise HTTPException(status_code=404, detail=f"No embedding model found")
         
@@ -704,10 +704,7 @@ class RequestProcessor:
                             tasks = ["image-generation"]
                         else:
                             raise HTTPException(status_code=404, detail="Task not found")
-                        
-                    
-                        print(f"tasks: {tasks}")
-                        
+                                                
                         try:
                             request_obj = model_cls(**request_data)
                             
