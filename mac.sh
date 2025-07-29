@@ -435,7 +435,7 @@ log_message "llama.cpp setup complete."
 
 # Step 6: Create and activate virtual environment
 
-VENV_PATH="$HOME/.eternal-zoo/venv"
+VENV_PATH=".eternal-zoo"
 log_message "Creating virtual environment 'eternal-zoo'..."
 "$PYTHON_CMD" -m venv $VENV_PATH || handle_error $? "Failed to create virtual environment"
 
