@@ -484,7 +484,7 @@ log_message "Virtual environment activated."
 
 
 # Step 8: Install mlx-flux dependencies
-if update_package "mlx-flux" "https://github.com/0x9334/mlx-flux.git" "https://raw.githubusercontent.com/0x9334/mlx-flux/main/setup.py" "version=\"[0-9.]*\"" "pip install -q git+https://github.com/0x9334/mlx-flux.git" "$MLX_FLUX_TAG"; then
+if update_package "mlx-flux" "https://github.com/0x9334/mlx-flux.git" "https://raw.githubusercontent.com/0x9334/mlx-flux/main/setup.py" "version=\"[0-9.]*\"" "pip install git+https://github.com/0x9334/mlx-flux.git" "$MLX_FLUX_TAG"; then
     log_message "mlx-flux installation completed successfully."
 else
     log_error "mlx-flux installation failed. This may happen on Intel Macs or due to compatibility issues. Continuing with installation..."
