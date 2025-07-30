@@ -44,4 +44,4 @@ help:
 	@echo ""
 	@echo "Package versions:"
 	@echo "  MLX_FLUX_TAG: $(MLX_FLUX_TAG)"
-	@echo "  ETERNALZOO_TAG: $(ETERNALZOO_TAG)" 
+	@echo "  ETERNALZOO_TAG: $(ETERNAL_ZOO_TAG)" 
