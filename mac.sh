@@ -59,49 +59,26 @@ update_package() {
     
     # Otherwise, use version-based update logic
     if pip show "$package_name" &>/dev/null; then
-        log_message "$package_name is installed. Checking for updates..."
+        log_message "$package_name is installed. Checking current version..."
         
         # Get installed version
         local installed_version=$(pip show "$package_name" | grep Version | awk '{print $2}')
         log_message "Current $package_name version: $installed_version"
         
-        # Get remote version
-        log_message "Checking latest version from repository..."
-        local temp_file=$(mktemp)
-        local remote_version=""
-        
-        if curl -s --connect-timeout 10 --max-time 30 "$version_source_url" | grep -o "$version_regex" | cut -d'"' -f2 > "$temp_file" 2>/dev/null; then
-            remote_version=$(cat "$temp_file")
-            rm -f "$temp_file"
-            
-            if [ -n "$remote_version" ]; then
-                log_message "Latest $package_name version: $remote_version"
-                
-                # Check if versions are actually different
-                if [ "$installed_version" = "$remote_version" ]; then
-                    log_message "$package_name is already at the latest version ($installed_version). No update needed."
-                else
-                    # Compare versions using our function
-                    if compare_versions "$installed_version" "$remote_version"; then
-                        log_message "New version available. Updating $package_name from $installed_version to $remote_version..."
-                        if pip uninstall "$package_name" -y && eval "$install_cmd"; then
-                            log_message "$package_name updated to version $remote_version."
-                        else
-                            log_error "Failed to update $package_name. Continuing with installation..."
-                        fi
-                    else
-                        case $? in
-                            1) log_message "Installed version ($installed_version) is newer than remote version ($remote_version). No update needed." ;;
-                            2) log_error "Version comparison failed for $package_name. Skipping update." ;;
-                        esac
-                    fi
-                fi
+        # Check if versions are actually different (only if specific tag is provided)
+        if [ -n "$specific_tag" ]; then
+            if [ "$installed_version" = "$specific_tag" ]; then
+                log_message "$package_name is already at the specified version ($installed_version). No update needed."
             else
-                log_message "Could not determine latest version. Skipping update for safety."
+                log_message "Version mismatch detected. Updating $package_name from $installed_version to $specific_tag..."
+                if pip uninstall "$package_name" -y && eval "$install_cmd"; then
+                    log_message "$package_name updated to version $specific_tag."
+                else
+                    log_error "Failed to update $package_name. Continuing with installation..."
+                fi
             fi
         else
-            rm -f "$temp_file"
-            log_message "Could not check latest version from repository. Skipping update for safety."
+            log_message "No specific tag provided. Skipping version check for $package_name."
         fi
     else
         log_message "Installing $package_name..."
