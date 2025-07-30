@@ -820,6 +820,7 @@ class EternalZooManager:
         best_practice_path = self._get_model_best_practice_path(model_family)
 
         projector = config.get("projector", None)
+        context_length = config.get("context_length", 32768)
         
         command = [
             self.llama_server_path,
@@ -830,6 +831,7 @@ class EternalZooManager:
             "-fa",
             "-ngl", "9999",
             "--jinja",
+            "-c", str(context_length),
             "--reasoning-format", "none",
             "--embeddings"
         ]
@@ -862,13 +864,13 @@ class EternalZooManager:
         model_path = config.get("model", None)
         if model_path is None:
             raise ValueError("Model path is required to start the service")
-
+        
         command = [
             self.llama_server_path,
             "--model", str(model_path),
             "--embedding",
             "--pooling", "mean",
-            "-ub", "8192",
+            "-ub", "4096",
             "-ngl", "9999"
         ]
         return command
