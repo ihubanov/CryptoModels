@@ -67,14 +67,14 @@ In an era of increasing AI centralization, Eternal Zoo puts you back in control:
 
 #### For macOS (Using Setup Script):
 ```bash
-bash mac.sh
+make install-macos
 ```
-> **Note**: You'll need `llama.cpp.rb` in the same directory as `mac.sh`
 
 #### For Ubuntu (Using Setup Script):
 ```bash
 bash ubuntu.sh
 ```
+
 #### For Jetson (Using Setup Script):
 ```bash
 bash jetson.sh

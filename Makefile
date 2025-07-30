@@ -20,7 +20,7 @@ ETERNALZOO_TAG=2.0.0
 
 # Default target
 .PHONY: install
-install:
+install-macos:
 	@echo "Installing EternalZoo with specific versions:"
 	@echo "  MLX_FLUX_TAG: $(MLX_FLUX_TAG)"
 	@echo "  ETERNALZOO_TAG: $(ETERNALZOO_TAG)"
