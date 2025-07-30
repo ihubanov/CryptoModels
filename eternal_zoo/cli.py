@@ -588,7 +588,7 @@ def handle_run(args):
             projector_path = candidate
             break
 
-    model_id = args.hash if hasattr(args, 'hash') else model_name
+    model_id = args.hash if getattr(args, 'hash', None) else model_name
     pattern = hf_data.get("pattern", None)
     if pattern:
         if not os.path.isdir(local_path):
