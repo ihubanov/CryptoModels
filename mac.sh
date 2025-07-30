@@ -432,10 +432,49 @@ hash -r
 llama-cli --version || handle_error $? "llama.cpp verification failed"
 log_message "llama.cpp setup complete."
 
+# Step 6: Migrate `cryptomodels/llms-storage` to `~/.eternal-zoo/models`
+log_message "Checking for existing model storage migration..."
 
-# Step 6: Create and activate virtual environment
+# Define source and destination paths
+SOURCE_DIR="$(pwd)/cryptomodels/llms-storage"
+DEST_DIR="$HOME/.eternal-zoo/models"
 
-VENV_PATH="$HOME/.eternal-zoo/venv"
+# Ensure destination directory exists
+if [ ! -d "$DEST_DIR" ]; then
+    log_message "Creating destination directory: $DEST_DIR"
+    mkdir -p "$DEST_DIR" || handle_error $? "Failed to create destination directory"
+fi
+
+# Ensure variables are set
+if [ -z "$SOURCE_DIR" ] || [ -z "$DEST_DIR" ]; then
+    log_message "Error: SOURCE_DIR or DEST_DIR not set."
+fi
+
+# Check if source directory exists
+if [ -d "$SOURCE_DIR" ]; then
+    log_message "Found existing cryptomodels storage at: $SOURCE_DIR"
+    
+    # Check if destination is writable
+    if [ ! -w "$DEST_DIR" ]; then
+        log_message "Error: No write permission for $DEST_DIR."
+    fi
+    
+    # Migrate files
+    log_message "Migrating files from $SOURCE_DIR to $DEST_DIR..."
+    if rsync -a "$SOURCE_DIR/" "$DEST_DIR/"; then
+        log_message "Migration completed successfully."
+    else
+        log_message "Error: Migration failed."
+    fi
+else
+    log_message "No existing cryptomodels storage found at: $SOURCE_DIR"
+fi
+
+log_message "Model storage setup complete."
+
+# Step 7: Create and activate virtual environment
+
+VENV_PATH=".eternal-zoo"
 log_message "Creating virtual environment 'eternal-zoo'..."
 "$PYTHON_CMD" -m venv $VENV_PATH || handle_error $? "Failed to create virtual environment"
 
@@ -444,7 +483,7 @@ source $VENV_PATH/bin/activate || handle_error $? "Failed to activate virtual en
 log_message "Virtual environment activated."
 
 
-# Step 7: Install mlx-flux dependencies
+# Step 8: Install mlx-flux dependencies
 log_message "Checking mlx-flux installation..."
 if update_package "mlx-flux" "https://github.com/0x9334/mlx-flux.git" "https://raw.githubusercontent.com/0x9334/mlx-flux/main/setup.py" "version=\"[0-9.]*\"" "pip install git+https://github.com/0x9334/mlx-flux.git" "$MLX_FLUX_TAG"; then
     log_message "mlx-flux installation completed successfully."
@@ -462,7 +501,7 @@ if [ "$PYTHON_VERSION_MAJOR_MINOR" = "3.13" ]; then
     fi
 fi
 
-# Step 8: Install eternal-zoo toolkit
+# Step 9: Install eternal-zoo toolkit
 log_message "Setting up eternal-zoo toolkit..."
 update_package "eternal-zoo" "https://github.com/eternalai-org/EternalZoo.git" "https://raw.githubusercontent.com/eternalai-org/EternalZoo/main/eternal_zoo/__init__.py" "__version__ = \"[0-9.]*\"" "pip install -q git+https://github.com/eternalai-org/eternal-zoo.git" "$ETERNAL_ZOO_TAG"
 

@@ -292,10 +292,32 @@ def parse_args():
         description="Check if a model with the specified hash has been downloaded"
     )
     check_command.add_argument(
+        "--model-name",
+        help="🏷️  Model name(s) - single: qwen3-1.7b or multi: qwen3-14b,qwen3-4b (first is main, others on-demand)",
+        metavar="MODEL"
+    )
+    check_command.add_argument(
         "--hash",
-        required=True,
         help="🔗 IPFS hash of the model to check",
         metavar="HASH"
+    )
+    check_command.add_argument(
+        "--hf-repo",
+        help="🤗 Hugging Face model repository",
+        metavar="REPO"
+    )
+    check_command.add_argument(
+        "--hf-file",
+    )
+    check_command.add_argument(
+        "--mmproj",
+        help="🔍 Multimodal Projector File",
+        metavar="MMProj"
+    )
+    check_command.add_argument(
+        "--pattern",
+        help="🔍 Pattern to download from Hugging Face",
+        metavar="PATTERN"
     )
 
     # Model preserve command
@@ -432,16 +454,8 @@ def handle_run(args):
         if not success:
             print_error(f"Failed to download model {args.hf_repo}")
             sys.exit(1)
-
-        folder_name = os.path.basename(local_path)
-        model_id = folder_name.replace("/", "_")
-        if args.hf_file:
-            local_path = os.path.join(local_path, args.hf_file)
-            if os.path.exists(local_path):
-                model_id = args.hf_file
-            else:
-                print_error(f"File {args.hf_file} not found in {local_path}")
-                sys.exit(1)
+        
+        model_id = os.path.basename(local_path)
 
         projector_path = None
         if args.mmproj:
@@ -456,14 +470,12 @@ def handle_run(args):
                 sys.exit(1)
             files_in_folder = sorted(os.listdir(local_path))
             local_path = os.path.join(local_path, files_in_folder[0])
-            model_id = model_id + "_" + args.pattern
-            
 
         config = {
             "model_id": model_id,
             "model": local_path,
             "context_length": args.context_length,
-            "model_name": folder_name,
+            "model_name": model_id,
             "task": args.task,
             "on_demand": False,
             "is_lora": False,
@@ -480,7 +492,7 @@ def handle_run(args):
         model_metadata = {
             "task": args.task,
             "model_id": model_id,
-            "model_name": folder_name,
+            "model_name": model_id,
             "multimodal": bool(projector_path),
         }
         model_metadata_path = os.path.join(DEFAULT_MODEL_DIR, model_id + ".json")
@@ -785,56 +797,50 @@ def handle_preserve(args):
 
 def handle_check(args):
     """Handle model check with beautiful output"""
-    print_info(f"Checking if model is downloaded for hash: {args.hash}")
-    try:
-        local_path = DEFAULT_MODEL_DIR / f"{args.hash}{POSTFIX_MODEL_PATH}"
-        is_downloaded = local_path.exists()
+    local_path = DEFAULT_MODEL_DIR / f"{args.hash}{POSTFIX_MODEL_PATH}"
+    is_downloaded = local_path.exists()
 
-        if is_downloaded:
-            # For LoRA models, we need to do additional validation
-            if local_path.is_dir():
-                # This is likely a LoRA model - check if it has valid metadata and base model
-                metadata_path = local_path / "metadata.json"
-                if metadata_path.exists():
-                    try:
-                        with open(metadata_path, 'r') as f:
-                            lora_metadata = json.load(f)
+    if is_downloaded:
+        # For LoRA models, we need to do additional validation
+        if local_path.is_dir():
+            # This is likely a LoRA model - check if it has valid metadata and base model
+            metadata_path = local_path / "metadata.json"
+            if metadata_path.exists():
+                try:
+                    with open(metadata_path, 'r') as f:
+                        lora_metadata = json.load(f)
 
-                        # Check if base model is available
-                        base_model_hash = lora_metadata.get("base_model")
-                        if base_model_hash:
-                            base_model_path = DEFAULT_MODEL_DIR / f"{base_model_hash}{POSTFIX_MODEL_PATH}"
-                            if not base_model_path.exists():
-                                print_warning(f"LoRA model found but base model missing: {base_model_hash}")
-                                print_info("False")
-                                return
+                    # Check if base model is available
+                    base_model_hash = lora_metadata.get("base_model")
+                    if base_model_hash:
+                        base_model_path = DEFAULT_MODEL_DIR / f"{base_model_hash}{POSTFIX_MODEL_PATH}"
+                        if not base_model_path.exists():
+                            print_warning(f"LoRA model found but base model missing: {base_model_hash}")
+                            print_info("False")
+                            return
 
-                        # Check if LoRA files exist
-                        lora_paths = lora_metadata.get("lora_paths", [])
-                        for lora_path in lora_paths:
-                            if not os.path.isabs(lora_path):
-                                lora_path = os.path.join(local_path, lora_path)
-                            if not os.path.exists(lora_path):
-                                print_warning(f"LoRA model found but LoRA file missing: {lora_path}")
-                                print_info("False")
-                                return
+                    # Check if LoRA files exist
+                    lora_paths = lora_metadata.get("lora_paths", [])
+                    for lora_path in lora_paths:
+                        if not os.path.isabs(lora_path):
+                            lora_path = os.path.join(local_path, lora_path)
+                        if not os.path.exists(lora_path):
+                            print_warning(f"LoRA model found but LoRA file missing: {lora_path}")
+                            print_info("False")
+                            return
 
-                        print_success("True")
-                    except (json.JSONDecodeError, KeyError, Exception) as e:
-                        print_warning(f"LoRA model found but metadata is invalid: {str(e)}")
-                        print_info("False")
-                else:
-                    print_warning("LoRA model directory found but metadata.json is missing")
+                    print_success("True")
+                except (json.JSONDecodeError, KeyError, Exception) as e:
+                    print_warning(f"LoRA model found but metadata is invalid: {str(e)}")
                     print_info("False")
             else:
-                # Regular model file
-                print_success("True")
+                print_warning("LoRA model directory found but metadata.json is missing")
+                print_info("False")
         else:
-            print_info("False")
-    except Exception as e:
-        print_error(f"Check failed: {str(e)}")
+            # Regular model file
+            print_success("True")
+    else:
         print_info("False")
-        sys.exit(1)
 
 def main():
     """Main CLI entry point with enhanced error handling"""

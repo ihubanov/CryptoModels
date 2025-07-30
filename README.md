@@ -171,6 +171,9 @@ eai model run --hf-repo dphn/Dolphin3.0-Llama3.1-8B-GGUF --hf-file Dolphin3.0-Ll
 # Language Model
 eai model run --hf-repo bartowski/phi-4-GGUF --hf-file phi-4-Q4_K_M.gguf --task chat
 
+# Large Model with gguf-split files
+eai model run --hf-repo unsloth/Qwen3-235B-A22B-Thinking-2507-GGUF --pattern Q4_K_M
+
 # Vision Language Model
 eai model run --hf-repo unsloth/Qwen2.5-VL-7B-Instruct-GGUF --hf-file Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf --mmproj mmproj-F16.gguf --task chat
 

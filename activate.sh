@@ -1,2 +1,2 @@
-VENV_PATH="$HOME/.eternal-zoo/venv"
+VENV_PATH=".eternal-zoo"
 source $VENV_PATH/bin/activate
