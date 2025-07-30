@@ -524,6 +524,9 @@ def handle_run(args):
         print_error(f"Failed to download model {model_name}")
         sys.exit(1)
 
+    print(f"local_path: {local_path}")
+    print(f"hf_data: {hf_data}")
+
     is_lora = False
     lora_config = None
     projector_path = None
@@ -531,7 +534,7 @@ def handle_run(args):
     model_name_from_metadata = model_name
 
     # Fetch metadata if hash is available
-    if hasattr(args, 'hash'):
+    if getattr(args, 'hash', None):
         success, metadata = asyncio.run(fetch_model_metadata_async(args.hash))
         if not success:
             print_error(f"Failed to fetch model metadata for {args.hash}")

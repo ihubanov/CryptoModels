@@ -1385,8 +1385,6 @@ async def download_model_async(hf_data: dict, filecoin_hash: str | None = None) 
 
             await async_rmtree(tmp_dir)
 
-        print(hf_res)
-
         path = hf_res["model_path"]
 
         logger.info(f"Downloaded model to {path}")
