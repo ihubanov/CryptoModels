@@ -23,9 +23,9 @@ ETERNAL_ZOO_TAG=2.0.1
 install-macos:
 	@echo "Installing EternalZoo with specific versions:"
 	@echo "  MLX_FLUX_TAG: $(MLX_FLUX_TAG)"
-	@echo "  ETERNALZOO_TAG: $(ETERNAL_ZOO_TAG)"
+	@echo "  ETERNAL_ZOO_TAG: $(ETERNAL_ZOO_TAG)"
 	@echo ""
-	MLX_FLUX_TAG=$(MLX_FLUX_TAG) ETERNALZOO_TAG=$(ETERNAL_ZOO_TAG) bash mac.sh
+	MLX_FLUX_TAG=$(MLX_FLUX_TAG) ETERNAL_ZOO_TAG=$(ETERNAL_ZOO_TAG) bash mac.sh
 
 # Clean target to remove virtual environment
 .PHONY: clean
