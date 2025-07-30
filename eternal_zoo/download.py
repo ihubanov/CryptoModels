@@ -661,7 +661,7 @@ async def fetch_model_metadata_async(filecoin_hash: str, max_attempts: int = 10)
     logger.error("All metadata fetch attempts failed")
     return False, None
 
-async def download_model_async_by_hash(hf_data: dict, filecoin_hash: str | None = None) -> tuple[bool, str | None]:
+async def download_model_async_by_hash(hf_data: dict, filecoin_hash: str) -> tuple[bool, str | None]:
     """
     Asynchronously download a model from Filecoin using its IPFS hash.
     This function will select the fastest gateway from a list of gateways by testing their response times,
@@ -675,10 +675,12 @@ async def download_model_async_by_hash(hf_data: dict, filecoin_hash: str | None 
     """
     # Ensure output directory exists
 
-    DEFAULT_MODEL_DIR.mkdir(exist_ok=True, parents=True)
+    is_lora = False
+    lora_metadata = None
+
     local_path = DEFAULT_MODEL_DIR / f"{filecoin_hash}{POSTFIX_MODEL_PATH}"
     local_path_str = str(local_path.absolute())
-
+    
     # Fetch model metadata using the dedicated async function
     success, data = await fetch_model_metadata_async(filecoin_hash)
 
@@ -688,8 +690,8 @@ async def download_model_async_by_hash(hf_data: dict, filecoin_hash: str | None 
         
     data["filecoin_hash"] = filecoin_hash
     data["local_path"] = local_path_str
-    is_lora = data.get("lora", False)
-    lora_metadata = {}
+    is_lora = data.get("lora", False)   
+        
 
     if is_lora:
         # First, try to load metadata from local LoRA model if it exists
