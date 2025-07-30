@@ -22,7 +22,7 @@ HASH_TO_MODEL = {
     "bafkreidbaksrogxispjejczfj36vtf5uzsbjt7irspl6kckynz5u2ugzke": "flux-dev-nsfw",
     "bafkreihiaeosw2jlyvzo7od46ihe4iwutgmppqj5d7z74g25qljlcmcikq": "flux-dev-18-loras",
     "bafkreidnd2n2sp3gw6c4iutvgdtupqa4qlpsznpjnwqmsna2ko3uhv4fce": "nsfw-lab",
-    "bafkreiccfkobmmaogtdqyqdz5x67e6scfdk4m5lr4wzfyv6pronkxyt3om": "lora-lab"
+    "bafkreidl2y42rs2ymhydn7gojikgv657yy73yldu3nanjsljeepen6ftsy": "lora-lab"
 }
 
 MODEL_TO_HASH = {model: hash for hash, model in HASH_TO_MODEL.items()}
