@@ -478,7 +478,7 @@ if [ "$PYTHON_VERSION_MAJOR_MINOR" = "3.13" ]; then
 fi
 
 # Step 9: Install eternal-zoo toolkit
-update_package "eternal-zoo" "https://github.com/eternalai-org/EternalZoo.git" "https://raw.githubusercontent.com/eternalai-org/EternalZoo/main/eternal_zoo/__init__.py" "__version__ = \"[0-9.]*\"" "pip install -q git+https://github.com/eternalai-org/eternal-zoo.git" "$ETERNAL_ZOO_TAG"
+update_package "eternal-zoo" "https://github.com/eternalai-org/eternal-zoo.git" "https://raw.githubusercontent.com/eternalai-org/eternal-zoo/main/eternal_zoo/__init__.py" "__version__ = \"[0-9.]*\"" "pip install -q git+https://github.com/eternalai-org/eternal-zoo.git" "$ETERNAL_ZOO_TAG"
 
 log_message "Setup completed successfully."
 log_message "Setup completed successfully."
