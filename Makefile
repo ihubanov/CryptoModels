@@ -25,7 +25,7 @@ install:
 	@echo "  MLX_FLUX_TAG: $(MLX_FLUX_TAG)"
 	@echo "  ETERNALZOO_TAG: $(ETERNALZOO_TAG)"
 	@echo ""
-	MLX_FLUX_TAG=$(MLX_FLUX_TAG) ETERNALZOO_TAG=$(ETERNALZOO_TAG) ./mac.sh
+	MLX_FLUX_TAG=$(MLX_FLUX_TAG) ETERNALZOO_TAG=$(ETERNALZOO_TAG) bash mac.sh
 
 # Clean target to remove virtual environment
 .PHONY: clean
