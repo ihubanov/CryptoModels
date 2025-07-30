@@ -467,10 +467,6 @@ if [ -d "$SOURCE_DIR" ]; then
         log_message "Error: Migration failed."
     fi
 else
-    log_message "Error: Source directory $SOURCE_DIR does not exist."
-fi
-    
-else
     log_message "No existing cryptomodels storage found at: $SOURCE_DIR"
 fi
 
