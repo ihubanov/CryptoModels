@@ -16,7 +16,7 @@ download:
 
 # Package versions
 MLX_FLUX_TAG=1.0.5
-ETERNALZOO_TAG=1.1.43
+ETERNALZOO_TAG=2.0.0
 
 # Default target
 .PHONY: install
