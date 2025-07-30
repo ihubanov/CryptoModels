@@ -436,7 +436,7 @@ log_message "llama.cpp setup complete."
 log_message "Checking for existing model storage migration..."
 
 # Define source and destination paths
-SOURCE_DIR="$HOME/cryptomodels/llms-storage"
+SOURCE_DIR="$(pwd)/cryptomodels/llms-storage"
 DEST_DIR="$HOME/.eternal-zoo/models"
 
 # Check if source directory exists
