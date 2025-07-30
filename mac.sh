@@ -432,8 +432,73 @@ hash -r
 llama-cli --version || handle_error $? "llama.cpp verification failed"
 log_message "llama.cpp setup complete."
 
+# Step 6: Migrate `cryptomodels/llms-storage` to `~/.eternal-zoo/models`
+log_message "Checking for existing model storage migration..."
 
-# Step 6: Create and activate virtual environment
+# Define source and destination paths
+SOURCE_DIR="$HOME/cryptomodels/llms-storage"
+DEST_DIR="$HOME/.eternal-zoo/models"
+
+# Check if source directory exists
+if [ -d "$SOURCE_DIR" ]; then
+    log_message "Found existing cryptomodels storage at: $SOURCE_DIR"
+    
+    # Create destination directory if it doesn't exist
+    if [ ! -d "$DEST_DIR" ]; then
+        log_message "Creating destination directory: $DEST_DIR"
+        mkdir -p "$DEST_DIR" || handle_error $? "Failed to create destination directory"
+    fi
+    
+    # Check if destination already has content
+    if [ "$(ls -A "$DEST_DIR" 2>/dev/null)" ]; then
+        log_message "Destination directory already contains files. Checking for conflicts..."
+        
+        # Count files in both directories
+        SOURCE_COUNT=$(find "$SOURCE_DIR" -type f 2>/dev/null | wc -l)
+        DEST_COUNT=$(find "$DEST_DIR" -type f 2>/dev/null | wc -l)
+        
+        log_message "Source directory has $SOURCE_COUNT files, destination has $DEST_COUNT files"
+        
+        # If destination has more files, skip migration
+        if [ "$DEST_COUNT" -gt "$SOURCE_COUNT" ]; then
+            log_message "Destination has more files than source. Skipping migration to preserve existing data."
+        else
+            log_message "Proceeding with migration (destination has fewer or equal files)..."
+            # Create backup of destination before migration
+            BACKUP_DIR="$HOME/.eternal-zoo/models.backup.$(date +%Y%m%d%H%M%S)"
+            log_message "Creating backup of destination at: $BACKUP_DIR"
+            cp -r "$DEST_DIR" "$BACKUP_DIR" || handle_error $? "Failed to create backup"
+            
+            # Perform migration with rsync to handle conflicts gracefully
+            log_message "Migrating files from $SOURCE_DIR to $DEST_DIR..."
+            if rsync -av --progress "$SOURCE_DIR/" "$DEST_DIR/"; then
+                log_message "Migration completed successfully."
+                log_message "Backup of original destination saved at: $BACKUP_DIR"
+            else
+                log_error "Migration failed. Restoring from backup..."
+                rm -rf "$DEST_DIR"
+                mv "$BACKUP_DIR" "$DEST_DIR"
+                handle_error $? "Migration failed and backup restored"
+            fi
+        fi
+    else
+        # Destination is empty, safe to migrate
+        log_message "Destination directory is empty. Proceeding with migration..."
+        if rsync -av --progress "$SOURCE_DIR/" "$DEST_DIR/"; then
+            log_message "Migration completed successfully."
+        else
+            handle_error $? "Migration failed"
+        fi
+    fi
+else
+    log_message "No existing cryptomodels storage found at: $SOURCE_DIR"
+    log_message "Creating models directory: $DEST_DIR"
+    mkdir -p "$DEST_DIR" || handle_error $? "Failed to create models directory"
+fi
+
+log_message "Model storage setup complete."
+
+# Step 7: Create and activate virtual environment
 
 VENV_PATH=".eternal-zoo"
 log_message "Creating virtual environment 'eternal-zoo'..."
@@ -444,7 +509,7 @@ source $VENV_PATH/bin/activate || handle_error $? "Failed to activate virtual en
 log_message "Virtual environment activated."
 
 
-# Step 7: Install mlx-flux dependencies
+# Step 8: Install mlx-flux dependencies
 log_message "Checking mlx-flux installation..."
 if update_package "mlx-flux" "https://github.com/0x9334/mlx-flux.git" "https://raw.githubusercontent.com/0x9334/mlx-flux/main/setup.py" "version=\"[0-9.]*\"" "pip install git+https://github.com/0x9334/mlx-flux.git" "$MLX_FLUX_TAG"; then
     log_message "mlx-flux installation completed successfully."
@@ -462,7 +527,7 @@ if [ "$PYTHON_VERSION_MAJOR_MINOR" = "3.13" ]; then
     fi
 fi
 
-# Step 8: Install eternal-zoo toolkit
+# Step 9: Install eternal-zoo toolkit
 log_message "Setting up eternal-zoo toolkit..."
 update_package "eternal-zoo" "https://github.com/eternalai-org/EternalZoo.git" "https://raw.githubusercontent.com/eternalai-org/EternalZoo/main/eternal_zoo/__init__.py" "__version__ = \"[0-9.]*\"" "pip install -q git+https://github.com/eternalai-org/eternal-zoo.git" "$ETERNAL_ZOO_TAG"
 
