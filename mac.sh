@@ -439,61 +439,39 @@ log_message "Checking for existing model storage migration..."
 SOURCE_DIR="$(pwd)/cryptomodels/llms-storage"
 DEST_DIR="$HOME/.eternal-zoo/models"
 
+# Ensure destination directory exists
+if [ ! -d "$DEST_DIR" ]; then
+    log_message "Creating destination directory: $DEST_DIR"
+    mkdir -p "$DEST_DIR" || handle_error $? "Failed to create destination directory"
+fi
+
+# Ensure variables are set
+if [ -z "$SOURCE_DIR" ] || [ -z "$DEST_DIR" ]; then
+    log_message "Error: SOURCE_DIR or DEST_DIR not set."
+fi
+
 # Check if source directory exists
 if [ -d "$SOURCE_DIR" ]; then
     log_message "Found existing cryptomodels storage at: $SOURCE_DIR"
     
-    # Create destination directory if it doesn't exist
-    if [ ! -d "$DEST_DIR" ]; then
-        log_message "Creating destination directory: $DEST_DIR"
-        mkdir -p "$DEST_DIR" || handle_error $? "Failed to create destination directory"
+    # Check if destination is writable
+    if [ ! -w "$DEST_DIR" ]; then
+        log_message "Error: No write permission for $DEST_DIR."
     fi
     
-    # Check if destination already has content
-    if [ "$(ls -A "$DEST_DIR" 2>/dev/null)" ]; then
-        log_message "Destination directory already contains files. Checking for conflicts..."
-        
-        # Count files in both directories
-        SOURCE_COUNT=$(find "$SOURCE_DIR" -type f 2>/dev/null | wc -l)
-        DEST_COUNT=$(find "$DEST_DIR" -type f 2>/dev/null | wc -l)
-        
-        log_message "Source directory has $SOURCE_COUNT files, destination has $DEST_COUNT files"
-        
-        # If destination has more files, skip migration
-        if [ "$DEST_COUNT" -gt "$SOURCE_COUNT" ]; then
-            log_message "Destination has more files than source. Skipping migration to preserve existing data."
-        else
-            log_message "Proceeding with migration (destination has fewer or equal files)..."
-            # Create backup of destination before migration
-            BACKUP_DIR="$HOME/.eternal-zoo/models.backup.$(date +%Y%m%d%H%M%S)"
-            log_message "Creating backup of destination at: $BACKUP_DIR"
-            cp -r "$DEST_DIR" "$BACKUP_DIR" || handle_error $? "Failed to create backup"
-            
-            # Perform migration with rsync to handle conflicts gracefully
-            log_message "Migrating files from $SOURCE_DIR to $DEST_DIR..."
-            if rsync -av --progress "$SOURCE_DIR/" "$DEST_DIR/"; then
-                log_message "Migration completed successfully."
-                log_message "Backup of original destination saved at: $BACKUP_DIR"
-            else
-                log_error "Migration failed. Restoring from backup..."
-                rm -rf "$DEST_DIR"
-                mv "$BACKUP_DIR" "$DEST_DIR"
-                handle_error $? "Migration failed and backup restored"
-            fi
-        fi
+    # Migrate files
+    log_message "Migrating files from $SOURCE_DIR to $DEST_DIR..."
+    if rsync -a "$SOURCE_DIR/" "$DEST_DIR/"; then
+        log_message "Migration completed successfully."
     else
-        # Destination is empty, safe to migrate
-        log_message "Destination directory is empty. Proceeding with migration..."
-        if rsync -av --progress "$SOURCE_DIR/" "$DEST_DIR/"; then
-            log_message "Migration completed successfully."
-        else
-            handle_error $? "Migration failed"
-        fi
+        log_message "Error: Migration failed."
     fi
 else
+    log_message "Error: Source directory $SOURCE_DIR does not exist."
+fi
+    
+else
     log_message "No existing cryptomodels storage found at: $SOURCE_DIR"
-    log_message "Creating models directory: $DEST_DIR"
-    mkdir -p "$DEST_DIR" || handle_error $? "Failed to create models directory"
 fi
 
 log_message "Model storage setup complete."
