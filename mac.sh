@@ -484,7 +484,6 @@ log_message "Virtual environment activated."
 
 
 # Step 8: Install mlx-flux dependencies
-log_message "Checking mlx-flux installation..."
 if update_package "mlx-flux" "https://github.com/0x9334/mlx-flux.git" "https://raw.githubusercontent.com/0x9334/mlx-flux/main/setup.py" "version=\"[0-9.]*\"" "pip install -q git+https://github.com/0x9334/mlx-flux.git" "$MLX_FLUX_TAG"; then
     log_message "mlx-flux installation completed successfully."
 else
@@ -502,7 +501,6 @@ if [ "$PYTHON_VERSION_MAJOR_MINOR" = "3.13" ]; then
 fi
 
 # Step 9: Install eternal-zoo toolkit
-log_message "Setting up eternal-zoo toolkit..."
 update_package "eternal-zoo" "https://github.com/eternalai-org/EternalZoo.git" "https://raw.githubusercontent.com/eternalai-org/EternalZoo/main/eternal_zoo/__init__.py" "__version__ = \"[0-9.]*\"" "pip install -q git+https://github.com/eternalai-org/eternal-zoo.git" "$ETERNAL_ZOO_TAG"
 
 log_message "Setup completed successfully."
