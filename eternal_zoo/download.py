@@ -691,7 +691,6 @@ async def download_model_async_by_hash(hf_data: dict, filecoin_hash: str) -> tup
     data["filecoin_hash"] = filecoin_hash
     data["local_path"] = local_path_str
     is_lora = data.get("lora", False)   
-        
 
     if is_lora:
         # First, try to load metadata from local LoRA model if it exists
@@ -740,7 +739,8 @@ async def download_model_async_by_hash(hf_data: dict, filecoin_hash: str) -> tup
 
     if is_lora:
         success, hf_res = await download_model_from_hf(hf_data)
-        
+        print(f"success: {success}")
+        print(f"hf_res: {hf_res}")
         if not success:
             logger.error("Failed to download LoRA model")
             return False, None
@@ -1174,6 +1174,7 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
     projector = data.get("projector", None)
     pattern = data.get("pattern", None)
     tmp_dir = str(DEFAULT_MODEL_DIR/f"tmp_{repo_id.replace('/', '_')}")   
+    filecoin_hash = data.get("filecoin_hash", None)
 
     final_path = None
     final_projector_path = None
@@ -1226,8 +1227,11 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                     )
 
                     res["tmp_dir"] = tmp_dir
-                    await async_move(pattern_dir, final_path)
-                    res["model_path"] = final_path
+                    res["model_path"] = tmp_dir
+
+                    if final_path:
+                        await async_move(pattern_dir, final_path)
+                        res["model_path"] = final_path
                 
                 else:
 
@@ -1241,8 +1245,11 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                     )
 
                     res["tmp_dir"] = tmp_dir
-                    await async_move(tmp_dir, final_path)
-                    res["model_path"] = final_path
+                    res["model_path"] = tmp_dir
+
+                    if final_path:
+                        await async_move(tmp_dir, final_path)
+                        res["model_path"] = final_path
 
             else:
 
@@ -1371,6 +1378,9 @@ async def download_model_async(hf_data: dict, filecoin_hash: str | None = None) 
     path = None
     if filecoin_hash:
         success, path = await download_model_async_by_hash(hf_data, filecoin_hash)
+
+        print(f"success: {success}")
+        print(f"path: {path}")
         if not success:
             logger.error("Failed to download model")
             return False, None
@@ -1382,8 +1392,8 @@ async def download_model_async(hf_data: dict, filecoin_hash: str | None = None) 
         tmp_dir = hf_res.get("tmp_dir", None)
         
         if tmp_dir:
-
             await async_rmtree(tmp_dir)
+            
 
         path = hf_res["model_path"]
 
