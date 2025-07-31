@@ -5,7 +5,7 @@ from loguru import logger
 from dotenv import load_dotenv
 
 load_dotenv()
-os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -57,6 +57,6 @@ required_commands = [
     ("cat", "CAT_COMMAND")
 ]
 
-# Find all required commands and set their environment variables
-for cmd_name, env_var_name in required_commands:
-    find_and_set_command(cmd_name, env_var_name, search_path)
+# # Find all required commands and set their environment variables
+# for cmd_name, env_var_name in required_commands:
+#     find_and_set_command(cmd_name, env_var_name, search_path)

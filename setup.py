@@ -19,6 +19,7 @@ setup(
     include_package_data=True,
     install_requires=[
         "rich==14.0.0",
+        "hf_transfer==0.1.9",
         "requests==2.32.4",
         "tqdm==4.67.1",
         "loguru==0.7.3",
