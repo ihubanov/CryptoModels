@@ -57,6 +57,6 @@ required_commands = [
     ("cat", "CAT_COMMAND")
 ]
 
-# # Find all required commands and set their environment variables
-# for cmd_name, env_var_name in required_commands:
-#     find_and_set_command(cmd_name, env_var_name, search_path)
+# Find all required commands and set their environment variables
+for cmd_name, env_var_name in required_commands:
+    find_and_set_command(cmd_name, env_var_name, search_path)
