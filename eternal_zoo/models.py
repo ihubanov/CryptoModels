@@ -73,6 +73,11 @@ FEATURED_MODELS = {
         "model": "Qwen3-30B-A3B-Instruct-2507-Q8_0.gguf",
         "task": "chat"
     },
+    "qwen3-30b-a3b-thinking-2507": {
+        "repo": "unsloth/Qwen3-30B-A3B-Thinking-2507-GGUF",
+        "model": "Qwen3-30B-A3B-Thinking-2507-Q8_0.gguf",
+        "task": "chat"
+    },
     "qwen3-235b-a22b": {
         "repo": "unsloth/Qwen3-235B-A22B-Instruct-2507-GGUF",
         "pattern": "Q4_K_M",
