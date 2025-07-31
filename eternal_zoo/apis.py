@@ -707,6 +707,8 @@ class RequestProcessor:
                                                 
                         try:
                             request_obj = model_cls(**request_data)
+                            if request_obj.model == "":
+                                request_obj.model = "default-chat-model"
                             
                             # Check if this is a streaming request
                             is_streaming = hasattr(request_obj, 'stream') and request_obj.stream
