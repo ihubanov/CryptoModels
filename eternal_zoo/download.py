@@ -299,7 +299,7 @@ class HuggingFaceProgressTracker:
         """
         self.current_size = current_size
         if self.total_size > 0:
-            self.percentage = (self.current_size / self.total_size) * 100
+            self.percentage = min((self.current_size / self.total_size) * 100, 95)
         else:
             self.percentage = 0.0
 
@@ -348,7 +348,7 @@ async def track_progress(tracker: HuggingFaceProgressTracker, folder_path: str):
                last_logged = tracker.percentage
         except Exception as e:
             logger.warning(f"Error in progress tracking: {e}")
-        await asyncio.sleep(0.5)  # Check every 0.5 second 
+        await asyncio.sleep(2)  # Check every 2 second 
 
 async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tuple[bool, dict | None]:
     """
