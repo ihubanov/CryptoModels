@@ -20,7 +20,7 @@ payload = {
     "model": "local-image-generation",
     "prompt": "A beautiful sunset over a calm ocean",
     "n": 1,
-    "steps": 4,
+    "steps": 28,
     "size": "1024x1024"
 }
 
