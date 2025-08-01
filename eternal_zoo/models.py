@@ -146,6 +146,11 @@ FEATURED_MODELS = {
         "task": "image-generation",
         "architecture": "flux-schnell"
     },
+    "flux-krea-dev": {
+        "repo": "NikolaSigmoid/FLUX.1-Krea-dev",
+        "task": "image-generation",
+        "architecture": "flux-dev"
+    },
     "flux-dev-nsfw": {
         "repo": "NikolaSigmoid/FLUX.1-dev-NSFW-Master",
         "task": "image-generation",
