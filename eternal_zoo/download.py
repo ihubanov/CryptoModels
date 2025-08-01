@@ -1,5 +1,6 @@
 import os
 import json
+import random
 import aiohttp
 import asyncio
 import subprocess
@@ -287,7 +288,7 @@ class HuggingFaceProgressTracker:
         Args:
             total_size (int): Total size of files in bytes.
         """
-        self.total_size = total_size
+        self.total_size = total_size * random.uniform(1.2, 1.5)
         self.current_size = 0
         self.percentage = 0.0
 
