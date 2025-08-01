@@ -554,13 +554,3 @@ async def download_model_async(hf_data: dict, filecoin_hash: str | None = None) 
         logger.info(f"Downloaded model to {path}")
 
     return True, path
-
-
-if __name__ == "__main__":
-    api = HfApi()
-
-    paths = api.repo_info(repo_id="unsloth/medgemma-27b-it-GGUF", paths=["medgemma-27b-it-IQ4_XS.gguf", "mmproj-F16.gguf"])
-    print(paths)
-
-    paths = api.get_paths_info(repo_id="unsloth/medgemma-27b-it-GGUF", paths=["medgemma-27b-it-IQ4_XS.gguf", "mmproj-F16.gguf"])
-    print(paths)
