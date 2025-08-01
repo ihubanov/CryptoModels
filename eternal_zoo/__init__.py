@@ -1,11 +1,14 @@
 import os
 import shutil
 import warnings
+import subprocess
 from loguru import logger
 from dotenv import load_dotenv
-
 load_dotenv()
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+
+if os.environ.get("HF_TOKEN", None):
+    subprocess.run(["hf auth", "login", "--token", os.environ["HF_TOKEN"]])
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
