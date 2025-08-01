@@ -524,9 +524,7 @@ def handle_run(args):
         print_error(f"Failed to download model {model_name}")
         sys.exit(1)
 
-    print(f"local_path: {local_path}")
-    print(f"hf_data: {hf_data}")
-
+    architecture = hf_data.get("architecture", "flux-dev")
     is_lora = False
     lora_config = None
     projector_path = None
@@ -609,6 +607,7 @@ def handle_run(args):
         "multimodal": bool(projector_path),
         "on_demand": False,
         "is_lora": is_lora,
+        "architecture": architecture,
         "lora_config": lora_config,
     }
 
@@ -623,6 +622,7 @@ def handle_run(args):
         "model_id": model_id,
         "model_name": model_name_from_metadata,
         "lora": is_lora,
+        "architecture": architecture,
         "multimodal": bool(projector_path),
     }
     model_metadata_path = os.path.join(DEFAULT_MODEL_DIR, model_id + ".json")
@@ -706,6 +706,7 @@ def load_model_metadata(model_id, is_main=False) -> tuple[bool, dict | None]:
         "projector": projector_path,
         "on_demand": not is_main,
         "is_lora": is_lora,
+        "architecture": metadata.get("architecture", "flux-dev"),
         "lora_config": lora_config,
         "context_length": DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH,
     }

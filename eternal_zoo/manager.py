@@ -879,9 +879,9 @@ class EternalZooManager:
         """Build the image-generation command with MLX Flux parameters and optional LoRA support."""
 
         model_path = config["model"]
-        config_name = config["model_name"]
         lora_config = config.get("lora_config", None)
         is_lora = config.get("is_lora", False)
+        architecture = config.get("architecture", "flux-dev")
         lora_paths = []
         lora_scales = []
 
@@ -894,7 +894,7 @@ class EternalZooManager:
             "mlx-flux",
             "serve",
             "--model-path", str(model_path),
-            "--config-name", config_name
+            "--config-name", architecture,
         ]
         
         # Validate LoRA parameters
