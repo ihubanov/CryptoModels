@@ -499,18 +499,19 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                 skip_download_projector = False
 
                 if final_path:
-                    print(final_path)
-                    if final_projector_path:
-                        if os.path.exists(final_path) and os.path.exists(final_projector_path):
-                            res["model_path"] = final_path
-                            res["projector_path"] = final_projector_path
-                            logger.info(f"Model {final_path} and projector {final_projector_path} already exists")
-                            return True, res
-                    else:
-                        if os.path.exists(final_path):
-                            skip_download_model = True
-                            res["model_path"] = final_path
-                            logger.info(f"Model {final_path} already exists")
+                    if os.path.exists(final_path):
+                        skip_download_model = True
+                        res["model_path"] = final_path
+                        logger.info(f"Model {final_path} already exists")
+
+                if final_projector_path:
+                    if os.path.exists(final_projector_path):
+                        skip_download_projector = True
+                        res["projector_path"] = final_projector_path
+                        logger.info(f"Projector {final_projector_path} already exists")
+
+                if skip_download_model and skip_download_projector:
+                    return True, res
 
                 if not skip_download_model:
                     command = f"hf download {repo_id} {model} --local-dir {tmp_dir}"
