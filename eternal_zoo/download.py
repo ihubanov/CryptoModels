@@ -398,8 +398,11 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
     if os.path.exists(CACHE_DIR):
         for file in os.listdir(CACHE_DIR):
             if file.endswith(".lock"):
-                os.remove(os.path.join(CACHE_DIR, file))
-                logger.info(f"Removed lock file: {os.path.join(CACHE_DIR, file)}")
+                try:
+                    os.remove(os.path.join(CACHE_DIR, file))
+                    logger.info(f"Removed lock file: {os.path.join(CACHE_DIR, file)}")
+                except Exception as e:
+                    logger.error(f"Failed to remove lock file: {os.path.join(CACHE_DIR, file)}: {e}")
 
     final_path = None
     final_projector_path = None
@@ -482,7 +485,10 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                         res["model_path"] = tmp_dir
 
                         if final_path:
+                            print(f"sha_1_from_hf: {sha_1_from_hf}")
+                            print(f"sha1_of_folder(tmp_dir): {sha1_of_folder(tmp_dir)}")
                             if sha_1_from_hf == sha1_of_folder(tmp_dir):
+                                print(f"Model {final_path} already exists")
                                 logger.info(f"Model {final_path} already exists")
                                 return True, {"model_path": final_path, "tmp_dir": tmp_dir}
                             else:
