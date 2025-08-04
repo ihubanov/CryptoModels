@@ -34,18 +34,14 @@ def get_infos_from_paths(repo_id: str, paths: list[str]) -> dict:
         "total_size": 0,
         "files": {}
     }
-    total_size = 0
-
     paths_info = hf_api.get_paths_info(repo_id=repo_id, paths=paths)
-    
     for path in paths_info:
+        infos["total_size"] += path.size
         sha256 = path.lfs.sha256 if path.lfs else None
         infos["files"][path.rfilename] = {
             "sha256": sha256,
             "size": path.size,
         }
-    infos["total_size"] = total_size
-    print(f"INFOS: {infos}")
     return infos
 
 def check_valid_folder(infos: dict, folder_path: str) -> bool:
