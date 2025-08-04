@@ -395,8 +395,8 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
     final_path = None
     final_projector_path = None
 
-    if os.path.exists(HF_LOCK_DIR):
-        await async_rmtree(HF_LOCK_DIR)
+    if HF_LOCK_DIR.exists():
+        await async_rmtree(str(HF_LOCK_DIR))
       
     files = []
     total_size = 0
