@@ -10,7 +10,7 @@ from loguru import logger
 from huggingface_hub import HfApi
 from eternal_zoo.utils import async_move, async_rmtree
 from eternal_zoo.models import FEATURED_MODELS, HASH_TO_MODEL
-from eternal_zoo.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH, GATEWAY_URLS, ETERNAL_AI_METADATA_GW, PREFIX_DOWNLOAD_LOG, HF_LOCK_DIR
+from eternal_zoo.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH, GATEWAY_URLS, ETERNAL_AI_METADATA_GW, PREFIX_DOWNLOAD_LOG
 
 SLEEP_TIME = 2
 CONNECTION_POOL_SIZE = 32  # Increased connection pool
@@ -391,18 +391,18 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
     projector = data.get("projector", None)
     pattern = data.get("pattern", None) 
     tmp_dir = str(DEFAULT_MODEL_DIR/f"tmp_{repo_id.replace('/', '_')}")   
+    os.makedirs(tmp_dir, exist_ok=True)
+
+    # Remove all lock files in the cache directory
+    CACHE_DIR = os.path.join(tmp_dir, ".cache", "huggingface", "download")
+    if os.path.exists(CACHE_DIR):
+        for file in os.listdir(CACHE_DIR):
+            if file.endswith(".lock"):
+                os.remove(os.path.join(CACHE_DIR, file))
+                logger.info(f"Removed lock file: {os.path.join(CACHE_DIR, file)}")
 
     final_path = None
     final_projector_path = None
-
-    if HF_LOCK_DIR.exists():
-        for file in HF_LOCK_DIR.iterdir():
-            if file.suffix == ".lock" and file.is_file():
-                try:
-                    file.unlink()
-                    logger.info(f"Removed {file}")
-                except Exception as e:
-                    logger.error(f"Failed to remove {file}: {e}")
       
     files = []
     total_size = 0
@@ -435,7 +435,6 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
         if pattern:
             final_path = os.path.join(final_dir, repo_id.replace("/", "_") + "_" + pattern)
 
-    os.makedirs(tmp_dir, exist_ok=True)
     try:
         attempt = 1
         while True:  # Infinite loop until success or user cancellation
