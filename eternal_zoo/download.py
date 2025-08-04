@@ -3,6 +3,7 @@ import json
 import random
 import aiohttp
 import asyncio
+import hashlib
 import subprocess
 from pathlib import Path
 from loguru import logger
@@ -14,7 +15,28 @@ from eternal_zoo.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH, GATEWAY
 SLEEP_TIME = 2
 CONNECTION_POOL_SIZE = 32  # Increased connection pool
 
-hf_api = HfApi()
+hf_api = HfApi(
+    token = os.getenv("HF_TOKEN")
+)
+
+def sha1_from_hf_repo(repo_id: str) -> str:
+    repo_info = hf_api.repo_info(repo_id)
+    return repo_info.sha
+
+def sha1_of_folder(folder_path):
+    sha1 = hashlib.sha1()
+
+    for root, dirs, files in sorted(os.walk(folder_path)):
+        for name in sorted(files):
+            file_path = os.path.join(root, name)
+            relative_path = os.path.relpath(file_path, folder_path).replace(os.sep, '/')
+            sha1.update(relative_path.encode())  # Include file path in hash
+
+            with open(file_path, 'rb') as f:
+                while chunk := f.read(8192):
+                    sha1.update(chunk)
+
+    return sha1.hexdigest()
 
 def get_all_files_from_hf_repo(repo_id: str) -> list[str]:
     """
@@ -395,6 +417,7 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
     total_size = get_size_from_paths(repo_id, files)
     tracker = HuggingFaceProgressTracker(total_size)
     progress_task = asyncio.create_task(track_progress(tracker, tmp_dir))
+    sha_1_from_hf = sha1_from_hf_repo(repo_id)
 
     if final_dir:
         
@@ -454,9 +477,13 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                         res["model_path"] = tmp_dir
 
                         if final_path:
-                            await async_move(tmp_dir, final_path)
-                            res["model_path"] = final_path
-
+                            if sha_1_from_hf == sha1_of_folder(tmp_dir):
+                                logger.info(f"Model {final_path} already exists")
+                                return True, {"model_path": final_path, "tmp_dir": tmp_dir}
+                            else:
+                                logger.info(f"Model {final_path} is not the same as the one on Hugging Face")
+                                # download again
+                                continue
                 else:
 
                     if not final_path or not os.path.exists(final_path):
@@ -554,3 +581,7 @@ async def download_model_async(hf_data: dict, filecoin_hash: str | None = None) 
         logger.info(f"Downloaded model to {path}")
 
     return True, path
+
+if __name__ == "__main__":
+    repo_info = hf_api.get_hf_file_metadata("https://huggingface.co/black-forest-labs/FLUX.1-Krea-dev")
+    print(repo_info.sha)
