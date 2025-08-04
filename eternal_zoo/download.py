@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 from loguru import logger
 from huggingface_hub import HfApi
-from eternal_zoo.utils import async_move, async_rmtree
+from eternal_zoo.utils import async_move, async_rmtree, compute_file_hash
 from eternal_zoo.models import FEATURED_MODELS, HASH_TO_MODEL
 from eternal_zoo.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH, GATEWAY_URLS, ETERNAL_AI_METADATA_GW, PREFIX_DOWNLOAD_LOG
 
@@ -19,25 +19,6 @@ hf_api = HfApi(
     token = os.getenv("HF_TOKEN")
 )
 
-def sha1_from_hf_repo(repo_id: str) -> str:
-    repo_info = hf_api.repo_info(repo_id)
-    return repo_info.sha
-
-def sha1_of_folder(folder_path):
-    sha1 = hashlib.sha1()
-
-    for root, dirs, files in sorted(os.walk(folder_path)):
-        for name in sorted(files):
-            file_path = os.path.join(root, name)
-            relative_path = os.path.relpath(file_path, folder_path).replace(os.sep, '/')
-            sha1.update(relative_path.encode())  # Include file path in hash
-
-            with open(file_path, 'rb') as f:
-                while chunk := f.read(8192):
-                    sha1.update(chunk)
-
-    return sha1.hexdigest()
-
 def get_all_files_from_hf_repo(repo_id: str) -> list[str]:
     """
     Get all files from a Hugging Face repository.
@@ -45,15 +26,40 @@ def get_all_files_from_hf_repo(repo_id: str) -> list[str]:
     files = hf_api.list_repo_files(repo_id, revision="main")
     return files
 
-def get_size_from_paths(repo_id: str, paths: list[str]) -> int:
+def get_infos_from_paths(repo_id: str, paths: list[str]) -> dict:
     """
     Get the size of a list of paths from a Hugging Face repository.
     """
+    infos = {
+        "total_size": 0,
+        "files": {}
+    }
     total_size = 0
+
     paths_info = hf_api.get_paths_info(repo_id=repo_id, paths=paths)
+    
     for path in paths_info:
-        total_size += path.size
-    return total_size
+        sha256 = path.lfs.sha256 if path.lfs else None
+        infos["files"][path.rfilename] = {
+            "sha256": sha256,
+            "size": path.size,
+        }
+    infos["total_size"] = total_size
+    print(f"INFOS: {infos}")
+    return infos
+
+def check_valid_folder(infos: dict, folder_path: str) -> bool:
+    """
+    Check if the folder is valid by comparing the sha256 of the files in the folder with the sha256 in the infos.
+    """
+    for file_name, file_info in infos["files"].items():
+        file_path = os.path.join(folder_path, file_name)
+        if not os.path.exists(file_path):
+            return False
+        computed_sha256 = compute_file_hash(file_path)
+        if computed_sha256 != file_info["sha256"]:
+            return False
+    return True
 
 
 async def pick_fastest_gateway(filecoin_hash: str, gateways: list[str], timeout: int = 5) -> str:
@@ -423,10 +429,9 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
         filter = f"-{pattern}-"
         files = [file for file in files if filter in file]
 
-    total_size = get_size_from_paths(repo_id, files)
-    tracker = HuggingFaceProgressTracker(total_size)
+    infos = get_infos_from_paths(repo_id, files)
+    tracker = HuggingFaceProgressTracker(infos["total_size"])
     progress_task = asyncio.create_task(track_progress(tracker, tmp_dir))
-    sha_1_from_hf = sha1_from_hf_repo(repo_id)
 
     if final_dir:
         
@@ -483,19 +488,18 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
 
                         res["tmp_dir"] = tmp_dir
                         res["model_path"] = tmp_dir
-
+                        
                         if final_path:
-                            print(f"sha_1_from_hf: {sha_1_from_hf}")
-                            print(f"sha1_of_folder(tmp_dir): {sha1_of_folder(tmp_dir)}")
-                            if sha_1_from_hf == sha1_of_folder(tmp_dir):
-                                print(f"Model {final_path} already exists")
-                                logger.info(f"Model {final_path} already exists")
-                                return True, {"model_path": final_path, "tmp_dir": tmp_dir}
+                            if check_valid_folder(infos, tmp_dir):
+                                logger.info(f"Model {final_path} already exists and is valid")
+                                await async_move(tmp_dir, final_path)
+                                res["model_path"] = final_path
+                                res["tmp_dir"] = tmp_dir
+                                return True, res
                             else:
                                 logger.info(f"Model {final_path} is not the same as the one on Hugging Face")
                                 # download again
                                 continue
-                else:
 
                     if not final_path or not os.path.exists(final_path):
 
@@ -592,7 +596,3 @@ async def download_model_async(hf_data: dict, filecoin_hash: str | None = None) 
         logger.info(f"Downloaded model to {path}")
 
     return True, path
-
-if __name__ == "__main__":
-    repo_info = hf_api.get_hf_file_metadata("https://huggingface.co/black-forest-labs/FLUX.1-Krea-dev")
-    print(repo_info.sha)
