@@ -543,12 +543,13 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                     else:
                         logger.info(f"Model {res['model_path']} is valid")
                 
-                if not skip_download_projector:
-                    sha256_projector = compute_file_hash(res["projector_path"])
-                    if sha256_projector != infos["files"][projector]["sha256"]:
-                        raise Exception("Projector is not the same as the one on Hugging Face")
-                    else:
-                        logger.info(f"Projector {res['projector_path']} is valid")
+                if projector:
+                    if not skip_download_projector:
+                        sha256_projector = compute_file_hash(res["projector_path"])
+                        if sha256_projector != infos["files"][projector]["sha256"]:
+                            raise Exception("Projector is not the same as the one on Hugging Face")
+                        else:
+                            logger.info(f"Projector {res['projector_path']} is valid")
 
                 if final_path:
                     if not os.path.exists(final_path):
