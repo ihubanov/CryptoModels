@@ -53,6 +53,8 @@ def check_valid_folder(infos: dict, folder_path: str) -> bool:
     Check if the folder is valid by comparing the sha256 of the files in the folder with the sha256 in the infos.
     """
     for file_name, file_info in infos["files"].items():
+        if file_info["sha256"] is None:
+            continue
         file_path = os.path.join(folder_path, file_name)
         if not os.path.exists(file_path):
             return False
