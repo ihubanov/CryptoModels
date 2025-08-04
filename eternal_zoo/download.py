@@ -474,8 +474,16 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                         res["model_path"] = tmp_dir
 
                         if final_path:
-                            await async_move(pattern_dir, final_path)
-                            res["model_path"] = final_path
+                            if check_valid_folder(infos, tmp_dir):
+                                logger.info(f"Model {final_path} already exists and is valid")
+                                await async_move(tmp_dir, final_path)
+                                res["model_path"] = final_path
+                                res["tmp_dir"] = tmp_dir
+                                return True, res
+                            else:
+                                logger.info(f"Model {final_path} is not the same as the one on Hugging Face")
+                                # download again
+                                continue
                     
                     else:
 
@@ -512,9 +520,16 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                         res["tmp_dir"] = tmp_dir
 
                         if final_path:
-                            await async_move(res["model_path"], final_path)
-                            res["model_path"] = final_path
-                            res["tmp_dir"] = tmp_dir
+                            if check_valid_folder(infos, tmp_dir):
+                                logger.info(f"Model {final_path} already exists and is valid")
+                                await async_move(tmp_dir, final_path)
+                                res["model_path"] = final_path
+                                res["tmp_dir"] = tmp_dir
+                                return True, res
+                            else:
+                                logger.info(f"Model {final_path} is not the same as the one on Hugging Face")
+                                # download again
+                                continue
                     else:
                         res["model_path"] = final_path
                         logger.info(f"Model {final_path} already exists")
@@ -532,9 +547,16 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                             )
                             res["projector_path"] = os.path.join(tmp_dir, projector)
                             if final_projector_path:
-                                await async_move(res["projector_path"], final_projector_path)
-                                res["projector_path"] = final_projector_path
-                                res["tmp_dir"] = tmp_dir
+                                if check_valid_folder(infos, tmp_dir):
+                                    logger.info(f"Projector {final_projector_path} already exists and is valid")
+                                    await async_move(tmp_dir, final_projector_path)
+                                    res["projector_path"] = final_projector_path
+                                    res["tmp_dir"] = tmp_dir
+                                    return True, res
+                                else:
+                                    logger.info(f"Projector {final_projector_path} is not the same as the one on Hugging Face")
+                                    # download again
+                                    continue
                         else:
                             res["projector_path"] = final_projector_path
                             logger.info(f"Projector {final_projector_path} already exists")
