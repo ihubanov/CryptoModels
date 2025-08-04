@@ -402,13 +402,15 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
     # Remove all lock files in the cache directory
     CACHE_DIR = os.path.join(tmp_dir, ".cache", "huggingface", "download")
     if os.path.exists(CACHE_DIR):
-        for file in os.listdir(CACHE_DIR):
-            if file.endswith(".lock"):
-                try:
-                    os.remove(os.path.join(CACHE_DIR, file))
-                    logger.info(f"Removed lock file: {os.path.join(CACHE_DIR, file)}")
-                except Exception as e:
-                    logger.error(f"Failed to remove lock file: {os.path.join(CACHE_DIR, file)}: {e}")
+        for root, dirs, files in os.walk(CACHE_DIR):
+            for file in files:
+                if file.endswith(".lock"):
+                    file_path = os.path.join(root, file)
+                    try:
+                        os.remove(file_path)
+                        logger.info(f"Removed lock file: {file_path}")
+                    except Exception as e:
+                        logger.error(f"Failed to remove lock file: {file_path}: {e}")
 
     final_path = None
     final_projector_path = None
