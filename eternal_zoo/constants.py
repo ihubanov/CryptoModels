@@ -22,6 +22,4 @@ GATEWAY_URLS = [
 ]
 
 ETERNAL_AI_METADATA_GW = "https://agent.api.eternalai.org/api/vibe/model/"
-HF_LOCK_DIR = str(Path.home() / ".cache" / "huggingface" / "hub" / ".locks")
-
 PREFIX_DOWNLOAD_LOG = "[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL]"
