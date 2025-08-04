@@ -57,6 +57,7 @@ def check_valid_folder(infos: dict, folder_path: str) -> bool:
         computed_sha256 = compute_file_hash(file_path)
         if computed_sha256 != file_info["sha256"]:
             return False
+        logger.info(f"File {file_name} is valid")
     return True
 
 
