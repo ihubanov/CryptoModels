@@ -582,33 +582,65 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
             logger.info(f"{PREFIX_DOWNLOAD_LOG} --progress {tracker.percentage:.2f}%")
 
 async def download_model_async(hf_data: dict, filecoin_hash: str | None = None) -> tuple[bool, str | None]:
-
+    """
+    Download model with infinite retry logic until success or cancellation.
+    
+    Args:
+        hf_data: Model metadata dictionary
+        filecoin_hash: Optional IPFS hash for Filecoin download
+        
+    Returns:
+        tuple[bool, str | None]: (success, local_path) - True and path if successful, False and None if failed
+    """
     logger.info(f"Downloading model: {hf_data}")
     logger.info(f"Filecoin hash: {filecoin_hash}")
-    path = None
-    if filecoin_hash:
-        print(f"DOWNLOADING MODEL: {hf_data}")
-        print(f"FILECOIN HASH: {filecoin_hash}")
-        success, path = await download_model_async_by_hash(hf_data, filecoin_hash)
-
-        print(f"success: {success}")
-        print(f"path: {path}")
-        if not success:
-            logger.error("Failed to download model")
-            return False, None
-    else:
-        final_dir = str(DEFAULT_MODEL_DIR)
-
-        success, hf_res = await download_model_from_hf(hf_data, final_dir)
-
-        tmp_dir = hf_res.get("tmp_dir", None)
-        
-        if tmp_dir:
-            await async_rmtree(tmp_dir)
+    
+    attempt = 1
+    while True:  # Infinite loop until success or user cancellation
+        try:
+            logger.info(f"Download attempt {attempt}")
+            path = None
             
+            if filecoin_hash:
+                print(f"DOWNLOADING MODEL: {hf_data}")
+                print(f"FILECOIN HASH: {filecoin_hash}")
+                success, path = await download_model_async_by_hash(hf_data, filecoin_hash)
 
-        path = hf_res["model_path"]
+                print(f"success: {success}")
+                print(f"path: {path}")
+                if success:
+                    logger.info(f"Successfully downloaded model to {path}")
+                    return True, path
+                else:
+                    logger.warning(f"Download attempt {attempt} failed")
+            else:
+                final_dir = str(DEFAULT_MODEL_DIR)
+                success, hf_res = await download_model_from_hf(hf_data, final_dir)
 
-        logger.info(f"Downloaded model to {path}")
-
-    return True, path
+                if success:
+                    tmp_dir = hf_res.get("tmp_dir", None)
+                    
+                    if tmp_dir:
+                        await async_rmtree(tmp_dir)
+                    
+                    path = hf_res["model_path"]
+                    logger.info(f"Successfully downloaded model to {path}")
+                    return True, path
+                else:
+                    logger.warning(f"Download attempt {attempt} failed")
+            
+            # Calculate exponential backoff with jitter
+            backoff_time = calculate_backoff(attempt)
+            logger.warning(f"Retrying in {backoff_time}s (attempt {attempt + 1})")
+            await asyncio.sleep(backoff_time)
+            attempt += 1
+            
+        except KeyboardInterrupt:
+            logger.info("Download canceled by user")
+            return False, None
+        except Exception as e:
+            logger.warning(f"Download attempt {attempt} failed with exception: {e}")
+            backoff_time = calculate_backoff(attempt)
+            logger.warning(f"Retrying in {backoff_time}s (attempt {attempt + 1})")
+            await asyncio.sleep(backoff_time)
+            attempt += 1
