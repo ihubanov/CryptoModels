@@ -499,6 +499,7 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                 skip_download_projector = False
 
                 if final_path:
+                    print(final_path)
                     if final_projector_path:
                         if os.path.exists(final_path) and os.path.exists(final_projector_path):
                             res["model_path"] = final_path
