@@ -443,6 +443,9 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
         if pattern:
             final_path = os.path.join(final_dir, repo_id.replace("/", "_") + "_" + pattern)
 
+        if projector:
+            final_projector_path = final_path + "-projector"
+
     try:
         attempt = 1
         while True:  # Infinite loop until success or user cancellation
@@ -459,9 +462,7 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                             logger.info(f"Model {final_path} already exists")
                             return True, {"model_path": final_path, "tmp_dir": tmp_dir}
 
-                    if pattern:
-                        # Download only the files that match the allow_patterns
-                        
+                    if pattern:                        
                         command = f"hf download {repo_id} --local-dir {tmp_dir} --include \"*{pattern}*\""
 
                         await loop.run_in_executor(
@@ -470,18 +471,14 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                         )
                         
                         res["model_path"] = tmp_dir
+                        if not check_valid_folder(infos, tmp_dir):
+                            raise Exception("Model is not the same as the one on Hugging Face")
 
                         if final_path:
-                            if check_valid_folder(infos, tmp_dir):
-                                logger.info(f"Model {final_path} already exists and is valid")
-                                await async_move(tmp_dir, final_path)
-                                res["model_path"] = final_path
-                                return True, res
-                            else:
-                                logger.info(f"Model {final_path} is not the same as the one on Hugging Face")
-                                # download again
-                                continue
-                    
+                            await async_move(tmp_dir, final_path)
+                            res["model_path"] = final_path
+                            return True, res
+                        
                     else:
                         command = f"hf download {repo_id} --local-dir {tmp_dir}"
                         await loop.run_in_executor(
@@ -490,72 +487,79 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                         )
 
                         res["model_path"] = tmp_dir
+                        if not check_valid_folder(infos, tmp_dir):
+                            raise Exception("Model is not the same as the one on Hugging Face")
                         
                         if final_path:
-                            if check_valid_folder(infos, tmp_dir):
-                                logger.info(f"Model {final_path} already exists and is valid")
-                                await async_move(tmp_dir, final_path)
-                                res["model_path"] = final_path
-                                return True, res
-                            else:
-                                logger.info(f"Model {final_path} is not the same as the one on Hugging Face")
-                                # download again
-                                continue
+                            await async_move(tmp_dir, final_path)
+                            res["model_path"] = final_path
+                            return True, res
+                
+                skip_download_model = False
+                skip_download_projector = False
 
-                else:
-                    if not final_path or not os.path.exists(final_path):
+                if final_path:
+                    if final_projector_path:
+                        if os.path.exists(final_path) and os.path.exists(final_projector_path):
+                            res["model_path"] = final_path
+                            res["projector_path"] = final_projector_path
+                            logger.info(f"Model {final_path} and projector {final_projector_path} already exists")
+                            return True, res
+                    else:
+                        if os.path.exists(final_path):
+                            skip_download_model = True
+                            res["model_path"] = final_path
+                            logger.info(f"Model {final_path} already exists")
 
-                        command = f"hf download {repo_id} {model} --local-dir {tmp_dir}"
+                if not skip_download_model:
+                    command = f"hf download {repo_id} {model} --local-dir {tmp_dir}"
+                    await loop.run_in_executor(
+                        None,
+                        lambda: subprocess.run(command, shell=True)
+                    )
+                    res["model_path"] = os.path.join(tmp_dir, model)
+
+                if projector:
+                    if final_projector_path:
+                        if os.path.exists(final_projector_path):
+                            skip_download_projector = True
+                            res["projector_path"] = final_projector_path
+                            logger.info(f"Projector {final_projector_path} already exists")
+                            
+                    if not skip_download_projector:
+                        command = f"hf download {repo_id} {projector} --local-dir {tmp_dir}"
                         await loop.run_in_executor(
                             None,
                             lambda: subprocess.run(command, shell=True)
                         )
-
-                        res["model_path"] = os.path.join(tmp_dir, model)
-
-                        if final_path:
-                            if check_valid_folder(infos, tmp_dir):
-                                logger.info(f"Model {final_path} already exists and is valid")
-                                await async_move(tmp_dir, final_path)
-                                res["model_path"] = final_path
-                                res["tmp_dir"] = tmp_dir
-                                return True, res
-                            else:
-                                logger.info(f"Model {final_path} is not the same as the one on Hugging Face")
-                                # download again
-                                continue
+                        res["projector_path"] = os.path.join(tmp_dir, projector)
+                
+                if not skip_download_model:
+                    sha256_model = compute_file_hash(res["model_path"])
+                    if sha256_model != infos["files"][model]["sha256"]:
+                        raise Exception("Model is not the same as the one on Hugging Face")
                     else:
+                        logger.info(f"Model {res['model_path']} is valid")
+                
+                if not skip_download_projector:
+                    sha256_projector = compute_file_hash(res["projector_path"])
+                    if sha256_projector != infos["files"][projector]["sha256"]:
+                        raise Exception("Projector is not the same as the one on Hugging Face")
+                    else:
+                        logger.info(f"Projector {res['projector_path']} is valid")
+
+                if final_path:
+                    if not os.path.exists(final_path):
+                        await async_move(res["model_path"], final_path)
                         res["model_path"] = final_path
-                        logger.info(f"Model {final_path} already exists")
+                
+                if final_projector_path:
+                    if not os.path.exists(final_projector_path):
+                        await async_move(res["projector_path"], final_projector_path)
+                        res["projector_path"] = final_projector_path
 
-                    # Download projector if specified
-                    if projector:
-                        if final_path:
-                            final_projector_path = final_path + "-projector"
-
-                        if not final_projector_path or not os.path.exists(final_projector_path):
-                            command = f"hf download {repo_id} {projector} --local-dir {tmp_dir}"
-                            await loop.run_in_executor(
-                                None,
-                                lambda: subprocess.run(command, shell=True)
-                            )
-                            res["projector_path"] = os.path.join(tmp_dir, projector)
-                            if final_projector_path:
-                                if check_valid_folder(infos, tmp_dir):
-                                    logger.info(f"Projector {final_projector_path} already exists and is valid")
-                                    await async_move(tmp_dir, final_projector_path)
-                                    res["projector_path"] = final_projector_path
-                                    return True, res
-                                else:
-                                    logger.info(f"Projector {final_projector_path} is not the same as the one on Hugging Face")
-                                    # download again
-                                    continue
-                        else:
-                            res["projector_path"] = final_projector_path
-                            logger.info(f"Projector {final_projector_path} already exists")
-
-                    return True, res
-            
+                return True, res
+                                    
             except KeyboardInterrupt:
                 logger.info("Download canceled by user")
 
