@@ -292,6 +292,7 @@ async def download_model_async_by_hash(hf_data: dict, filecoin_hash: str) -> tup
         return True, local_path_str
 
     success, hf_res = await download_model_from_hf(hf_data)
+    print(f"success: {success}")
     if not success:
         logger.error("Failed to download model")
         return False, None
@@ -413,7 +414,6 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
     final_projector_path = None
       
     files = []
-    total_size = 0
     if model:
         files.append(model)
     
@@ -431,6 +431,7 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
     infos = get_infos_from_paths(repo_id, files)
     tracker = HuggingFaceProgressTracker(infos["total_size"])
     progress_task = asyncio.create_task(track_progress(tracker, tmp_dir))
+    res["tmp_dir"] = tmp_dir
 
     if final_dir:
         
@@ -460,7 +461,6 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
 
                     if pattern:
                         # Download only the files that match the allow_patterns
-                        pattern_dir = os.path.join(tmp_dir, pattern)
                         
                         command = f"hf download {repo_id} --local-dir {tmp_dir} --include \"*{pattern}*\""
 
@@ -469,8 +469,6 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                             lambda: subprocess.run(command, shell=True)
                         )
                         
-
-                        res["tmp_dir"] = tmp_dir
                         res["model_path"] = tmp_dir
 
                         if final_path:
@@ -478,7 +476,6 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                                 logger.info(f"Model {final_path} already exists and is valid")
                                 await async_move(tmp_dir, final_path)
                                 res["model_path"] = final_path
-                                res["tmp_dir"] = tmp_dir
                                 return True, res
                             else:
                                 logger.info(f"Model {final_path} is not the same as the one on Hugging Face")
@@ -486,14 +483,12 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                                 continue
                     
                     else:
-
                         command = f"hf download {repo_id} --local-dir {tmp_dir}"
                         await loop.run_in_executor(
                             None,
                             lambda: subprocess.run(command, shell=True)
                         )
 
-                        res["tmp_dir"] = tmp_dir
                         res["model_path"] = tmp_dir
                         
                         if final_path:
@@ -501,13 +496,13 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                                 logger.info(f"Model {final_path} already exists and is valid")
                                 await async_move(tmp_dir, final_path)
                                 res["model_path"] = final_path
-                                res["tmp_dir"] = tmp_dir
                                 return True, res
                             else:
                                 logger.info(f"Model {final_path} is not the same as the one on Hugging Face")
                                 # download again
                                 continue
 
+                else:
                     if not final_path or not os.path.exists(final_path):
 
                         command = f"hf download {repo_id} {model} --local-dir {tmp_dir}"
@@ -517,7 +512,6 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                         )
 
                         res["model_path"] = os.path.join(tmp_dir, model)
-                        res["tmp_dir"] = tmp_dir
 
                         if final_path:
                             if check_valid_folder(infos, tmp_dir):
@@ -551,7 +545,6 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                                     logger.info(f"Projector {final_projector_path} already exists and is valid")
                                     await async_move(tmp_dir, final_projector_path)
                                     res["projector_path"] = final_projector_path
-                                    res["tmp_dir"] = tmp_dir
                                     return True, res
                                 else:
                                     logger.info(f"Projector {final_projector_path} is not the same as the one on Hugging Face")
@@ -561,7 +554,7 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                             res["projector_path"] = final_projector_path
                             logger.info(f"Projector {final_projector_path} already exists")
 
-                return True, res
+                    return True, res
             
             except KeyboardInterrupt:
                 logger.info("Download canceled by user")
@@ -594,6 +587,8 @@ async def download_model_async(hf_data: dict, filecoin_hash: str | None = None) 
     logger.info(f"Filecoin hash: {filecoin_hash}")
     path = None
     if filecoin_hash:
+        print(f"DOWNLOADING MODEL: {hf_data}")
+        print(f"FILECOIN HASH: {filecoin_hash}")
         success, path = await download_model_async_by_hash(hf_data, filecoin_hash)
 
         print(f"success: {success}")
