@@ -396,7 +396,13 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
     final_projector_path = None
 
     if HF_LOCK_DIR.exists():
-        await async_rmtree(str(HF_LOCK_DIR))
+        for file in HF_LOCK_DIR.iterdir():
+            if file.suffix == ".lock" and file.is_file():
+                try:
+                    file.unlink()
+                    logger.info(f"Removed {file}")
+                except Exception as e:
+                    logger.error(f"Failed to remove {file}: {e}")
       
     files = []
     total_size = 0
