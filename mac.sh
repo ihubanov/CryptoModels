@@ -328,6 +328,8 @@ else
     PYTHON_CMD=$(brew --prefix python@3.11)/bin/python3.11
 fi
 
+log_message "Using Python at: $PYTHON_CMD"
+
 # Step 3: Update PATH in .zshrc for future sessions
 log_message "Checking if PATH update is needed in .zshrc..."
 if ! grep -q "export PATH=\"/usr/local/bin:\$PATH\"" ~/.zshrc 2>/dev/null; then
