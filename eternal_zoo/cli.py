@@ -529,11 +529,11 @@ def handle_run(args):
                             with open(metadata_path, "r") as f:
                                 lora_metadata = json.load(f)
                             base_model = lora_metadata.get("base_model")
+                            if base_model in HASH_TO_MODEL:
+                                base_model = HASH_TO_MODEL[base_model]
                             if base_model not in FEATURED_MODELS:
                                 print_error(f"Base model {base_model} not found in FEATURED_MODELS")
                                 sys.exit(1)
-                            if base_model in HASH_TO_MODEL:
-                                base_model = HASH_TO_MODEL[base_model]
                             base_model_hf_data = FEATURED_MODELS[base_model]
                             success, base_model_local_path = asyncio.run(download_model_async(base_model_hf_data, base_model))
                             if not success:
