@@ -230,16 +230,16 @@ models:
 
 #### **Model Configuration Options**
 
-| Option | Description | Required | Default |
-|--------|-------------|----------|---------|
-| `on_demand` | `False` for main model, `True` for on-demand models | ✅ | `True` |
-| `model` | Featured model name from eternal-zoo or model name from Hugging Face | ❌ | - |
-| `hf_repo` | Hugging Face repository | ❌ | - |
-| `task` | Model task type (`chat`, `embed`, `image-generation`) | ❌ | `chat` |
-| `mmproj` | Multimodal projector file (for vision models) | ❌ | - |
-| `architecture` | Model architecture (for image-generation models) | ❌ | - |
-| `lora` | LoRA model (for LoRA models) | ❌ | - |
-| `base_model` | Base model name (for LoRA models) | ❌ | - |
+| Option | Description | Default |
+|--------|-------------|---------|
+| `model` | Featured model name from eternal-zoo or model name from Hugging Face | - |
+| `hf_repo` | Hugging Face repository | - |
+| `task` | Model task type (`chat`, `embed`, `image-generation`) | `chat` |
+| `mmproj` | Multimodal projector file (for vision models) | - |
+| `architecture` | Model architecture (for image-generation models) | - |
+| `lora` | LoRA model (for LoRA models) | - |
+| `base_model` | Base model name (for LoRA models) | - |
+| `on_demand` | `False` for main model, `True` for on-demand models | `True` |
 
 #### **Running with Config Files**
 
