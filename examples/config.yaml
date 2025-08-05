@@ -1,0 +1,27 @@
+port: 8080
+host: 0.0.0.0
+models:
+  # from featured models
+  qwen3-30b:
+    model: qwen3-30b-a3b-instruct-2507 
+    on_demand: False  # Main model - loaded immediately when server starts
+
+  # from filecoin hash
+  flux-dev:
+    hash: bafkreiaha3sjfmv4affmi5kbu6bnayenf2avwafp3cthhar3latmfi632u
+    on_demand: True   # On-demand model - loaded only when requested
+  
+  # from huggingface models
+  medgemma-27b:
+    hf_repo: medgemma/MedGemma-3-27B-GGUF
+    model: medgemma-27b-it-Q8_0.gguf
+    mmproj: mmproj-F16.gguf
+    task: chat
+    on_demand: True   # On-demand model - loaded only when requested
+  
+  # from huggingface models
+  jina-embeddings-v4:
+    hf_repo: jinaai/jina-embeddings-v4-text-code-GGUF
+    model: jina-embeddings-v4-text-code-F16.gguf
+    task: embed
+    on_demand: True   # On-demand model - loaded only when requested
