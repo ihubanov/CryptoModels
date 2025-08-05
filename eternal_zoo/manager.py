@@ -999,7 +999,14 @@ class EternalZooManager:
         })
 
         return True
-        
+    
+    def get_available_models(self) -> List[Dict[str, Any]]:
+        """
+        Get the list of available models.
+        """
+        service_info = self.get_service_info()
+        ai_services = service_info.get("ai_services", [])
+        return ai_services
         
     def get_models_by_task(self, tasks: List[str]) -> List[Dict[str, Any]]:
         """
