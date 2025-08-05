@@ -528,6 +528,15 @@ def handle_run(args):
                                 sys.exit(1)
                             with open(metadata_path, "r") as f:
                                 lora_metadata = json.load(f)
+                            lora_config = {}
+                            lora_paths = lora_metadata.get("lora_paths", [])
+                            lora_scales = lora_metadata.get("lora_scales", [])
+                            for i, lora_path in enumerate(lora_paths):
+                                lora_name = os.path.basename(lora_path)
+                                lora_config[lora_name] = {
+                                    "path": os.path.join(local_path, lora_path),
+                                    "scale": lora_scales[i]
+                                }
                             base_model = lora_metadata.get("base_model")
                             if base_model in HASH_TO_MODEL:
                                 base_model_hash = base_model
@@ -538,15 +547,6 @@ def handle_run(args):
                                 print_error(f"Failed to download base model {base_model}")
                                 sys.exit(1)
                             local_path = base_model_local_path
-                            lora_config = {}
-                            lora_paths = lora_metadata.get("lora_paths", [])
-                            lora_scales = lora_metadata.get("lora_scales", [])
-                            for i, lora_path in enumerate(lora_paths):
-                                lora_name = os.path.basename(lora_path)
-                                lora_config[lora_name] = {
-                                    "path": os.path.join(local_path, lora_path),
-                                    "scale": lora_scales[i]
-                                }
                         else:
                             print_warning(f"Lora model found but task {task} is not supported for lora")
                             continue
