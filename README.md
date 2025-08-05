@@ -477,6 +477,88 @@ curl -X POST http://localhost:8080/v1/images/generations \
 }'
 ```
 
+### JSON Schema Structured Outputs Example
+
+Eternal Zoo supports structured outputs using JSON schema, allowing you to get responses in a specific format. This is useful for extracting structured data from text.
+
+```bash
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "local-model",
+    "messages": [
+        {
+            "role": "system",
+            "content": "Extract product information from the user input into the specified JSON format."
+        },
+        {
+            "role": "user",
+            "content": "I found this laptop: Apple MacBook Pro 13-inch with M2 chip, 8GB RAM, 256GB SSD, Space Gray, $1299"
+        }
+    ],
+    "response_format": {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "Product",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "product": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "brand": {"type": "string"},
+                            "model": {"type": "string"},
+                            "specifications": {
+                                "type": "object",
+                                "properties": {
+                                    "processor": {"type": "string"},
+                                    "memory": {"type": "string"},
+                                    "storage": {"type": "string"}
+                                },
+                                "required": ["processor", "memory", "storage"]
+                            },
+                            "color": {"type": "string"},
+                            "price": {
+                                "type": "number",
+                                "description": "Price in USD"
+                            }
+                        },
+                        "required": ["name", "brand", "model", "specifications", "color", "price"]
+                    }
+                },
+                "required": ["product"]
+            }
+        }
+    },
+    "temperature": 0.1,
+    "max_tokens": 1000
+}'
+```
+
+**Expected Response:**
+```json
+{
+    "id": "chatcmpl-ExQkhfuRkFSjWCo2HXZBsO8LOrwpJdew",
+    "object": "chat.completion",
+    "created": 1754382667,
+    "model": "local-model",
+    "choices": [
+        {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+                "content": "{\n  \"product\": {\n    \"name\": \"Apple MacBook Pro 13-inch\",\n    \"brand\": \"Apple\",\n    \"model\": \"MacBook Pro 13-inch\",\n    \"specifications\": {\n      \"processor\": \"M2 chip\",\n      \"memory\": \"8GB RAM\",\n      \"storage\": \"256GB SSD\"\n    },\n    \"color\": \"Space Gray\",\n    \"price\": 1299\n  }\n}",
+                "refusal": null,
+                "role": "assistant",
+                "function_call": null,
+                "tool_calls": null
+            }
+        }
+    ]
+}
+```
+
 ## 🔄 Multi-Model Support
 
 Eternal Zoo supports running multiple models simultaneously with intelligent request-based switching. This allows you to serve several models from a single server instance with optimized resource usage.
