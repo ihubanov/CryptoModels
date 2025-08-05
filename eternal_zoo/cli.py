@@ -530,9 +530,10 @@ def handle_run(args):
                                 lora_metadata = json.load(f)
                             base_model = lora_metadata.get("base_model")
                             if base_model in HASH_TO_MODEL:
+                                base_model_hash = base_model
                                 base_model = HASH_TO_MODEL[base_model]
                             base_model_hf_data = FEATURED_MODELS[base_model]
-                            success, base_model_local_path = asyncio.run(download_model_async(base_model_hf_data, base_model))
+                            success, base_model_local_path = asyncio.run(download_model_async(base_model_hf_data, base_model_hash))
                             if not success:
                                 print_error(f"Failed to download base model {base_model}")
                                 sys.exit(1)
