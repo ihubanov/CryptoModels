@@ -13,14 +13,14 @@ models:
   
   # from huggingface models
   medgemma-27b:
-    hf_repo: medgemma/MedGemma-3-27B-GGUF
+    hf_repo: unsloth/medgemma-27b-it-GGUF
     model: medgemma-27b-it-Q8_0.gguf
     mmproj: mmproj-F16.gguf
     task: chat
     on_demand: True   # On-demand model - loaded only when requested
   
   # from huggingface models
-  jina-embeddings-v4:
+  jina-embeddings-v4-text-code:
     hf_repo: jinaai/jina-embeddings-v4-text-code-GGUF
     model: jina-embeddings-v4-text-code-F16.gguf
     task: embed
