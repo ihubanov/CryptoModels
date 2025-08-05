@@ -551,22 +551,22 @@ def handle_run(args):
                             print_warning(f"Lora model found but task {task} is not supported for lora")
                             continue
                         
-                config_dict = {
-                    "model_id": model_name,
-                    "model": local_path,
-                    "context_length": DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH,
-                    "model_name": featured_model_name,
-                    "task": task,
-                    "on_demand": not is_main,
-                    "is_lora": is_lora,
-                    "projector": projector_path,
-                    "multimodal": bool(projector_path),
-                    "architecture": model_config.get("architecture", None),
-                    "lora_config": lora_config,
-                }
-                configs.append(config_dict)
-                continue
-
+                    config_dict = {
+                        "model_id": model_name,
+                        "model": local_path,
+                        "context_length": DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH,
+                        "model_name": featured_model_name,
+                        "task": task,
+                        "on_demand": not is_main,
+                        "is_lora": is_lora,
+                        "projector": projector_path,
+                        "multimodal": bool(projector_path),
+                        "architecture": hf_data.get("architecture", None),
+                        "lora_config": lora_config,
+                    }
+                    configs.append(config_dict)
+                    continue
+                
             if "hf_repo" in model_config:
                 # Download from Hugging Face
                 hf_data = {
