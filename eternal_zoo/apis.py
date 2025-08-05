@@ -603,8 +603,8 @@ class RequestProcessor:
             if model:
                 model_task = model.get("task", "chat")
                 if model_task not in tasks:
-                    raise HTTPException(status_code=400, detail=f"Model {model_requested} is not a {tasks} model")
-                
+                    logger.error(f"[{request_id}] Model {model_requested} is not a {tasks} model")
+                    return False
             else:
                 # Get current service info
                 available_models = eternal_zoo_manager.get_models_by_task(tasks)
@@ -729,7 +729,7 @@ class RequestProcessor:
                                     logger.info(f"[{request_id}] Found {active_stream_count} active streams before model check")
                                 
                                 if not await RequestProcessor._ensure_model_active_in_queue(tasks, request_obj.model, request_id):
-                                    error_msg = f"Model {request_obj.model} is not available or failed to switch"
+                                    error_msg = f"Model {request_obj.model} is not available or failed to switch or is not a {tasks} model"
                                     logger.error(f"[{request_id}] {error_msg}")
                                     future.set_exception(HTTPException(status_code=400, detail=error_msg))
                                     continue
