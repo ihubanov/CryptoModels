@@ -587,7 +587,7 @@ def handle_run(args):
                         projector_path = mmproj_path
                         
                 config_dict = {
-                    "model_id": model_id,
+                    "model_id": model_name,
                     "model": local_path,
                     "context_length": DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH,
                     "model_name": model_id,
