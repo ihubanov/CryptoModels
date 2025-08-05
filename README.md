@@ -205,13 +205,12 @@ host: 0.0.0.0
 models:
   # Main model - loaded immediately when server starts
   qwen3-30b:
-    model: qwen3-30b-a3b-instruct-2507 
+    model: qwen3-30b-a3b-instruct-2507 # Featured model name from eternal-zoo
     on_demand: False  # Main model - loaded immediately
 
-  # On-demand models - loaded only when requested
-  flux-dev:
-    hash: bafkreiaha3sjfmv4affmi5kbu6bnayenf2avwafp3cthhar3latmfi632u
-    on_demand: True   # On-demand model - loaded when requested
+  flux-dev-nsfw:
+    model: flux-dev-nsfw # Featured model name from eternal-zoo
+    on_demand: True   # On-demand model - loaded only when requested
   
   # Hugging Face model
   medgemma-27b:
@@ -234,11 +233,13 @@ models:
 | Option | Description | Required | Default |
 |--------|-------------|----------|---------|
 | `on_demand` | `False` for main model, `True` for on-demand models | ✅ | `True` |
-| `model` | Featured model name from Eternal Zoo | ❌ | - |
-| `hash` | Filecoin hash for IPFS models | ❌ | - |
+| `model` | Featured model name from eternal-zoo or model name from Hugging Face | ❌ | - |
 | `hf_repo` | Hugging Face repository | ❌ | - |
 | `task` | Model task type (`chat`, `embed`, `image-generation`) | ❌ | `chat` |
 | `mmproj` | Multimodal projector file (for vision models) | ❌ | - |
+| `architecture` | Model architecture (for image-generation models) | ❌ | - |
+| `lora` | LoRA model (for LoRA models) | ❌ | - |
+| `base_model` | Base model name (for LoRA models) | ❌ | - |
 
 #### **Running with Config Files**
 
