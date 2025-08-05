@@ -85,6 +85,7 @@ class ChatCompletionRequestBase(BaseModel):
     tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(None, description="Tool choice configuration")
     max_tokens: Optional[int] = Field(None, description="Maximum number of tokens to generate")
     seed: Optional[int] = Field(None, description="Random seed for generation")
+    response_format: Optional[Dict[str, Any]] = Field(None, description="Format for the response.")
     
     @validator("messages")
     def check_messages_not_empty(cls, v: List[Message]) -> List[Message]:
