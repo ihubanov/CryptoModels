@@ -157,7 +157,7 @@ class ServiceHandler:
         
         if model is None:
             model = chat_models[0]
-        
+
         port = model.get("port", None)
         if port is None:
             raise HTTPException(status_code=500, detail=f"Model {model.get('model_id', 'unknown')} has no port")
@@ -592,20 +592,27 @@ class RequestProcessor:
             bool: True if the model is active or was successfully switched to
         """
         try:
-            # Get current service info
-            available_models = eternal_zoo_manager.get_models_by_task(tasks)
-
-            if len(available_models) == 0:
-                logger.error(f"[{request_id}] No {tasks} models found")
-                return False
-
+            available_models = eternal_zoo_manager.get_available_models()
             model = None
-            for available_model in available_models:
-                if available_model.get("model_id", None) == model_requested:
-                    model = available_model
+
+            for model in available_models:
+                if model["model_id"] == model_requested:
+                    model = model
                     break
             
-            if model is None:
+            if model:
+                model_task = model.get("task", "chat")
+                if model_task not in tasks:
+                    raise HTTPException(status_code=400, detail=f"Model {model_requested} is not a {tasks} model")
+                
+            else:
+                # Get current service info
+                available_models = eternal_zoo_manager.get_models_by_task(tasks)
+
+                if len(available_models) == 0:
+                    logger.error(f"[{request_id}] No {tasks} models found")
+                    return False
+                
                 model = available_models[0]
                 logger.info(f"[{request_id}] No model {model_requested} found, using {model['model_id']} instead")
                 model_requested = model["model_id"]
@@ -706,10 +713,7 @@ class RequestProcessor:
                             raise HTTPException(status_code=404, detail="Task not found")
                                                 
                         try:
-                            request_obj = model_cls(**request_data)
-                            if request_obj.model == "":
-                                request_obj.model = "default-chat-model"
-                            
+                            request_obj = model_cls(**request_data) 
                             # Check if this is a streaming request
                             is_streaming = hasattr(request_obj, 'stream') and request_obj.stream
                             if is_streaming:
