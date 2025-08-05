@@ -102,6 +102,7 @@ Eternal Zoo uses a structured command hierarchy for better organization. All mod
 eai model run --hash <hash>           # Run a model server
 eai model run <model-name>            # Run a preserved model (e.g., qwen3-1.7b)
 eai model run --hf-repo <repo> --hf-file <file> --task <task>  # Run any GGUF model from Hugging Face
+eai model run --config <config.yaml>  # Run multiple models using config file
 eai model serve [--main-hash <hash>]  # Serve all downloaded models (with optional main model)
 eai model stop                        # Stop the running model server  
 eai model status                      # Check which model is running
@@ -123,6 +124,9 @@ eai model run --hash bafkreiacd5mwy4a5wkdmvxsk42nsupes5uf4q3dm52k36mvbhgdrez422y
 
 # Run any GGUF model directly from Hugging Face
 eai model run --hf-repo dphn/Dolphin3.0-Llama3.1-8B-GGUF --hf-file Dolphin3.0-Llama3.1-8B-Q4_0.gguf --task chat
+
+# Run multiple models using config file
+eai model run --config config.yaml
 
 # Serve all downloaded models with specific main model
 eai model serve --main-hash bafkreiacd5mwy4a5wkdmvxsk42nsupes5uf4q3dm52k36mvbhgdrez422y
@@ -186,6 +190,134 @@ eai model run --hf-repo jinaai/jina-embeddings-v4-text-matching-GGUF --hf-file j
 - **Huge Selection**: Access to thousands of models on Hugging Face
 - **Latest Models**: Try new models as soon as they're uploaded
 - **Flexible**: Works with any GGUF-compatible model
+
+### 🎛️ Multi-Model Configuration with Config Files
+
+Eternal Zoo supports running multiple models simultaneously using YAML configuration files. This allows you to specify which model should be the main model (loaded immediately) and which models should be loaded on-demand.
+
+#### **Config File Structure**
+
+Create a YAML file (e.g., `config.yaml`) with the following structure:
+
+```yaml
+port: 8080
+host: 0.0.0.0
+models:
+  # Main model - loaded immediately when server starts
+  qwen3-30b:
+    model: qwen3-30b-a3b-instruct-2507 
+    on_demand: False  # Main model - loaded immediately
+
+  # On-demand models - loaded only when requested
+  flux-dev:
+    hash: bafkreiaha3sjfmv4affmi5kbu6bnayenf2avwafp3cthhar3latmfi632u
+    on_demand: True   # On-demand model - loaded when requested
+  
+  # Hugging Face model
+  medgemma-27b:
+    hf_repo: medgemma/MedGemma-3-27B-GGUF
+    model: medgemma-27b-it-Q8_0.gguf
+    mmproj: mmproj-F16.gguf
+    task: chat
+    on_demand: True   # On-demand model - loaded when requested
+  
+  # Embedding model
+  jina-embeddings-v4:
+    hf_repo: jinaai/jina-embeddings-v4-text-code-GGUF
+    model: jina-embeddings-v4-text-code-F16.gguf
+    task: embed
+    on_demand: True   # On-demand model - loaded when requested
+```
+
+#### **Model Configuration Options**
+
+| Option | Description | Required | Default |
+|--------|-------------|----------|---------|
+| `on_demand` | `False` for main model, `True` for on-demand models | ✅ | `True` |
+| `model` | Featured model name from Eternal Zoo | ❌ | - |
+| `hash` | Filecoin hash for IPFS models | ❌ | - |
+| `hf_repo` | Hugging Face repository | ❌ | - |
+| `task` | Model task type (`chat`, `embed`, `image-generation`) | ❌ | `chat` |
+| `mmproj` | Multimodal projector file (for vision models) | ❌ | - |
+
+#### **Running with Config Files**
+
+```bash
+# Run multiple models using config file
+eai model run --config config.yaml
+```
+
+#### **Main Model Selection**
+
+- **Primary Rule**: The first model with `on_demand: False` becomes the main model
+- **Fallback**: If no model has `on_demand: False`, the first model in the config becomes the main model
+- **Behavior**: The main model is loaded immediately when the server starts, while on-demand models are loaded only when first requested
+
+#### **Example Configurations**
+
+**Simple Multi-Model Setup:**
+```yaml
+port: 8080
+host: 0.0.0.0
+models:
+  qwen3-8b:
+    model: qwen3-8b
+    on_demand: False  # Main model
+  
+  gemma-3-4b:
+    model: gemma-3-4b
+    on_demand: True   # On-demand model
+```
+
+**Mixed Model Sources:**
+```yaml
+port: 8080
+host: 0.0.0.0
+models:
+  # Featured model as main
+  qwen3-30b:
+    model: qwen3-30b-a3b-instruct-2507
+    on_demand: False
+  
+  # IPFS model on-demand
+  flux-dev:
+    hash: bafkreiaha3sjfmv4affmi5kbu6bnayenf2avwafp3cthhar3latmfi632u
+    on_demand: True
+  
+  # Hugging Face model on-demand
+  dolphin-3.0:
+    hf_repo: dphn/Dolphin3.0-Llama3.1-8B-GGUF
+    model: Dolphin3.0-Llama3.1-8B-Q4_0.gguf
+    task: chat
+    on_demand: True
+```
+
+**Vision Model Setup:**
+```yaml
+port: 8080
+host: 0.0.0.0
+models:
+  # Main vision model
+  gemma-3-4b:
+    model: gemma-3-4b
+    on_demand: False
+  
+  # On-demand vision model from Hugging Face
+  qwen2.5-vl:
+    hf_repo: unsloth/Qwen2.5-VL-7B-Instruct-GGUF
+    model: Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf
+    mmproj: mmproj-F16.gguf
+    task: chat
+    on_demand: True
+```
+
+#### **Benefits of Config Files**
+
+- **🎯 Precise Control**: Specify exactly which model should be main vs on-demand
+- **📦 Easy Deployment**: Store your model configuration in version control
+- **🔄 Reproducible**: Share config files for consistent setups across environments
+- **⚡ Performance**: Optimize loading times by choosing the right main model
+- **🛠️ Flexible**: Mix different model sources (featured, IPFS, Hugging Face)
 
 ### Available Pre-uploaded Models
 
@@ -409,7 +541,14 @@ Model Field Present?
 
 ### **Running Multi-Model Setups**
 
-Serve all models with a specific main model by running:
+#### **Option 1: Using Config Files (Recommended)**
+Run multiple models with precise control over main vs on-demand models:
+```bash
+eai model run --config config.yaml
+```
+
+#### **Option 2: Using Downloaded Models**
+Serve all downloaded models with a specific main model:
 ```bash
 eai model serve --main-model <main-model-id>
 ```
