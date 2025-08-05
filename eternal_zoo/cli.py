@@ -514,6 +514,8 @@ def handle_run(args):
                 if not success:
                     print_error(f"Failed to load metadata for {model_name}")
                     continue
+
+                config_dict["model_id"] = model_name
                     
             elif "hf_repo" in model_config:
                 # Download from Hugging Face
@@ -541,9 +543,11 @@ def handle_run(args):
                     "model_name": model_id,
                     "task": model_config.get("task", "chat"),
                     "on_demand": not is_main,
-                    "is_lora": False,
+                    "is_lora": model_config.get("lora", False),
                     "projector": projector_path,
                     "multimodal": bool(projector_path),
+                    "architecture": model_config.get("architecture", None),
+                    "lora_config": model_config.get("lora_config", None),
                 }
                 
             elif "model" in model_config:
@@ -559,11 +563,24 @@ def handle_run(args):
                 if not success:
                     print_error(f"Failed to download model {model_name}")
                     continue
-                    
-                success, config_dict = load_model_metadata(model_hash or featured_model_name, is_main=is_main)
-                if not success:
-                    print_error(f"Failed to load metadata for {model_name}")
-                    continue
+
+                projector_path = None
+                if os.path.exists(local_path + "-projector"):
+                    projector_path = local_path + "-projector"
+
+                config_dict = {
+                    "task": model_config.get("task", "chat"),
+                    "model_id": model_name,
+                    "model": local_path,
+                    "context_length": DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH,
+                    "model_name": featured_model_name,
+                    "on_demand": not is_main,
+                    "is_lora": model_config.get("lora", False),
+                    "projector": projector_path,
+                    "multimodal": bool(projector_path),
+                    "architecture": model_config.get("architecture", None),
+                    "lora_config": model_config.get("lora_config", None),
+                }
             else:
                 print_error(f"Invalid model configuration for {model_name}: must specify 'hash', 'hf_repo', or 'model'")
                 continue
