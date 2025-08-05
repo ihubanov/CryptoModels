@@ -413,26 +413,6 @@ def parse_args():
 
 def handle_download(args) -> bool:
     """Handle model download with beautiful output"""
-    main_model_id = None
-    # run by config file with multi-model support
-    if args.config:
-        # read config file from yaml
-        with open(args.config, "r") as f:
-            config = yaml.safe_load(f)
-        port = config.get("port", 8080)
-        host = config.get("host", "0.0.0.0")
-        models = config.get("models", {})
-        main_model_id = None
-        for model_name, model_config in models.items():
-            on_demand = model_config.get("on_demand", False)
-            if not on_demand:
-                main_model_id = model_name
-                break
-        if not main_model_id:
-            print_warning("No active model found in config file, using random model")
-            main_model_id = random.choice(list(models.keys()))
-
-    
     if args.hash:
         # Download by hash
         if args.hash not in HASH_TO_MODEL:
