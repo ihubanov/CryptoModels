@@ -320,40 +320,13 @@ BREW_PREFIX=$(brew --prefix)
 export PATH="$BREW_PREFIX/bin:$PATH"
 log_message "Homebrew found at $BREW_PREFIX. PATH updated for this session."
 
-# Step 2: Check system Python version and decide on installation
-PYTHON_CMD=""
-log_message "Searching for suitable Python (>= 3.11) in PATH..."
-
-# Find all python3* executables in PATH and select the highest version >= 3.11
-HIGHEST_VERSION=""
-HIGHEST_CMD=""
-PYTHON_CANDIDATES=$(compgen -c | grep -E '^python3(\.[0-9]+)?$' | sort -u)
-for candidate in $PYTHON_CANDIDATES; do
-    if command_exists "$candidate"; then
-        VERSION=$($candidate --version 2>&1 | awk '{print $2}')
-        MAJOR=$(echo "$VERSION" | cut -d. -f1)
-        MINOR=$(echo "$VERSION" | cut -d. -f2)
-        if [ "$MAJOR" -eq 3 ] && [ "$MINOR" -ge 11 ]; then
-            # Compare versions to select the highest
-            if [[ -z "$HIGHEST_VERSION" ]] || [[ $(printf '%s\n' "$VERSION" "$HIGHEST_VERSION" | sort -V | tail -n1) == "$VERSION" ]]; then
-                HIGHEST_VERSION="$VERSION"
-                HIGHEST_CMD="$candidate"
-            fi
-        fi
-    fi
-done
-
-if [ -n "$HIGHEST_CMD" ]; then
-    log_message "Found suitable Python: $HIGHEST_CMD ($HIGHEST_VERSION)"
-    PYTHON_CMD="$HIGHEST_CMD"
+# Step 2: Install Python 3.11
+if brew list python@3.11 >/dev/null 2>&1; then
+    PYTHON_CMD=$(brew --prefix python@3.11)/bin/python3.11
+else
+    brew install python@3.11
+    PYTHON_CMD=$(brew --prefix python@3.11)/bin/python3.11
 fi
-
-if [ -z "$PYTHON_CMD" ]; then
-    handle_error 1 "No suitable Python (>= 3.11) found in PATH. Please install Python 3.11 or higher."
-fi
-
-log_message "Using Python at: $(which $PYTHON_CMD)"
-log_message "Python setup complete."
 
 # Step 3: Update PATH in .zshrc for future sessions
 log_message "Checking if PATH update is needed in .zshrc..."
@@ -425,16 +398,6 @@ if update_package "mlx-flux" "https://github.com/0x9334/mlx-flux.git" "https://r
     log_message "mlx-flux installation completed successfully."
 else
     log_error "mlx-flux installation failed. This may happen on Intel Macs or due to compatibility issues. Continuing with installation..."
-fi
-
-PYTHON_VERSION_MAJOR_MINOR=$("$PYTHON_CMD" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-if [ "$PYTHON_VERSION_MAJOR_MINOR" = "3.13" ]; then
-    log_message "Detected Python 3.13. Installing compatible SentencePiece wheel..."
-    if pip install -q https://github.com/anthonywu/sentencepiece/releases/download/0.2.1-py13dev/sentencepiece-0.2.1-cp313-cp313-macosx_11_0_arm64.whl; then
-        log_message "SentencePiece for Python 3.13 installed successfully."
-    else
-        log_error "Failed to install SentencePiece for Python 3.13. This may happen on Intel Macs due to ARM64-specific wheel. Continuing with installation..."
-    fi
 fi
 
 # Step 8: Install eternal-zoo toolkit
