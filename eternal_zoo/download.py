@@ -479,8 +479,7 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                         if final_path:
                             await async_move(tmp_dir, final_path)
                             res["model_path"] = final_path
-                            return True, res
-                        
+                                                   
                     else:
                         command = f"hf download {repo_id} --local-dir {tmp_dir}"
                         await loop.run_in_executor(
@@ -495,7 +494,8 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                         if final_path:
                             await async_move(tmp_dir, final_path)
                             res["model_path"] = final_path
-                            return True, res
+                        
+                    return True, res
                 
                 skip_download_model = False
                 skip_download_projector = False

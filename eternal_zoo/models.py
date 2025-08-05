@@ -155,24 +155,28 @@ FEATURED_MODELS = {
         "repo": "NikolaSigmoid/FLUX.1-dev-NSFW-Master",
         "task": "image-generation",
         "lora": True,
-        "base_model": "flux-dev"
+        "base_model": "flux-dev",
+        "architecture": "flux-dev"
     },
     "flux-dev-18-loras": {
         "repo": "NikolaSigmoid/FLUX.1-dev-18-loras",
         "task": "image-generation",
         "lora": True,
-        "base_model": "flux-dev"
+        "base_model": "flux-dev",
+        "architecture": "flux-dev"
     },
     "nsfw-lab": {
        "repo": "NikolaSigmoid/NSFW-Lab",
        "task": "image-generation",
        "lora": True,
-       "base_model": "flux-schnell"
+       "base_model": "flux-schnell",
+       "architecture": "flux-schnell"
     },
     "lora-lab": {
         "repo": "NikolaSigmoid/lora-lab",
         "task": "image-generation",
         "lora": True,
-        "base_model": "flux-dev"
+        "base_model": "flux-dev",
+        "architecture": "flux-dev"
     }
 }

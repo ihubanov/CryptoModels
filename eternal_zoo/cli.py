@@ -2,8 +2,9 @@ import sys
 import os
 import asyncio
 import argparse
-import random
 import json
+import yaml
+import random
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
@@ -127,7 +128,12 @@ def parse_args():
         help="🚀 Launch AI model server with multi-model support",
         description="Start serving models locally with multi-model and on-demand loading support"
     )
-
+    run_command.add_argument(
+        "--config",
+        type=str,
+        help="🔍 Config file path",
+        metavar="CONFIG"
+    )
     run_command.add_argument(
         "model_name",
         nargs='?',
@@ -201,6 +207,7 @@ def parse_args():
     )
     serve_command.add_argument(
         "--main-hash",
+        type=str,
         help="🔗 Hash of the main model to serve (if not specified, uses random model)",
         metavar="HASH"
     )
@@ -406,7 +413,26 @@ def parse_args():
 
 def handle_download(args) -> bool:
     """Handle model download with beautiful output"""
-    # Determine the download source and validate inputs
+    main_model_id = None
+    # run by config file with multi-model support
+    if args.config:
+        # read config file from yaml
+        with open(args.config, "r") as f:
+            config = yaml.safe_load(f)
+        port = config.get("port", 8080)
+        host = config.get("host", "0.0.0.0")
+        models = config.get("models", {})
+        main_model_id = None
+        for model_name, model_config in models.items():
+            on_demand = model_config.get("on_demand", False)
+            if not on_demand:
+                main_model_id = model_name
+                break
+        if not main_model_id:
+            print_warning("No active model found in config file, using random model")
+            main_model_id = random.choice(list(models.keys()))
+
+    
     if args.hash:
         # Download by hash
         if args.hash not in HASH_TO_MODEL:
@@ -442,6 +468,153 @@ def handle_download(args) -> bool:
 
 def handle_run(args):
     """Handle model loading and configuration based on provided arguments."""
+    # Handle config file case with multi-model support
+    if args.config:
+        # read config file from yaml
+        with open(args.config, "r") as f:
+            config = yaml.safe_load(f)
+        port = config.get("port", 8080)
+        host = config.get("host", "0.0.0.0")
+        models = config.get("models", {})
+        
+        # Build configurations for all models
+        configs = []
+        main_model_id = None
+
+        # First pass: find the main model (on_demand=False)
+        for model_name, model_config in models.items():
+            on_demand = model_config.get("on_demand", False)
+            if not on_demand:
+                main_model_id = model_name
+                break
+        
+        if not main_model_id:
+            print_warning("No main model found in config file (on_demand=False), using first model")
+            main_model_id = list(models.keys())[0]
+        
+        # Second pass: create configurations for all models
+        for model_name, model_config in models.items():
+            lora_config = None
+            is_main = (model_name == main_model_id)
+            if "model" in model_config:
+                if model_config["model"] in FEATURED_MODELS:
+                    # Featured model by name
+                    featured_model_name = model_config["model"]
+                    if featured_model_name not in FEATURED_MODELS:
+                        print_error(f"Model {featured_model_name} not found in FEATURED_MODELS")
+                        continue
+                        
+                    hf_data = FEATURED_MODELS[featured_model_name]
+                    model_hash = MODEL_TO_HASH.get(featured_model_name)
+                    success, local_path = asyncio.run(download_model_async(hf_data, model_hash))
+                    if not success:
+                        print_error(f"Failed to download model {model_name}")
+                        continue
+                    projector = hf_data.get("projector", None)
+                    projector_path = None
+                    if projector:
+                        if os.path.exists(local_path + "-projector"):
+                            projector_path = local_path + "-projector"
+                        else:
+                            print_warning(f"Projector file {local_path + '-projector'} not found")
+                    
+                    is_lora = hf_data.get("lora", False)
+                    task = hf_data.get("task", "chat")
+                    if is_lora:
+                        if task == "image-generation":
+                            metadata_path = os.path.join(local_path, "metadata.json")
+                            if not os.path.exists(metadata_path):
+                                print_error("LoRA model found but metadata.json is missing")
+                                sys.exit(1)
+                            with open(metadata_path, "r") as f:
+                                lora_metadata = json.load(f)
+                            base_model = lora_metadata.get("base_model")
+                            if base_model in HASH_TO_MODEL:
+                                base_model_hash = base_model
+                                base_model = HASH_TO_MODEL[base_model]
+                            base_model_hf_data = FEATURED_MODELS[base_model]
+                            success, base_model_local_path = asyncio.run(download_model_async(base_model_hf_data, base_model_hash))
+                            if not success:
+                                print_error(f"Failed to download base model {base_model}")
+                                sys.exit(1)
+                            local_path = base_model_local_path
+                            lora_config = {}
+                            lora_paths = lora_metadata.get("lora_paths", [])
+                            lora_scales = lora_metadata.get("lora_scales", [])
+                            for i, lora_path in enumerate(lora_paths):
+                                lora_name = os.path.basename(lora_path)
+                                lora_config[lora_name] = {
+                                    "path": os.path.join(local_path, lora_path),
+                                    "scale": lora_scales[i]
+                                }
+                        else:
+                            print_warning(f"Lora model found but task {task} is not supported for lora")
+                            continue
+                        
+                    config_dict = {
+                        "model_id": model_name,
+                        "model": local_path,
+                        "context_length": DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH,
+                        "model_name": featured_model_name,
+                        "task": task,
+                        "on_demand": not is_main,
+                        "is_lora": is_lora,
+                        "projector": projector_path,
+                        "multimodal": bool(projector_path),
+                        "architecture": hf_data.get("architecture", None),
+                        "lora_config": lora_config,
+                    }
+                    configs.append(config_dict)
+                    continue
+                
+            if "hf_repo" in model_config:
+                # Download from Hugging Face
+                hf_data = {
+                    "repo": model_config["hf_repo"],
+                    "model": model_config["model"],
+                    "projector": model_config.get("mmproj"),
+                }
+                success, local_path = asyncio.run(download_model_async(hf_data))
+                if not success:
+                    print_error(f"Failed to download model {model_name}")
+                    continue
+                    
+                model_id = os.path.basename(local_path)
+                projector_path = None
+                if model_config.get("mmproj"):
+                    mmproj_path = local_path + "-projector"
+                    if os.path.exists(mmproj_path):
+                        projector_path = mmproj_path
+                        
+                config_dict = {
+                    "model_id": model_id,
+                    "model": local_path,
+                    "context_length": DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH,
+                    "model_name": model_id,
+                    "task": model_config.get("task", "chat"),
+                    "on_demand": not is_main,
+                    "is_lora": False,
+                    "projector": projector_path,
+                    "multimodal": bool(projector_path),
+                    "architecture": None,
+                    "lora_config": None,
+                }                
+                configs.append(config_dict)
+
+        
+        if not configs:
+            print_error("No valid models found in config file")
+            sys.exit(1)
+            
+        # Start the multi-model server
+        success = manager.start(configs, port, host)
+        if not success:
+            print_error("Failed to start multi-model server")
+            sys.exit(1)
+            
+        print_success(f"Multi-model server started with {len(configs)} models")
+        return success
+    
     # Handle Hugging Face repository case separately
     if args.hf_repo:
         hf_data = {
@@ -641,68 +814,58 @@ def load_model_metadata(model_id, is_main=False) -> tuple[bool, dict | None]:
         is_main (bool): Whether this is the main model (default: False).
 
     Returns:
-        dict: Configuration dictionary for the model.
+        tuple[bool, dict | None]: Success status and configuration dictionary.
     """
-    json_path = os.path.join(DEFAULT_MODEL_DIR, f"{model_id}.json")
+    # Use pathlib for consistent path operations
+    model_dir = DEFAULT_MODEL_DIR
+    json_path = model_dir / f"{model_id}.json"
+    
+    # Load metadata with optimized error handling
     try:
-        with open(json_path, "r") as f:
+        with json_path.open("r") as f:
             metadata = json.load(f)
-    except FileNotFoundError:
+    except (FileNotFoundError, OSError):
         print_warning(f"Metadata file not found for model {model_id}")
         return False, None
-    except json.JSONDecodeError:
-        print_warning(f"Invalid JSON in metadata file for model {model_id}")
+    except json.JSONDecodeError as e:
+        print_warning(f"Invalid JSON in metadata file for model {model_id}: {e}")
         return False, None
 
-    local_path = os.path.join(DEFAULT_MODEL_DIR, model_id)
-    if not os.path.exists(local_path):
-        local_path = local_path + POSTFIX_MODEL_PATH
-        if not os.path.exists(local_path):
+    # Optimize path checking - check both paths at once
+    local_path = model_dir / model_id
+    if not local_path.exists():
+        local_path = model_dir / f"{model_id}{POSTFIX_MODEL_PATH}"
+        if not local_path.exists():
             print_warning(f"Model file not found for model {model_id}")
             return False, None
 
-    projector_path = None
-    if metadata.get("multimodal", False):
-        projector_path = os.path.join(DEFAULT_MODEL_DIR, f"{model_id}-projector")
+    # Extract metadata values once
+    is_multimodal = metadata.get("multimodal", False)
+    is_lora = metadata.get("lora", False)
+    model_name = metadata.get("model_name") or metadata.get("folder_name", model_id)
+    
+    # Handle projector path for multimodal models
+    projector_path = str(model_dir / f"{model_id}-projector") if is_multimodal else None
     
     lora_config = None
-    is_lora = metadata.get("lora", False)
-    model_name = metadata.get("model_name", None)
-    if model_name is None:
-        model_name = metadata.get("folder_name", model_id)
-
     if is_lora:
-        lora_config = {}
-        lora_metadata_path = os.path.join(local_path, "metadata.json")
-        if not os.path.exists(lora_metadata_path):
-            print_warning("LoRA model found but metadata.json is missing")
+        lora_config = _load_lora_config(local_path, model_dir)
+        if lora_config is None:
             return False, None
-        with open(lora_metadata_path, "r") as f:
-            lora_metadata = json.load(f)
-        lora_paths = lora_metadata["lora_paths"]
-        lora_scales = lora_metadata["lora_scales"]
-        for i, lora_path in enumerate(lora_paths):
-            lora_name = os.path.basename(lora_path)
-            lora_config[lora_name] = {
-                "path": os.path.join(local_path, lora_path),
-                "scale": lora_scales[i]
-            }
-        base_model_hash = lora_metadata["base_model"]
-        if base_model_hash not in HASH_TO_MODEL:
-            print_warning(f"Base model hash {base_model_hash} not found")
+        
+        # Handle base model for LoRA
+        base_model_result = _handle_lora_base_model(lora_config.pop("_metadata", {}))
+        if base_model_result is None:
             return False, None
-        base_model_name = HASH_TO_MODEL[base_model_hash]
-        base_model_hf_data = FEATURED_MODELS[base_model_name]
-        success, base_model_local_path = asyncio.run(download_model_async(base_model_hf_data, base_model_hash))
-        local_path = base_model_local_path
-        model_name = base_model_name
+        local_path, model_name = base_model_result
 
+    # Build configuration dictionary
     config = {
         "model_id": model_id,
         "model_name": model_name,
         "task": metadata.get("task", "chat"),
-        "model": local_path,
-        "multimodal": metadata.get("multimodal", False),
+        "model": str(local_path),
+        "multimodal": is_multimodal,
         "projector": projector_path,
         "on_demand": not is_main,
         "is_lora": is_lora,
@@ -712,6 +875,72 @@ def load_model_metadata(model_id, is_main=False) -> tuple[bool, dict | None]:
     }
     return True, config
 
+
+def _load_lora_config(local_path, model_dir):
+    """Helper function to load LoRA configuration."""
+    lora_metadata_path = local_path / "metadata.json"
+    if not lora_metadata_path.exists():
+        print_warning("LoRA model found but metadata.json is missing")
+        return None
+    
+    try:
+        with lora_metadata_path.open("r") as f:
+            lora_metadata = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        print_warning(f"Failed to read LoRA metadata: {e}")
+        return None
+    
+    # Build LoRA configuration efficiently
+    lora_paths = lora_metadata.get("lora_paths", [])
+    lora_scales = lora_metadata.get("lora_scales", [])
+    
+    if len(lora_paths) != len(lora_scales):
+        print_warning("Mismatch between LoRA paths and scales")
+        return None
+    
+    lora_config = {
+        os.path.basename(lora_path): {
+            "path": str(local_path / lora_path),
+            "scale": lora_scales[i]
+        }
+        for i, lora_path in enumerate(lora_paths)
+    }
+    
+    # Store metadata for base model handling
+    lora_config["_metadata"] = lora_metadata
+    return lora_config
+
+
+def _handle_lora_base_model(lora_metadata):
+    """Helper function to handle LoRA base model resolution."""
+    base_model_hash = lora_metadata.get("base_model")
+    if not base_model_hash:
+        print_warning("LoRA metadata missing base_model hash")
+        return None
+        
+    if base_model_hash not in HASH_TO_MODEL:
+        print_warning(f"Base model hash {base_model_hash} not found")
+        return None
+    
+    base_model_name = HASH_TO_MODEL[base_model_hash]
+    if base_model_name not in FEATURED_MODELS:
+        print_warning(f"Base model {base_model_name} not in featured models")
+        return None
+        
+    base_model_hf_data = FEATURED_MODELS[base_model_name]
+    
+    try:
+        success, base_model_local_path = asyncio.run(
+            download_model_async(base_model_hf_data, base_model_hash)
+        )
+        if not success:
+            print_warning(f"Failed to download base model {base_model_name}")
+            return None
+        return base_model_local_path, base_model_name
+    except Exception as e:
+        print_warning(f"Error downloading base model: {e}")
+        return None
+
 def handle_serve(args):
     """Handle model serve command - run all downloaded models with specified main model.
 
@@ -719,7 +948,7 @@ def handle_serve(args):
         args: Command-line arguments containing host, port, main_hash, and main_model.
     """
     print_info("Discovering downloaded models in models directory...")
-
+            
     # Get all downloaded models
     downloaded_models = get_all_downloaded_models()
 
