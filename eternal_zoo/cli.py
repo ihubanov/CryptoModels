@@ -520,8 +520,8 @@ def handle_run(args):
                     
                     is_lora = hf_data.get("lora", False)
                     task = hf_data.get("task", "chat")
-                    if task == "image-generation":
-                        if is_lora:
+                    if is_lora:
+                        if task == "image-generation":
                             metadata_path = os.path.join(local_path, "metadata.json")
                             if not os.path.exists(metadata_path):
                                 print_error("LoRA model found but metadata.json is missing")
@@ -547,25 +547,25 @@ def handle_run(args):
                                     "path": os.path.join(local_path, lora_path),
                                     "scale": lora_scales[i]
                                 }
-                    else:
-                        print_warning(f"Task {task} not supported for {featured_model_name}")
-                        continue
-                    
-                    config_dict = {
-                        "model_id": model_name,
-                        "model": local_path,
-                        "context_length": DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH,
-                        "model_name": featured_model_name,
-                        "task": task,
-                        "on_demand": not is_main,
-                        "is_lora": is_lora,
-                        "projector": projector_path,
-                        "multimodal": bool(projector_path),
-                        "architecture": model_config.get("architecture", None),
-                        "lora_config": lora_config,
-                    }
-                    configs.append(config_dict)
-                    continue
+                        else:
+                            print_warning(f"Lora model found but task {task} is not supported for lora")
+                            continue
+                        
+                config_dict = {
+                    "model_id": model_name,
+                    "model": local_path,
+                    "context_length": DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH,
+                    "model_name": featured_model_name,
+                    "task": task,
+                    "on_demand": not is_main,
+                    "is_lora": is_lora,
+                    "projector": projector_path,
+                    "multimodal": bool(projector_path),
+                    "architecture": model_config.get("architecture", None),
+                    "lora_config": lora_config,
+                }
+                configs.append(config_dict)
+                continue
 
             if "hf_repo" in model_config:
                 # Download from Hugging Face
@@ -600,6 +600,7 @@ def handle_run(args):
                     "lora_config": None,
                 }                
                 configs.append(config_dict)
+
         
         if not configs:
             print_error("No valid models found in config file")
