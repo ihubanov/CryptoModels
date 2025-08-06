@@ -390,8 +390,3 @@ Calls to these tools must go to the commentary channel: 'functions'." }}
         {{- "<|start|>user<|message|>" + message.content + "<|end|>" }}
     {%- endif -%}
 {%- endfor -%}
-
-{#- Generation prompt #}
-{%- if add_generation_prompt -%}
-<|start|>assistant<|channel|>analysis
-{%- endif -%}
