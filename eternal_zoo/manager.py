@@ -14,7 +14,7 @@ from loguru import logger
 from eternal_zoo.config import DEFAULT_CONFIG
 from eternal_zoo.utils import wait_for_health
 from typing import Optional, Dict, Any, List
-from eternal_zoo.constants import NOT_SUPPORTED_TOOLS_MODELS
+from eternal_zoo.constants import GPT_OSS_SERIES
 
 
 class EternalZooServiceError(Exception):
@@ -834,12 +834,12 @@ class EternalZooManager:
             "-fa",
             "-ngl", "9999",
             "-c", str(context_length),
-            "--reasoning-format", "none",
             "--embeddings"
         ]
 
-        if model_name not in NOT_SUPPORTED_TOOLS_MODELS:
+        if model_name not in GPT_OSS_SERIES:
             command.extend(["--jinja"])
+            command.extend(["--reasoning-format", "none"])
 
         if projector is not None:
             if os.path.exists(projector):
