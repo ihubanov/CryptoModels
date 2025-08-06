@@ -171,6 +171,7 @@ class ServiceHandler:
         request.clean_messages()
         request.enhance_tool_messages()
         request_dict = convert_request_to_dict(request)
+        logger.info(f"Request dict: {request_dict}")
         
         if request.stream:
             # For streaming requests, generate a stream ID 
