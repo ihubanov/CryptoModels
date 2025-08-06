@@ -360,7 +360,9 @@ class ServiceHandler:
             json_response = response.json()
             
             # Apply harmony parsing for GPT-OSS models
-            if model in HARMONY_SERIES and HARMONY_AVAILABLE:
+            model = data.get("model", None)
+            harmony_enabled = model in HARMONY_SERIES and HARMONY_AVAILABLE
+            if harmony_enabled:
                 try:
                     if "choices" in json_response and len(json_response["choices"]) > 0:
                         choice = json_response["choices"][0]
@@ -396,7 +398,8 @@ class ServiceHandler:
             tool_calls = {}
             
             # Initialize harmony parsing for GPT-OSS models
-            harmony_enabled = data.get("model", None) in HARMONY_SERIES and HARMONY_AVAILABLE
+            model = data.get("model", None)
+            harmony_enabled = model in HARMONY_SERIES and HARMONY_AVAILABLE
             thinking_stream = None
             content_stream = None
             harmony_enc = None
