@@ -136,6 +136,11 @@ FEATURED_MODELS = {
         "model": "Dolphin3.0-Llama3.1-8B-Q8_0.gguf",
         "task": "chat"
     },
+    "gpt-oss-20b": {
+        "repo": "unsloth/gpt-oss-20b-GGUF",
+        "model": "gpt-oss-20b-F16.gguf",
+        "task": "chat"
+    },
     "flux-dev": {
        "repo": "NikolaSigmoid/FLUX.1-dev",
        "task": "image-generation",
