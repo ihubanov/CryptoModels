@@ -358,26 +358,29 @@ else
 fi
 
 # Step 5: Install llama.cpp
-log_message "Checking llama.cpp version..."
-if command_exists llama-cli; then
-    INSTALLED_VERSION=$(llama-cli --version 2>&1 | grep -oE 'version: [0-9]+' | cut -d' ' -f2 || echo "0")
-    log_message "Current llama.cpp version: $INSTALLED_VERSION"
+# log_message "Checking llama.cpp version..."
+# if command_exists llama-cli; then
+#     INSTALLED_VERSION=$(llama-cli --version 2>&1 | grep -oE 'version: [0-9]+' | cut -d' ' -f2 || echo "0")
+#     log_message "Current llama.cpp version: $INSTALLED_VERSION"
     
-    # Get latest version from the formula file
-    LATEST_VERSION=$(grep -oE 'tag: *"b[0-9]+"' llama.cpp.rb | sed 's/tag: *"b//;s/"//' || echo "0")
-    log_message "Latest available version: $LATEST_VERSION"
+#     # Get latest version from the formula file
+#     LATEST_VERSION=$(grep -oE 'tag: *"b[0-9]+"' llama.cpp.rb | sed 's/tag: *"b//;s/"//' || echo "0")
+#     log_message "Latest available version: $LATEST_VERSION"
     
-    if [ "$INSTALLED_VERSION" -ne "$LATEST_VERSION" ]; then
-        log_message "Version mismatch detected. Reinstalling llama.cpp to match formula version..."
-        brew uninstall --force llama.cpp
-        brew install llama.cpp.rb || handle_error $? "Failed to install llama.cpp"
-    else
-        log_message "Already running the correct version of llama.cpp."
-    fi
-else
-    log_message "llama.cpp not found. Installing..."
-    brew install llama.cpp.rb || handle_error $? "Failed to install llama.cpp"
-fi
+#     if [ "$INSTALLED_VERSION" -ne "$LATEST_VERSION" ]; then
+#         log_message "Version mismatch detected. Reinstalling llama.cpp to match formula version..."
+#         brew uninstall --force llama.cpp
+#         brew install llama.cpp.rb || handle_error $? "Failed to install llama.cpp"
+#     else
+#         log_message "Already running the correct version of llama.cpp."
+#     fi
+# else
+#     log_message "llama.cpp not found. Installing..."
+#     brew install llama.cpp.rb || handle_error $? "Failed to install llama.cpp"
+# fi
+log_message "installing latest llama.cpp"
+brew unlink llama.cpp || true
+brew install llama.cpp --HEAD || handle_error $? "Failed to install llama.cpp"
 
 log_message "Verifying llama.cpp version..."
 hash -r
