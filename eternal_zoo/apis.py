@@ -241,7 +241,8 @@ class ServiceHandler:
                 break
 
         if model is None:
-            raise HTTPException(status_code=404, detail=f"Model {request.model} not found in chat models")
+            model = chat_models[0]
+            request.model = model["model_id"]
 
         port = model.get("port", None)
         if port is None:
@@ -295,7 +296,8 @@ class ServiceHandler:
                 break
                 
         if model is None:
-            raise HTTPException(status_code=404, detail=f"Model {request.model} not found in embedding models")
+            model = embedding_models[0]
+            request.model = model["model_id"]
         
         port = model.get("port", None)
         if port is None:
@@ -325,7 +327,8 @@ class ServiceHandler:
                 break
 
         if model is None:
-            raise HTTPException(status_code=404, detail=f"Model {request.model} not found in image generation models")
+            model = image_generation_models[0]
+            request.model = model["model_id"]
         
         port = model.get("port", None)
         if port is None:
@@ -761,7 +764,7 @@ class RequestProcessor:
             )
     
     @staticmethod
-    async def _ensure_model_active_in_queue(model_requested: str, request_id: str) -> Tuple[str, bool]:
+    async def _ensure_model_active_in_queue(model_requested: str, request_id: str) -> bool:
         """
         Ensure the requested model is active within the queue processing context.
         This method is called within the processing lock to ensure atomic model switching.
@@ -776,24 +779,16 @@ class RequestProcessor:
         """
         try:
             available_models = eternal_zoo_manager.get_available_models()
-
             model = None
-            
             for model in available_models:
                 if model["model_id"] == model_requested:
                     break
-
+            
             if model is None:
-                model = available_models[0]
-                model_requested = model["model_id"]
-
-            # Check if model is already active
+                return False
+            
             if model["active"]:
-                logger.debug(f"[{request_id}] Model {model_requested} is already active")
-                return model_requested, True
-                
-            # Model exists but not active, need to switch
-            logger.info(f"[{request_id}] Model switch required to {model_requested}")
+                return True
             
             # Wait for any active streams to complete before switching
             if await RequestProcessor.has_active_streams():
@@ -801,7 +796,7 @@ class RequestProcessor:
                 logger.info(f"[{request_id}] Waiting for {stream_count} active streams to complete before model switch")
                 if not await RequestProcessor.wait_for_streams_to_complete(timeout=MODEL_SWITCH_STREAM_TIMEOUT, force_terminate=True):
                     logger.error(f"[{request_id}] Failed to wait for streams to complete")
-                    return None, False
+                    return False
                 logger.info(f"[{request_id}] All streams completed, proceeding with model switch")
             
             # Perform the model switch
@@ -814,17 +809,17 @@ class RequestProcessor:
             switch_duration = time.time() - switch_start_time
             
             if success:
-                logger.info(f"[{request_id}] Successfully switched from {model['model_id']} to {model_requested} "
+                logger.info(f"[{request_id}] Successfully switched to {model_requested} "
                            f"(switch time: {switch_duration:.2f}s)")
-                return model_requested, True
+                return True
             else:
                 logger.error(f"[{request_id}] Failed to switch to model {model_requested} "
                            f"(attempted for {switch_duration:.2f}s)")
-                return None, False
+                return False
                 
         except Exception as e:
             logger.error(f"[{request_id}] Error ensuring model active: {str(e)}", exc_info=True)
-            return None, False
+            return False
     
     @staticmethod
     async def process_request(endpoint: str, request_data: Dict[str, Any]):
@@ -898,7 +893,7 @@ class RequestProcessor:
                                 if active_stream_count > 0:
                                     logger.info(f"[{request_id}] Found {active_stream_count} active streams before model check")
                                 
-                                model_requested, success = await RequestProcessor._ensure_model_active_in_queue(request_obj.model, request_id)
+                                success = await RequestProcessor._ensure_model_active_in_queue(request_obj.model, request_id)
                                 if not success:
                                     error_msg = f"Model {request_obj.model} is not available or failed to switch or is not a {tasks} model"
                                     logger.error(f"[{request_id}] {error_msg}")
@@ -908,7 +903,6 @@ class RequestProcessor:
                                 # Refresh service info after potential model switch
                                 logger.debug(f"[{request_id}] Model {request_obj.model} confirmed active, proceeding with request")
                             
-                            request_obj.model = model_requested
                             # Process the request with the updated service info
                             result = await handler(request_obj)
                             future.set_result(result)
