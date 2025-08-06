@@ -172,9 +172,7 @@ class ServiceHandler:
                 
         request.clean_messages()
         request.enhance_tool_messages()
-        request_dict = convert_request_to_dict(request)
-        print(request_dict)
-        
+        request_dict = convert_request_to_dict(request)        
         if request.stream:
             # For streaming requests, generate a stream ID 
             stream_id = generate_request_id()
@@ -260,6 +258,11 @@ class ServiceHandler:
     @staticmethod
     async def _make_api_call(host: str, port: int, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """Make a non-streaming API call to the specified endpoint and return the JSON response."""
+        model = data.get("model", None)
+        if model in GPT_OSS_SERIES:
+            data.pop("tools", None)
+            data.pop("tool_choice", None)
+            logger.info(f"Removed tools and tool_choice for model in {GPT_OSS_SERIES}")
         try:
             response = await app.state.client.post(
                 f"http://{host}:{port}{endpoint}", 
@@ -285,6 +288,11 @@ class ServiceHandler:
     
     @staticmethod
     async def _stream_generator(port: int, data: Dict[str, Any], stream_id: str):
+        model = data.get("model", None)
+        if model in GPT_OSS_SERIES:
+            data.pop("tools", None)
+            data.pop("tool_choice", None)
+            logger.info(f"Removed tools and tool_choice for model in {GPT_OSS_SERIES}")
         """Generator for streaming responses from the service."""
         try:
             # Register stream at the start of actual streaming to avoid race conditions
