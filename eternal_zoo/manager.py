@@ -695,6 +695,8 @@ class EternalZooManager:
             return None
         model_name = model_name.lower()
 
+        if "gpt-oss" in model_name:
+            return "gpt-oss"
         if "qwen3-coder" in model_name:
             return "qwen3-coder"
         if "qwen3" in model_name:
