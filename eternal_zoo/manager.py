@@ -14,8 +14,6 @@ from loguru import logger
 from eternal_zoo.config import DEFAULT_CONFIG
 from eternal_zoo.utils import wait_for_health
 from typing import Optional, Dict, Any, List
-from eternal_zoo.constants import GPT_OSS_SERIES
-
 
 class EternalZooServiceError(Exception):
     """Base exception for EternalZoo service errors."""
@@ -835,11 +833,9 @@ class EternalZooManager:
             "-ngl", "9999",
             "-c", str(context_length),
             "--embeddings",
-            "--jinja"
+            "--jinja",
+            "--reasoning-format", "none"
         ]
-
-        if model_name not in GPT_OSS_SERIES:
-            command.extend(["--reasoning-format", "none"])
 
         if projector is not None:
             if os.path.exists(projector):

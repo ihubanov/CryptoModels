@@ -18,7 +18,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from eternal_zoo.manager import EternalZooManager, EternalZooServiceError
-from eternal_zoo.constants import GPT_OSS_SERIES
+from eternal_zoo.constants import HARMONY_SERIES
 
 # Import schemas from schema.py
 from eternal_zoo.schema import (
@@ -160,21 +160,21 @@ class HarmonyParser:
         
         try:
             # Find the final content pattern
-            pattern = "<|start|>assistant<|channel|>final"
+            pattern = "<|start|>"
             start_content = content.find(pattern)
             
             if start_content == -1:
                 # No thinking content found, return content as is
                 return "", content
             
-            thinking_content = content[:start_content]
+            non_thinking_content = content[:start_content]
             final_content = content[start_content:]
             
-            # Parse thinking content
-            if thinking_content:
-                thinking_tokens = enc.encode(thinking_content, allowed_special="all")
-                thinking_messages = enc.parse_messages_from_completion_tokens(thinking_tokens, role=Role.ASSISTANT)
-                thinking_text = thinking_messages[0].content if thinking_messages else ""
+            # Parse non-thinking content (thinking content)
+            if non_thinking_content:
+                non_thinking_tokens = enc.encode(non_thinking_content, allowed_special="all")
+                non_thinking_messages = enc.parse_messages_from_completion_tokens(non_thinking_tokens, role=Role.ASSISTANT)
+                thinking_text = non_thinking_messages[0].content[0].text if non_thinking_messages and non_thinking_messages[0].content else ""
             else:
                 thinking_text = ""
             
@@ -182,7 +182,7 @@ class HarmonyParser:
             if final_content:
                 final_tokens = enc.encode(final_content, allowed_special="all")
                 final_messages = enc.parse_messages_from_completion_tokens(final_tokens, role=Role.ASSISTANT)
-                final_text = final_messages[0].content if final_messages else ""
+                final_text = final_messages[0].content[0].text if final_messages and final_messages[0].content else ""
             else:
                 final_text = content
                 
@@ -343,10 +343,10 @@ class ServiceHandler:
     async def _make_api_call(host: str, port: int, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """Make a non-streaming API call to the specified endpoint and return the JSON response."""
         model = data.get("model", None)
-        if model in GPT_OSS_SERIES:
+        if model in HARMONY_SERIES:
             data.pop("tools", None)
             data.pop("tool_choice", None)
-            logger.info(f"Removed tools and tool_choice for model in {GPT_OSS_SERIES}")
+            logger.info(f"Removed tools and tool_choice for model in {HARMONY_SERIES}")
         try:
             response = await app.state.client.post(
                 f"http://{host}:{port}{endpoint}", 
@@ -365,7 +365,7 @@ class ServiceHandler:
             json_response = response.json()
             
             # Apply harmony parsing for GPT-OSS models
-            if model in GPT_OSS_SERIES and HARMONY_AVAILABLE:
+            if model in HARMONY_SERIES and HARMONY_AVAILABLE:
                 try:
                     if "choices" in json_response and len(json_response["choices"]) > 0:
                         choice = json_response["choices"][0]
@@ -373,12 +373,10 @@ class ServiceHandler:
                             original_content = choice["message"]["content"]
                             thinking_content, final_content = HarmonyParser.parse_non_streaming_content(original_content)
                             
-                            # Update the response with parsed final content
-                            choice["message"]["content"] = final_content
-                            
-                            # Add thinking content as a custom field if it exists
                             if thinking_content.strip():
-                                choice["message"]["thinking"] = thinking_content
+                                choice["message"]["content"] = "<think>" + thinking_content + "</think>" + final_content
+                            else:
+                                choice["message"]["content"] = final_content
                                 
                             logger.debug(f"Applied harmony parsing for model {model}")
                 except Exception as e:
@@ -394,10 +392,10 @@ class ServiceHandler:
     @staticmethod
     async def _stream_generator(port: int, data: Dict[str, Any], stream_id: str):
         model = data.get("model", None)
-        if model in GPT_OSS_SERIES:
+        if model in HARMONY_SERIES:
             data.pop("tools", None)
             data.pop("tool_choice", None)
-            logger.info(f"Removed tools and tool_choice for model in {GPT_OSS_SERIES}")
+            logger.info(f"Removed tools and tool_choice for model in {HARMONY_SERIES}")
         """Generator for streaming responses from the service."""
         try:
             # Register stream at the start of actual streaming to avoid race conditions
@@ -408,7 +406,7 @@ class ServiceHandler:
             tool_calls = {}
             
             # Initialize harmony parsing for GPT-OSS models
-            harmony_enabled = model in GPT_OSS_SERIES and HARMONY_AVAILABLE
+            harmony_enabled = model in HARMONY_SERIES and HARMONY_AVAILABLE
             thinking_stream = None
             content_stream = None
             harmony_enc = None
@@ -532,15 +530,18 @@ class ServiceHandler:
                                             content = choice.delta.content
                                             tokens = harmony_enc.encode(content, allowed_special="all")
                                             
-                                            for token in tokens:
+                                            if tokens:  # Only process if we have tokens
+                                                token = tokens[0]  # Process first token from this chunk
                                                 if not done_thinking:
                                                     thinking_stream.process(token)
                                                     if thinking_stream.last_content_delta:
                                                         thinking_content += thinking_stream.last_content_delta
-                                                    if thinking_stream.last_content_delta == "final":
+                                                    if thinking_stream.last_content_delta == "<|start|>":
                                                         done_thinking = True
-                                                        # Start processing with content stream from now on
+                                                        # Don't yield thinking content chunks
                                                         continue
+                                                    # Don't yield thinking content chunks
+                                                    continue
                                                 else:
                                                     content_stream.process(token)
                                                     if content_stream.last_content_delta:
@@ -548,10 +549,11 @@ class ServiceHandler:
                                                         # Update chunk content with parsed final content
                                                         chunk_obj.choices[0].delta.content = content_stream.last_content_delta
                                                         yield f"data: {chunk_obj.json()}\n\n"
-                                                        break  # Only yield one delta per chunk
-                                            
-                                            # If we're still in thinking mode, don't yield the chunk
-                                            if not done_thinking:
+                                                    else:
+                                                        # No content delta, don't yield empty chunk
+                                                        continue
+                                            else:
+                                                # No tokens, skip this chunk
                                                 continue
                                                 
                                         except Exception as e:
