@@ -531,7 +531,6 @@ class ServiceHandler:
                                                     thinking_stream.process(token)
                                                     
                                                     if thinking_stream.last_content_delta:
-                                                        print(thinking_stream.last_content_delta)
                                                         if thinking_stream.last_content_delta == "<|start|>":
                                                             done_thinking = True
                                                             chunk_obj.choices[0].delta.content = "</think>"
