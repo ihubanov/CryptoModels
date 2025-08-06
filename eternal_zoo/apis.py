@@ -147,9 +147,7 @@ class ServiceHandler:
         chat_models = eternal_zoo_manager.get_models_by_task(["chat"])
         if len(chat_models) == 0:
             raise HTTPException(status_code=404, detail=f"No chat model found")
-        
-        print(request.model)
-        
+                
         model = None
         for chat_model in chat_models:
             if request.model == chat_model["model_id"]:
