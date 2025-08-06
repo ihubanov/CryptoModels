@@ -545,7 +545,7 @@ class ServiceHandler:
                                                     content_stream.process(token)
                                                     if content_stream.last_content_delta:
                                                         # Update chunk content with parsed final content
-                                                        chunk_obj.choices[0].delta.content = think_chunk_content
+                                                        chunk_obj.choices[0].delta.content = content_stream.last_content_delta
                                                         yield f"data: {chunk_obj.json()}\n\n"
                                                     else:
                                                         # No content delta, don't yield empty chunk
@@ -765,7 +765,8 @@ class RequestProcessor:
                     break
             
             if model is None:
-                return False
+                model = available_models[0]
+                model_requested = model["model_id"]
             
             if model["active"]:
                 return True
