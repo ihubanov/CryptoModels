@@ -204,9 +204,14 @@ port: 8080
 host: 0.0.0.0
 models:
   # Main model - loaded immediately when server starts
+  gpt-oss-20b:
+    model: gpt-oss-20b # Featured model name from eternal-zoo
+    on_demand: True  # Main model - loaded immediately
+
+  # On-demand models - loaded only when requested
   qwen3-30b-instruct:
     model: qwen3-30b-a3b-instruct-2507 # Featured model name from eternal-zoo
-    on_demand: False  # Main model - loaded immediately
+    on_demand: True  # Main model - loaded immediately
 
   qwen3-30b-thinking:
     model: qwen3-30b-a3b-thinking-2507 # Featured model name from eternal-zoo
@@ -262,64 +267,6 @@ eai model run --config config.yaml
 - **Fallback**: If no model has `on_demand: False`, the first model in the config becomes the main model
 - **Behavior**: The main model is loaded immediately when the server starts, while on-demand models are loaded only when first requested
 
-#### **Example Configurations**
-
-**Simple Multi-Model Setup:**
-```yaml
-port: 8080
-host: 0.0.0.0
-models:
-  qwen3-8b:
-    model: qwen3-8b
-    on_demand: False  # Main model
-  
-  gemma-3-4b:
-    model: gemma-3-4b
-    on_demand: True   # On-demand model
-```
-
-**Mixed Model Sources:**
-```yaml
-port: 8080
-host: 0.0.0.0
-models:
-  # Featured model as main
-  qwen3-30b:
-    model: qwen3-30b-a3b-instruct-2507
-    on_demand: False
-  
-  # IPFS model on-demand
-  flux-dev:
-    hash: bafkreiaha3sjfmv4affmi5kbu6bnayenf2avwafp3cthhar3latmfi632u
-    on_demand: True
-  
-  # Hugging Face model on-demand
-  dolphin-3.0:
-    hf_repo: dphn/Dolphin3.0-Llama3.1-8B-GGUF
-    model: Dolphin3.0-Llama3.1-8B-Q4_0.gguf
-    task: chat
-    on_demand: True
-```
-
-**Vision Model Setup:**
-```yaml
-port: 8080
-host: 0.0.0.0
-models:
-  # Main vision model
-  gemma-3-4b:
-    model: gemma-3-4b
-    on_demand: False
-  
-  # On-demand vision model from Hugging Face
-  qwen2.5-vl:
-    hf_repo: unsloth/Qwen2.5-VL-7B-Instruct-GGUF
-    model: Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf
-    mmproj: mmproj-F16.gguf
-    task: chat
-    on_demand: True
-```
-
 #### **Benefits of Config Files**
 
 - **🎯 Precise Control**: Specify exactly which model should be main vs on-demand
@@ -331,6 +278,14 @@ models:
 ### Available Pre-uploaded Models
 
 We've prepared several models for you to test with. Each model is listed with its specifications and command to run.
+
+#### 🔤 GPT-OSS Series
+[Learn more about GPT-OSS](https://huggingface.co/openai/gpt-oss-20b)
+
+| Model | Size | RAM | Command |
+|-------|------|-----|---------|
+| gpt-oss-20b | 63.4 GB | _ | `eai model run gpt-oss-20b` |
+| gpt-oss-120b | 120 GB | _ | `eai model run gpt-oss-120b` |
 
 #### 🔤 Qwen3 Series
 [Learn more about Qwen3](https://qwenlm.github.io/blog/qwen3/)
