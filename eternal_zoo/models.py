@@ -144,8 +144,8 @@ FEATURED_MODELS = {
         "task": "chat"
     },
     "gpt-oss-120b": {
-        "repo": "ggml-org/gpt-oss-120b-GGUF",
-        "model": "gpt-oss-120b-mxfp4.gguf",
+        "repo": "bartowski/openai_gpt-oss-120b-GGUF-MXFP4-Experimental",
+        "model": "openai_gpt-oss-120b-MXFP4.gguf",
         "task": "chat"
     },
     "flux-dev": {
