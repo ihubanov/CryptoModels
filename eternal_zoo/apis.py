@@ -342,11 +342,6 @@ class ServiceHandler:
     @staticmethod
     async def _make_api_call(host: str, port: int, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """Make a non-streaming API call to the specified endpoint and return the JSON response."""
-        model = data.get("model", None)
-        if model in HARMONY_SERIES:
-            data.pop("tools", None)
-            data.pop("tool_choice", None)
-            logger.info(f"Removed tools and tool_choice for model in {HARMONY_SERIES}")
         try:
             response = await app.state.client.post(
                 f"http://{host}:{port}{endpoint}", 
@@ -366,17 +361,12 @@ class ServiceHandler:
             
             # Apply harmony parsing for GPT-OSS models
             if model in HARMONY_SERIES and HARMONY_AVAILABLE:
-                print(json_response)
                 try:
                     if "choices" in json_response and len(json_response["choices"]) > 0:
                         choice = json_response["choices"][0]
                         if "message" in choice and "content" in choice["message"]:
                             original_content = choice["message"]["content"]
                             thinking_content, final_content = HarmonyParser.parse_non_streaming_content(original_content)
-
-                            print(thinking_content)
-                            print(final_content)
-                            
                             
                             if thinking_content.strip():
                                 json_response["choices"][0]["message"]["content"] = "<think>" + thinking_content + "</think>" + final_content
@@ -396,11 +386,6 @@ class ServiceHandler:
     
     @staticmethod
     async def _stream_generator(port: int, data: Dict[str, Any], stream_id: str):
-        model = data.get("model", None)
-        if model in HARMONY_SERIES:
-            data.pop("tools", None)
-            data.pop("tool_choice", None)
-            logger.info(f"Removed tools and tool_choice for model in {HARMONY_SERIES}")
         """Generator for streaming responses from the service."""
         try:
             # Register stream at the start of actual streaming to avoid race conditions
@@ -411,7 +396,7 @@ class ServiceHandler:
             tool_calls = {}
             
             # Initialize harmony parsing for GPT-OSS models
-            harmony_enabled = model in HARMONY_SERIES and HARMONY_AVAILABLE
+            harmony_enabled = data.get("model", None) in HARMONY_SERIES and HARMONY_AVAILABLE
             thinking_stream = None
             content_stream = None
             harmony_enc = None
@@ -801,13 +786,6 @@ class RequestProcessor:
                     logger.error(f"[{request_id}] Model {model_requested} is not a {tasks} model")
                     return False
             else:
-                # Get current service info
-                available_models = eternal_zoo_manager.get_models_by_task(tasks)
-
-                if len(available_models) == 0:
-                    logger.error(f"[{request_id}] No {tasks} models found")
-                    return False
-                
                 model = available_models[0]
                 logger.info(f"[{request_id}] No model {model_requested} found, using {model['model_id']} instead")
                 model_requested = model["model_id"]
