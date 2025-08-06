@@ -366,12 +366,17 @@ class ServiceHandler:
             
             # Apply harmony parsing for GPT-OSS models
             if model in HARMONY_SERIES and HARMONY_AVAILABLE:
+                print(json_response)
                 try:
                     if "choices" in json_response and len(json_response["choices"]) > 0:
                         choice = json_response["choices"][0]
                         if "message" in choice and "content" in choice["message"]:
                             original_content = choice["message"]["content"]
                             thinking_content, final_content = HarmonyParser.parse_non_streaming_content(original_content)
+
+                            print(thinking_content)
+                            print(final_content)
+                            
                             
                             if thinking_content.strip():
                                 json_response["choices"][0]["message"]["content"] = "<think>" + thinking_content + "</think>" + final_content
