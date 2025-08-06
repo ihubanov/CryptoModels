@@ -406,8 +406,7 @@ class ServiceHandler:
             thinking_stream = None
             content_stream = None
             harmony_enc = None
-            thinking_content = ""
-            final_content = ""
+            think_chunk_content = None
             done_thinking = False
             
             if harmony_enabled:
@@ -531,19 +530,22 @@ class ServiceHandler:
                                                 if not done_thinking:
                                                     thinking_stream.process(token)
                                                     if thinking_stream.last_content_delta:
-                                                        thinking_content += thinking_stream.last_content_delta
+                                                        if think_chunk_content is None:
+                                                            think_chunk_content = "<think>" + thinking_stream.last_content_delta
+                                                        else:
+                                                            think_chunk_content = thinking_stream.last_content_delta
                                                     if thinking_stream.last_content_delta == "<|start|>":
                                                         done_thinking = True
-                                                        # Don't yield thinking content chunks
-                                                        continue
-                                                    # Don't yield thinking content chunks
-                                                    continue
+                                                        think_chunk_content += "</think>"
+                                                    
+                                                    chunk_obj.choices[0].delta.content = think_chunk_content
+                                                    yield f"data: {chunk_obj.json()}\n\n"
+                                                
                                                 else:
                                                     content_stream.process(token)
                                                     if content_stream.last_content_delta:
-                                                        final_content += content_stream.last_content_delta
                                                         # Update chunk content with parsed final content
-                                                        chunk_obj.choices[0].delta.content = content_stream.last_content_delta
+                                                        chunk_obj.choices[0].delta.content = think_chunk_content
                                                         yield f"data: {chunk_obj.json()}\n\n"
                                                     else:
                                                         # No content delta, don't yield empty chunk
@@ -575,29 +577,7 @@ class ServiceHandler:
                                 yield f"data: {chunk_obj.json()}\n\n"
                             except Exception as e:
                                 logger.error(f"Failed to parse trailing chunk in {stream_id}: {e}")
-                        elif json_str == '[DONE]':
-                            # Before finishing, send thinking content if available for GPT-OSS models
-                            if harmony_enabled and thinking_content.strip():
-                                try:
-                                    # Create a final chunk with thinking content
-                                    thinking_chunk = ChatCompletionChunk.parse_raw(json.dumps({
-                                        "id": generate_chat_completion_id(),
-                                        "object": "chat.completion.chunk",
-                                        "created": int(time.time()),
-                                        "model": model,
-                                        "choices": [{
-                                            "index": 0,
-                                            "delta": {
-                                                "content": None,
-                                                "thinking": thinking_content
-                                            },
-                                            "finish_reason": None
-                                        }]
-                                    }))
-                                    yield f"data: {thinking_chunk.json()}\n\n"
-                                except Exception as e:
-                                    logger.error(f"Failed to send thinking content chunk: {e}")
-                            
+                        elif json_str == '[DONE]':                        
                             yield 'data: [DONE]\n\n'
                             
             except Exception as e:
