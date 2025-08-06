@@ -12,6 +12,7 @@ from rich import print as rprint
 
 from eternal_zoo.version import __version__
 from eternal_zoo.config import DEFAULT_CONFIG
+from eternal_zoo.utils import find_gguf_files
 from eternal_zoo.manager import EternalZooManager
 from eternal_zoo.upload import upload_folder_to_lighthouse
 from eternal_zoo.constants import DEFAULT_MODEL_DIR, POSTFIX_MODEL_PATH
@@ -617,12 +618,38 @@ def handle_run(args):
                 projector_path = mmproj_path
 
         if args.pattern:
-            # check `local_path` is a folder
+            # Validate that local_path is a directory
             if not os.path.isdir(local_path):
-                print_error(f"Path {local_path} is not a folder")
+                print_error(f"Path {local_path} is not a directory")
                 sys.exit(1)
-            files_in_folder = sorted(os.listdir(local_path))
-            local_path = os.path.join(local_path, files_in_folder[0])
+            
+            pattern_dir = os.path.join(local_path, args.pattern)
+            
+            # First try to find GGUF files in the pattern directory
+            if os.path.exists(pattern_dir) and os.path.isdir(pattern_dir):
+                print_info(f"Searching for GGUF files in pattern directory: {pattern_dir}")
+                gguf_files = find_gguf_files(pattern_dir)
+                
+                if gguf_files:
+                    selected_file = gguf_files[0]  # Use the first (sorted) file
+                    local_path = os.path.join(pattern_dir, selected_file)
+                    print_success(f"Found GGUF file: {selected_file}")
+                else:
+                    print_error(f"No GGUF files found in {pattern_dir}")
+                    sys.exit(1)
+            else:
+                # Pattern directory doesn't exist, search in base directory
+                print_info(f"Pattern directory not found: {pattern_dir}")
+                print_info(f"Searching for GGUF files in base directory: {local_path}")
+                
+                gguf_files = find_gguf_files(local_path)
+                if gguf_files:
+                    selected_file = gguf_files[0]
+                    local_path = os.path.join(local_path, selected_file)
+                    print_success(f"Found GGUF file: {selected_file}")
+                else:
+                    print_error(f"No GGUF files found in {local_path}")
+                    sys.exit(1)
 
         config = {
             "model_id": model_id,
@@ -745,9 +772,12 @@ def handle_run(args):
         if not os.path.isdir(local_path):
             print_error(f"Path {local_path} is not a folder")
             sys.exit(1)
-        files_in_folder = sorted(os.listdir(local_path))
-        local_path = os.path.join(local_path, files_in_folder[0])
-        
+        gguf_files = find_gguf_files(local_path)
+        if len(gguf_files) == 0:
+            print_error(f"No GGUF files found in {local_path}")
+            sys.exit(1)
+        local_path = os.path.join(local_path, gguf_files[0])
+
     # Build configuration
     config = {
         "model_id": model_id,
