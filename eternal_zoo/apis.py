@@ -148,6 +148,8 @@ class ServiceHandler:
         if len(chat_models) == 0:
             raise HTTPException(status_code=404, detail=f"No chat model found")
         
+        print(request.model)
+        
         model = None
         for chat_model in chat_models:
             if request.model == chat_model["model_id"]:
@@ -171,7 +173,7 @@ class ServiceHandler:
         request.clean_messages()
         request.enhance_tool_messages()
         request_dict = convert_request_to_dict(request)
-        logger.info(f"Request dict: {request_dict}")
+        print(request_dict)
         
         if request.stream:
             # For streaming requests, generate a stream ID 
@@ -258,10 +260,6 @@ class ServiceHandler:
     @staticmethod
     async def _make_api_call(host: str, port: int, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """Make a non-streaming API call to the specified endpoint and return the JSON response."""
-        if data.get("model", None) in GPT_OSS_SERIES:
-            data.pop("tools", None)
-            data.pop("tool_choice", None)
-            logger.info(f"Removed tools and tool_choice for model in {GPT_OSS_SERIES}")
         try:
             response = await app.state.client.post(
                 f"http://{host}:{port}{endpoint}", 
