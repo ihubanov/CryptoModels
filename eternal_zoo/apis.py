@@ -374,14 +374,14 @@ class ServiceHandler:
                             thinking_content, final_content = HarmonyParser.parse_non_streaming_content(original_content)
                             
                             if thinking_content.strip():
-                                choice["message"]["content"] = "<think>" + thinking_content + "</think>" + final_content
+                                json_response["choices"][0]["message"]["content"] = "<think>" + thinking_content + "</think>" + final_content
                             else:
-                                choice["message"]["content"] = final_content
+                                json_response["choices"][0]["message"]["content"] = final_content
                                 
                             logger.debug(f"Applied harmony parsing for model {model}")
                 except Exception as e:
                     logger.error(f"Failed to apply harmony parsing for model {model}: {e}")
-            
+
             return json_response
             
         except httpx.TimeoutException as e:
