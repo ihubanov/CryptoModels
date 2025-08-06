@@ -14,6 +14,7 @@ from loguru import logger
 from eternal_zoo.config import DEFAULT_CONFIG
 from eternal_zoo.utils import wait_for_health
 from typing import Optional, Dict, Any, List
+from eternal_zoo.constants import NOT_SUPPORTED_TOOLS_MODELS
 
 
 class EternalZooServiceError(Exception):
@@ -823,7 +824,7 @@ class EternalZooManager:
 
         projector = config.get("projector", None)
         context_length = config.get("context_length", 32768)
-        
+
         command = [
             self.llama_server_path,
             "--model", str(model_path),
@@ -832,11 +833,13 @@ class EternalZooManager:
             "--no-context-shift",
             "-fa",
             "-ngl", "9999",
-            "--jinja",
             "-c", str(context_length),
             "--reasoning-format", "none",
             "--embeddings"
         ]
+
+        if model_name not in NOT_SUPPORTED_TOOLS_MODELS:
+            command.extend(["--jinja"])
 
         if projector is not None:
             if os.path.exists(projector):

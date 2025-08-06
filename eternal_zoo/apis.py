@@ -18,6 +18,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from eternal_zoo.manager import EternalZooManager, EternalZooServiceError
+from eternal_zoo.constants import NOT_SUPPORTED_TOOLS_MODELS
 
 # Import schemas from schema.py
 from eternal_zoo.schema import (
@@ -43,8 +44,6 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 app = FastAPI()
-
-
 
 # Add CORS middleware to allow localhost only
 app.add_middleware(
@@ -172,6 +171,10 @@ class ServiceHandler:
         request.clean_messages()
         request.enhance_tool_messages()
         request_dict = convert_request_to_dict(request)
+
+        if request.model in NOT_SUPPORTED_TOOLS_MODELS:
+            request_dict.pop("tools", None)
+            request_dict.pop("tool_choice", None)
         
         if request.stream:
             # For streaming requests, generate a stream ID 
