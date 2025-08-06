@@ -834,11 +834,11 @@ class EternalZooManager:
             "-fa",
             "-ngl", "9999",
             "-c", str(context_length),
-            "--embeddings"
+            "--embeddings",
+            "--jinja"
         ]
 
         if model_name not in GPT_OSS_SERIES:
-            command.extend(["--jinja"])
             command.extend(["--reasoning-format", "none"])
 
         if projector is not None:
