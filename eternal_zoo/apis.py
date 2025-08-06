@@ -529,18 +529,22 @@ class ServiceHandler:
                                                 token = tokens[0]  # Process first token from this chunk
                                                 if not done_thinking:
                                                     thinking_stream.process(token)
-                                                    if thinking_stream.last_content_delta == "<|start|>":
-                                                        done_thinking = True
-                                                        chunk_obj.choices[0].delta.content = "</think>"
-                                                        yield f"data: {chunk_obj.json()}\n\n"
-                                                        continue
-
+                                                    
                                                     if thinking_stream.last_content_delta:
+                                                        print(thinking_stream.last_content_delta)
+                                                        if thinking_stream.last_content_delta == "<|start|>":
+                                                            done_thinking = True
+                                                            chunk_obj.choices[0].delta.content = "</think>"
+                                                            yield f"data: {chunk_obj.json()}\n\n"
+                                                            continue
+                                                        
                                                         if think_chunk_content is None:
                                                             think_chunk_content = "<think>" + thinking_stream.last_content_delta
                                                         else:
-                                                            think_chunk_content = thinking_stream.last_content_delta
-
+                                                            think_chunk_content = thinking_stream.last_content_delta        
+                                                        chunk_obj.choices[0].delta.content = think_chunk_content
+                                                        yield f"data: {chunk_obj.json()}\n\n"
+                                                        continue
                                                 else:
                                                     content_stream.process(token)
                                                     if content_stream.last_content_delta:
