@@ -1,5 +1,4 @@
 import os
-import msgpack
 import shutil
 import hashlib
 from typing import List
@@ -12,6 +11,88 @@ import requests
 import time
 from loguru import logger
 from pathlib import Path
+
+# Import openai_harmony for GPT-OSS models
+try:
+    from openai_harmony import (
+        load_harmony_encoding,
+        HarmonyEncodingName,
+        StreamableParser,
+        Role
+    )
+    HARMONY_AVAILABLE = True
+except ImportError:
+    HARMONY_AVAILABLE = False
+
+# Harmony Parsing Helper Functions
+class HarmonyParser:
+    """Helper class for parsing GPT-OSS model responses using harmony encoding."""
+    
+    @staticmethod
+    def get_harmony_encoding():
+        """Get harmony encoding for GPT-OSS models."""
+        if not HARMONY_AVAILABLE:
+            return None
+        return load_harmony_encoding(HarmonyEncodingName.HARMONY_GPT_OSS)
+    
+    @staticmethod
+    def create_streamable_parsers():
+        """Create thinking and content stream parsers for GPT-OSS models."""
+        if not HARMONY_AVAILABLE:
+            return None, None
+        
+        enc = HarmonyParser.get_harmony_encoding()
+        if enc is None:
+            return None, None
+            
+        thinking_stream = StreamableParser(enc, role=Role.ASSISTANT)
+        content_stream = StreamableParser(enc, role=Role.ASSISTANT)
+        return thinking_stream, content_stream
+    
+    @staticmethod
+    def parse_non_streaming_content(content: str):
+        """Parse non-streaming content from GPT-OSS models."""
+        if not HARMONY_AVAILABLE:
+            return content, content
+            
+        enc = HarmonyParser.get_harmony_encoding()
+        if enc is None:
+            return content, content
+        
+        try:
+            # Find the final content pattern
+            pattern = "<|start|>assistant<|channel|>final"
+            start_content = content.find(pattern)
+            
+            if start_content == -1:
+                # No thinking content found, return content as is
+                return "", content
+            
+            thinking_content = content[:start_content]
+            final_content = content[start_content:]
+            
+            # Parse thinking content
+            if thinking_content:
+                thinking_tokens = enc.encode(thinking_content, allowed_special="all")
+                thinking_messages = enc.parse_messages_from_completion_tokens(thinking_tokens, role=Role.ASSISTANT)
+                thinking_text = thinking_messages[0].content if thinking_messages else ""
+            else:
+                thinking_text = ""
+            
+            # Parse final content
+            if final_content:
+                final_tokens = enc.encode(final_content, allowed_special="all")
+                final_messages = enc.parse_messages_from_completion_tokens(final_tokens, role=Role.ASSISTANT)
+                final_text = final_messages[0].content if final_messages else ""
+            else:
+                final_text = content
+                
+            return thinking_text, final_text
+            
+        except Exception as e:
+            logger.error(f"Error parsing harmony content: {e}")
+            return "", content
+
 
 # Add file logger for extract_zip and related operations
 logger.add("utils.log", rotation="10 MB", retention="10 days", encoding="utf-8")

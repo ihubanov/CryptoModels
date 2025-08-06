@@ -15,7 +15,6 @@ from eternal_zoo.config import DEFAULT_CONFIG
 from eternal_zoo.utils import wait_for_health
 from typing import Optional, Dict, Any, List
 
-
 class EternalZooServiceError(Exception):
     """Base exception for EternalZoo service errors."""
     pass
@@ -695,6 +694,8 @@ class EternalZooManager:
             return None
         model_name = model_name.lower()
 
+        if "gpt-oss" in model_name:
+            return "gpt-oss"
         if "qwen3-coder" in model_name:
             return "qwen3-coder"
         if "qwen3" in model_name:
@@ -821,7 +822,7 @@ class EternalZooManager:
 
         projector = config.get("projector", None)
         context_length = config.get("context_length", 32768)
-        
+
         command = [
             self.llama_server_path,
             "--model", str(model_path),
@@ -830,10 +831,10 @@ class EternalZooManager:
             "--no-context-shift",
             "-fa",
             "-ngl", "9999",
-            "--jinja",
             "-c", str(context_length),
-            "--reasoning-format", "none",
-            "--embeddings"
+            "--embeddings",
+            "--jinja",
+            "--reasoning-format", "none"
         ]
 
         if projector is not None:

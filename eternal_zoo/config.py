@@ -30,7 +30,7 @@ class PerformanceConfig:
     # Model switch and verification settings
     MODEL_SWITCH_VERIFICATION_DELAY: float = float(os.getenv("CRYPTO_MODEL_SWITCH_VERIFICATION_DELAY", "0.5"))  # 0.5 seconds
     MODEL_SWITCH_MAX_RETRIES: int = int(os.getenv("CRYPTO_MODEL_SWITCH_MAX_RETRIES", "3"))
-    MODEL_SWITCH_STREAM_TIMEOUT: float = float(os.getenv("CRYPTO_MODEL_SWITCH_STREAM_TIMEOUT", "30.0"))  # 30 seconds
+    MODEL_SWITCH_STREAM_TIMEOUT: float = float(os.getenv("CRYPTO_MODEL_SWITCH_STREAM_TIMEOUT", "60.0"))  # 60 seconds
     
     # Queue management settings
     QUEUE_BACKPRESSURE_TIMEOUT: float = float(os.getenv("CRYPTO_QUEUE_BACKPRESSURE_TIMEOUT", "30.0"))  # 30 seconds

@@ -12,12 +12,13 @@ import json
 import uuid
 # Import configuration settings
 from json_repair import repair_json
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from eternal_zoo.config import DEFAULT_CONFIG
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from eternal_zoo.manager import EternalZooManager, EternalZooServiceError
+from eternal_zoo.constants import HARMONY_SERIES
 
 # Import schemas from schema.py
 from eternal_zoo.schema import (
@@ -42,9 +43,24 @@ from eternal_zoo.schema import (
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+# Import openai_harmony for GPT-OSS models
+try:
+    from openai_harmony import (
+        load_harmony_encoding,
+        HarmonyEncodingName,
+        StreamableParser,
+        Role
+    )
+    HARMONY_AVAILABLE = True
+except ImportError:
+    HARMONY_AVAILABLE = False
+
+
+# Log harmony availability
+if not HARMONY_AVAILABLE:
+    logger.warning("openai_harmony not available - GPT-OSS models will not use harmony parsing")
+
 app = FastAPI()
-
-
 
 # Add CORS middleware to allow localhost only
 app.add_middleware(
@@ -107,6 +123,75 @@ def generate_chat_completion_id() -> str:
     """Generate a chat completion ID."""
     return f"chatcmpl-{uuid.uuid4().hex}"
 
+# Harmony Parsing Helper Functions
+class HarmonyParser:
+    """Helper class for parsing GPT-OSS model responses using harmony encoding."""
+    
+    @staticmethod
+    def get_harmony_encoding():
+        """Get harmony encoding for GPT-OSS models."""
+        if not HARMONY_AVAILABLE:
+            return None
+        return load_harmony_encoding(HarmonyEncodingName.HARMONY_GPT_OSS)
+    
+    @staticmethod
+    def create_streamable_parsers():
+        """Create thinking and content stream parsers for GPT-OSS models."""
+        if not HARMONY_AVAILABLE:
+            return None, None
+        
+        enc = HarmonyParser.get_harmony_encoding()
+        if enc is None:
+            return None, None
+            
+        thinking_stream = StreamableParser(enc, role=Role.ASSISTANT)
+        content_stream = StreamableParser(enc, role=Role.ASSISTANT)
+        return thinking_stream, content_stream
+    
+    @staticmethod
+    def parse_non_streaming_content(content: str):
+        """Parse non-streaming content from GPT-OSS models."""
+        if not HARMONY_AVAILABLE:
+            return content, content
+            
+        enc = HarmonyParser.get_harmony_encoding()
+        if enc is None:
+            return content, content
+        
+        try:
+            # Find the final content pattern
+            pattern = "<|start|>"
+            start_content = content.find(pattern)
+            
+            if start_content == -1:
+                # No thinking content found, return content as is
+                return "", content
+            
+            non_thinking_content = content[:start_content]
+            final_content = content[start_content:]
+            
+            # Parse non-thinking content (thinking content)
+            if non_thinking_content:
+                non_thinking_tokens = enc.encode(non_thinking_content, allowed_special="all")
+                non_thinking_messages = enc.parse_messages_from_completion_tokens(non_thinking_tokens, role=Role.ASSISTANT)
+                thinking_text = non_thinking_messages[0].content[0].text if non_thinking_messages and non_thinking_messages[0].content else ""
+            else:
+                thinking_text = ""
+            
+            # Parse final content
+            if final_content:
+                final_tokens = enc.encode(final_content, allowed_special="all")
+                final_messages = enc.parse_messages_from_completion_tokens(final_tokens, role=Role.ASSISTANT)
+                final_text = final_messages[0].content[0].text if final_messages and final_messages[0].content else ""
+            else:
+                final_text = content
+                
+            return thinking_text, final_text
+            
+        except Exception as e:
+            logger.error(f"Error parsing harmony content: {e}")
+            return "", content
+
 # Service Functions
 class ServiceHandler:
     """Handler class for making requests to the underlying service."""
@@ -148,15 +233,16 @@ class ServiceHandler:
         chat_models = eternal_zoo_manager.get_models_by_task(["chat"])
         if len(chat_models) == 0:
             raise HTTPException(status_code=404, detail=f"No chat model found")
-        
+                
         model = None
         for chat_model in chat_models:
             if request.model == chat_model["model_id"]:
                 model = chat_model
                 break
-        
+
         if model is None:
             model = chat_models[0]
+            request.model = model["model_id"]
 
         port = model.get("port", None)
         if port is None:
@@ -171,8 +257,7 @@ class ServiceHandler:
                 
         request.clean_messages()
         request.enhance_tool_messages()
-        request_dict = convert_request_to_dict(request)
-        
+        request_dict = convert_request_to_dict(request) 
         if request.stream:
             # For streaming requests, generate a stream ID 
             stream_id = generate_request_id()
@@ -209,9 +294,10 @@ class ServiceHandler:
             if request.model == embedding_model["model_id"]:
                 model = embedding_model
                 break
-        
+                
         if model is None:
             model = embedding_models[0]
+            request.model = model["model_id"]
         
         port = model.get("port", None)
         if port is None:
@@ -242,6 +328,7 @@ class ServiceHandler:
 
         if model is None:
             model = image_generation_models[0]
+            request.model = model["model_id"]
         
         port = model.get("port", None)
         if port is None:
@@ -274,6 +361,27 @@ class ServiceHandler:
             
             # Cache JSON parsing to avoid multiple calls
             json_response = response.json()
+            
+            # Apply harmony parsing for GPT-OSS models
+            model = data.get("model", None)
+            harmony_enabled = model in HARMONY_SERIES and HARMONY_AVAILABLE
+            if harmony_enabled:
+                try:
+                    if "choices" in json_response and len(json_response["choices"]) > 0:
+                        choice = json_response["choices"][0]
+                        if "message" in choice and "content" in choice["message"]:
+                            original_content = choice["message"]["content"]
+                            thinking_content, final_content = HarmonyParser.parse_non_streaming_content(original_content)
+                            
+                            if thinking_content.strip():
+                                json_response["choices"][0]["message"]["content"] = "<think>" + thinking_content + "</think>" + final_content
+                            else:
+                                json_response["choices"][0]["message"]["content"] = final_content
+                                
+                            logger.debug(f"Applied harmony parsing for model {model}")
+                except Exception as e:
+                    logger.error(f"Failed to apply harmony parsing for model {model}: {e}")
+
             return json_response
             
         except httpx.TimeoutException as e:
@@ -291,6 +399,24 @@ class ServiceHandler:
             
             buffer = ""
             tool_calls = {}
+            
+            # Initialize harmony parsing for GPT-OSS models
+            model = data.get("model", None)
+            harmony_enabled = model in HARMONY_SERIES and HARMONY_AVAILABLE
+            thinking_stream = None
+            content_stream = None
+            harmony_enc = None
+            think_chunk_content = None
+            done_thinking = False
+            
+            if harmony_enabled:
+                try:
+                    thinking_stream, content_stream = HarmonyParser.create_streamable_parsers()
+                    harmony_enc = HarmonyParser.get_harmony_encoding()
+                    logger.debug(f"Initialized harmony parsing for model {model}")
+                except Exception as e:
+                    logger.error(f"Failed to initialize harmony parsing for model {model}: {e}")
+                    harmony_enabled = False
             
             def _extract_json_data(line: str) -> Optional[str]:
                 """Extract JSON data from SSE line, return None if not valid data."""
@@ -393,8 +519,51 @@ class ServiceHandler:
                                 if choice.delta.tool_calls:
                                     _process_tool_call_delta(choice.delta.tool_calls[0], tool_calls)
                                 else:
-                                    # Regular content chunk
-                                    yield f"data: {chunk_obj.json()}\n\n"
+                                    # Handle content chunk with harmony parsing for GPT-OSS models
+                                    if harmony_enabled and choice.delta.content:
+                                        try:
+                                            content = choice.delta.content
+                                            tokens = harmony_enc.encode(content, allowed_special="all")
+                                            
+                                            if tokens:  # Only process if we have tokens
+                                                token = tokens[0]  # Process first token from this chunk
+                                                if not done_thinking:
+                                                    thinking_stream.process(token)
+                                                    
+                                                    if thinking_stream.last_content_delta:
+                                                        if thinking_stream.last_content_delta == "<|start|>":
+                                                            done_thinking = True
+                                                            chunk_obj.choices[0].delta.content = "</think>"
+                                                            yield f"data: {chunk_obj.json()}\n\n"
+                                                            continue
+                                                        
+                                                        if think_chunk_content is None:
+                                                            think_chunk_content = "<think>" + thinking_stream.last_content_delta
+                                                        else:
+                                                            think_chunk_content = thinking_stream.last_content_delta        
+                                                        chunk_obj.choices[0].delta.content = think_chunk_content
+                                                        yield f"data: {chunk_obj.json()}\n\n"
+                                                        continue
+                                                else:
+                                                    content_stream.process(token)
+                                                    if content_stream.last_content_delta:
+                                                        # Update chunk content with parsed final content
+                                                        chunk_obj.choices[0].delta.content = content_stream.last_content_delta
+                                                        yield f"data: {chunk_obj.json()}\n\n"
+                                                    else:
+                                                        # No content delta, don't yield empty chunk
+                                                        continue
+                                            else:
+                                                # No tokens, skip this chunk
+                                                continue
+                                                
+                                        except Exception as e:
+                                            logger.error(f"Error in harmony parsing for streaming chunk: {e}")
+                                            # Fall back to regular content chunk
+                                            yield f"data: {chunk_obj.json()}\n\n"
+                                    else:
+                                        # Regular content chunk (non-GPT-OSS models or harmony disabled)
+                                        yield f"data: {chunk_obj.json()}\n\n"
                                         
                             except Exception as e:
                                 logger.error(f"Failed to parse streaming chunk in {stream_id}: {e}")
@@ -411,7 +580,7 @@ class ServiceHandler:
                                 yield f"data: {chunk_obj.json()}\n\n"
                             except Exception as e:
                                 logger.error(f"Failed to parse trailing chunk in {stream_id}: {e}")
-                        elif json_str == '[DONE]':
+                        elif json_str == '[DONE]':                        
                             yield 'data: [DONE]\n\n'
                             
             except Exception as e:
@@ -578,7 +747,7 @@ class RequestProcessor:
             )
     
     @staticmethod
-    async def _ensure_model_active_in_queue(tasks: List[str], model_requested: str, request_id: str) -> bool:
+    async def _ensure_model_active_in_queue(model_requested: str, request_id: str) -> bool:
         """
         Ensure the requested model is active within the queue processing context.
         This method is called within the processing lock to ensure atomic model switching.
@@ -594,36 +763,16 @@ class RequestProcessor:
         try:
             available_models = eternal_zoo_manager.get_available_models()
             model = None
-
             for model in available_models:
                 if model["model_id"] == model_requested:
-                    model = model
                     break
             
-            if model:
-                model_task = model.get("task", "chat")
-                if model_task not in tasks:
-                    logger.error(f"[{request_id}] Model {model_requested} is not a {tasks} model")
-                    return False
-            else:
-                # Get current service info
-                available_models = eternal_zoo_manager.get_models_by_task(tasks)
-
-                if len(available_models) == 0:
-                    logger.error(f"[{request_id}] No {tasks} models found")
-                    return False
-                
+            if model is None:
                 model = available_models[0]
-                logger.info(f"[{request_id}] No model {model_requested} found, using {model['model_id']} instead")
                 model_requested = model["model_id"]
             
-            # Check if model is already active
             if model["active"]:
-                logger.debug(f"[{request_id}] Model {model_requested} is already active")
                 return True
-                
-            # Model exists but not active, need to switch
-            logger.info(f"[{request_id}] Model switch required to {model_requested}")
             
             # Wait for any active streams to complete before switching
             if await RequestProcessor.has_active_streams():
@@ -644,7 +793,7 @@ class RequestProcessor:
             switch_duration = time.time() - switch_start_time
             
             if success:
-                logger.info(f"[{request_id}] Successfully switched from {model['model_id']} to {model_requested} "
+                logger.info(f"[{request_id}] Successfully switched to {model_requested} "
                            f"(switch time: {switch_duration:.2f}s)")
                 return True
             else:
@@ -728,7 +877,8 @@ class RequestProcessor:
                                 if active_stream_count > 0:
                                     logger.info(f"[{request_id}] Found {active_stream_count} active streams before model check")
                                 
-                                if not await RequestProcessor._ensure_model_active_in_queue(tasks, request_obj.model, request_id):
+                                success = await RequestProcessor._ensure_model_active_in_queue(request_obj.model, request_id)
+                                if not success:
                                     error_msg = f"Model {request_obj.model} is not available or failed to switch or is not a {tasks} model"
                                     logger.error(f"[{request_id}] {error_msg}")
                                     future.set_exception(HTTPException(status_code=400, detail=error_msg))
