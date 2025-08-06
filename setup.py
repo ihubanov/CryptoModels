@@ -36,7 +36,7 @@ setup(
         "asyncio==3.4.3",
         "json_repair==0.47.6",
         "msgpack==1.1.1",
-        "openai-harmony==0.4.1"
+        "openai-harmony==0.0.3"
     ],
     entry_points={
         "console_scripts": [
