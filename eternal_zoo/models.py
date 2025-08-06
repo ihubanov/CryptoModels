@@ -142,6 +142,11 @@ FEATURED_MODELS = {
         "model": "gpt-oss-20b-mxfp4.gguf",
         "task": "chat"
     },
+    "gpt-oss-120b": {
+        "repo": "ggml-org/gpt-oss-120b-GGUF",
+        "model": "gpt-oss-120b-mxfp4.gguf",
+        "task": "chat"
+    },
     "flux-dev": {
        "repo": "NikolaSigmoid/FLUX.1-dev",
        "task": "image-generation",

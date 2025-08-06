@@ -43,6 +43,23 @@ from eternal_zoo.schema import (
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+# Import openai_harmony for GPT-OSS models
+try:
+    from openai_harmony import (
+        load_harmony_encoding,
+        HarmonyEncodingName,
+        StreamableParser,
+        Role
+    )
+    HARMONY_AVAILABLE = True
+except ImportError:
+    HARMONY_AVAILABLE = False
+
+
+# Log harmony availability
+if not HARMONY_AVAILABLE:
+    logger.warning("openai_harmony not available - GPT-OSS models will not use harmony parsing")
+
 app = FastAPI()
 
 # Add CORS middleware to allow localhost only
@@ -105,6 +122,75 @@ def generate_request_id() -> str:
 def generate_chat_completion_id() -> str:
     """Generate a chat completion ID."""
     return f"chatcmpl-{uuid.uuid4().hex}"
+
+# Harmony Parsing Helper Functions
+class HarmonyParser:
+    """Helper class for parsing GPT-OSS model responses using harmony encoding."""
+    
+    @staticmethod
+    def get_harmony_encoding():
+        """Get harmony encoding for GPT-OSS models."""
+        if not HARMONY_AVAILABLE:
+            return None
+        return load_harmony_encoding(HarmonyEncodingName.HARMONY_GPT_OSS)
+    
+    @staticmethod
+    def create_streamable_parsers():
+        """Create thinking and content stream parsers for GPT-OSS models."""
+        if not HARMONY_AVAILABLE:
+            return None, None
+        
+        enc = HarmonyParser.get_harmony_encoding()
+        if enc is None:
+            return None, None
+            
+        thinking_stream = StreamableParser(enc, role=Role.ASSISTANT)
+        content_stream = StreamableParser(enc, role=Role.ASSISTANT)
+        return thinking_stream, content_stream
+    
+    @staticmethod
+    def parse_non_streaming_content(content: str):
+        """Parse non-streaming content from GPT-OSS models."""
+        if not HARMONY_AVAILABLE:
+            return content, content
+            
+        enc = HarmonyParser.get_harmony_encoding()
+        if enc is None:
+            return content, content
+        
+        try:
+            # Find the final content pattern
+            pattern = "<|start|>assistant<|channel|>final"
+            start_content = content.find(pattern)
+            
+            if start_content == -1:
+                # No thinking content found, return content as is
+                return "", content
+            
+            thinking_content = content[:start_content]
+            final_content = content[start_content:]
+            
+            # Parse thinking content
+            if thinking_content:
+                thinking_tokens = enc.encode(thinking_content, allowed_special="all")
+                thinking_messages = enc.parse_messages_from_completion_tokens(thinking_tokens, role=Role.ASSISTANT)
+                thinking_text = thinking_messages[0].content if thinking_messages else ""
+            else:
+                thinking_text = ""
+            
+            # Parse final content
+            if final_content:
+                final_tokens = enc.encode(final_content, allowed_special="all")
+                final_messages = enc.parse_messages_from_completion_tokens(final_tokens, role=Role.ASSISTANT)
+                final_text = final_messages[0].content if final_messages else ""
+            else:
+                final_text = content
+                
+            return thinking_text, final_text
+            
+        except Exception as e:
+            logger.error(f"Error parsing harmony content: {e}")
+            return "", content
 
 # Service Functions
 class ServiceHandler:
@@ -277,6 +363,27 @@ class ServiceHandler:
             
             # Cache JSON parsing to avoid multiple calls
             json_response = response.json()
+            
+            # Apply harmony parsing for GPT-OSS models
+            if model in GPT_OSS_SERIES and HARMONY_AVAILABLE:
+                try:
+                    if "choices" in json_response and len(json_response["choices"]) > 0:
+                        choice = json_response["choices"][0]
+                        if "message" in choice and "content" in choice["message"]:
+                            original_content = choice["message"]["content"]
+                            thinking_content, final_content = HarmonyParser.parse_non_streaming_content(original_content)
+                            
+                            # Update the response with parsed final content
+                            choice["message"]["content"] = final_content
+                            
+                            # Add thinking content as a custom field if it exists
+                            if thinking_content.strip():
+                                choice["message"]["thinking"] = thinking_content
+                                
+                            logger.debug(f"Applied harmony parsing for model {model}")
+                except Exception as e:
+                    logger.error(f"Failed to apply harmony parsing for model {model}: {e}")
+            
             return json_response
             
         except httpx.TimeoutException as e:
@@ -299,6 +406,24 @@ class ServiceHandler:
             
             buffer = ""
             tool_calls = {}
+            
+            # Initialize harmony parsing for GPT-OSS models
+            harmony_enabled = model in GPT_OSS_SERIES and HARMONY_AVAILABLE
+            thinking_stream = None
+            content_stream = None
+            harmony_enc = None
+            thinking_content = ""
+            final_content = ""
+            done_thinking = False
+            
+            if harmony_enabled:
+                try:
+                    thinking_stream, content_stream = HarmonyParser.create_streamable_parsers()
+                    harmony_enc = HarmonyParser.get_harmony_encoding()
+                    logger.debug(f"Initialized harmony parsing for model {model}")
+                except Exception as e:
+                    logger.error(f"Failed to initialize harmony parsing for model {model}: {e}")
+                    harmony_enabled = False
             
             def _extract_json_data(line: str) -> Optional[str]:
                 """Extract JSON data from SSE line, return None if not valid data."""
@@ -401,8 +526,41 @@ class ServiceHandler:
                                 if choice.delta.tool_calls:
                                     _process_tool_call_delta(choice.delta.tool_calls[0], tool_calls)
                                 else:
-                                    # Regular content chunk
-                                    yield f"data: {chunk_obj.json()}\n\n"
+                                    # Handle content chunk with harmony parsing for GPT-OSS models
+                                    if harmony_enabled and choice.delta.content:
+                                        try:
+                                            content = choice.delta.content
+                                            tokens = harmony_enc.encode(content, allowed_special="all")
+                                            
+                                            for token in tokens:
+                                                if not done_thinking:
+                                                    thinking_stream.process(token)
+                                                    if thinking_stream.last_content_delta:
+                                                        thinking_content += thinking_stream.last_content_delta
+                                                    if thinking_stream.last_content_delta == "final":
+                                                        done_thinking = True
+                                                        # Start processing with content stream from now on
+                                                        continue
+                                                else:
+                                                    content_stream.process(token)
+                                                    if content_stream.last_content_delta:
+                                                        final_content += content_stream.last_content_delta
+                                                        # Update chunk content with parsed final content
+                                                        chunk_obj.choices[0].delta.content = content_stream.last_content_delta
+                                                        yield f"data: {chunk_obj.json()}\n\n"
+                                                        break  # Only yield one delta per chunk
+                                            
+                                            # If we're still in thinking mode, don't yield the chunk
+                                            if not done_thinking:
+                                                continue
+                                                
+                                        except Exception as e:
+                                            logger.error(f"Error in harmony parsing for streaming chunk: {e}")
+                                            # Fall back to regular content chunk
+                                            yield f"data: {chunk_obj.json()}\n\n"
+                                    else:
+                                        # Regular content chunk (non-GPT-OSS models or harmony disabled)
+                                        yield f"data: {chunk_obj.json()}\n\n"
                                         
                             except Exception as e:
                                 logger.error(f"Failed to parse streaming chunk in {stream_id}: {e}")
@@ -420,6 +578,28 @@ class ServiceHandler:
                             except Exception as e:
                                 logger.error(f"Failed to parse trailing chunk in {stream_id}: {e}")
                         elif json_str == '[DONE]':
+                            # Before finishing, send thinking content if available for GPT-OSS models
+                            if harmony_enabled and thinking_content.strip():
+                                try:
+                                    # Create a final chunk with thinking content
+                                    thinking_chunk = ChatCompletionChunk.parse_raw(json.dumps({
+                                        "id": generate_chat_completion_id(),
+                                        "object": "chat.completion.chunk",
+                                        "created": int(time.time()),
+                                        "model": model,
+                                        "choices": [{
+                                            "index": 0,
+                                            "delta": {
+                                                "content": None,
+                                                "thinking": thinking_content
+                                            },
+                                            "finish_reason": None
+                                        }]
+                                    }))
+                                    yield f"data: {thinking_chunk.json()}\n\n"
+                                except Exception as e:
+                                    logger.error(f"Failed to send thinking content chunk: {e}")
+                            
                             yield 'data: [DONE]\n\n'
                             
             except Exception as e:
