@@ -18,6 +18,7 @@ HASH_TO_MODEL = {
     "bafkreih4xgr5t7yc3yooz6i6usgpwhggaobspmgut4rnu42gi6cv77o4em": "devstral-small",
     "bafkreibokz6tdke7k3eozsro3hh3luyqbub7tzdawpswtt7q6bzfg36fw4": "dolphin-3.0-llama3.1-8b",
     "bafkreiclhnqcjfbbusqmg73jcwasomv7tqchkqm3fea5wwzs5vavc2wzfq": "gpt-oss-20b",
+    "bafkreia4xtrb4vfsf7lblomjwh7cc3nlpci3fsqyeqpgqqflx4cnhwa3za": "gpt-oss-120b",
     "bafkreiaha3sjfmv4affmi5kbu6bnayenf2avwafp3cthhar3latmfi632u": "flux-dev",
     "bafkreibks5pmc777snbo7dwk26sympe2o24tpqfedjq6gmgghwwu7iio34": "flux-schnell",
     "bafkreidbaksrogxispjejczfj36vtf5uzsbjt7irspl6kckynz5u2ugzke": "flux-dev-nsfw",
