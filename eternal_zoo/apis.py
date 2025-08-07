@@ -762,16 +762,17 @@ class RequestProcessor:
         """
         try:
             available_models = eternal_zoo_manager.get_available_models()
-            model = None
+            target_model = None
             for model in available_models:
                 if model["model_id"] == model_requested:
+                    target_model = model
                     break
             
-            if model is None:
-                model = available_models[0]
-                model_requested = model["model_id"]
+            if target_model is None:
+                target_model = available_models[0]
+                model_requested = target_model["model_id"]
             
-            if model["active"]:
+            if target_model["active"]:
                 return True
             
             # Wait for any active streams to complete before switching
