@@ -230,11 +230,7 @@ class ServiceHandler:
     @staticmethod
     async def generate_text_response(request: ChatCompletionRequest):
         """Generate a response for chat completion requests, supporting both streaming and non-streaming."""
-        chat_models = eternal_zoo_manager.get_models_by_task(["chat"])
-        
-        if request.model in HARMONY_SERIES:
-            request.pop("tools", None)
-            request.pop("tool_choice", None)
+        chat_models = eternal_zoo_manager.get_models_by_task(["chat"])            
             
         if len(chat_models) == 0:
             raise HTTPException(status_code=404, detail=f"No chat model found")
@@ -263,6 +259,11 @@ class ServiceHandler:
         request.clean_messages()
         request.enhance_tool_messages()
         request_dict = convert_request_to_dict(request) 
+
+        if request_dict["model"] in HARMONY_SERIES:
+            request_dict.pop("tools", None)
+            request_dict.pop("tool_choice", None)
+
         if request.stream:
             # For streaming requests, generate a stream ID 
             stream_id = generate_request_id()
