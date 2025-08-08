@@ -116,9 +116,10 @@ class EternalZooManager:
                     raise EternalZooServiceError("mlx-flux command not found in PATH")
                 running_ai_command = self._build_image_generation_command(config)
             elif task == "image-edit":
-                raise NotImplementedError("Image edit is not implemented yet")
+                logger.warning(f"Image edit is not implemented yet: {config}")
+                continue
             else:
-                raise ValueError(f"Invalid task: {task}")
+                continue
 
             if running_ai_command is None:
                 raise ValueError(f"Invalid running AI command: {running_ai_command}")
