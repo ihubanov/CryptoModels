@@ -436,6 +436,7 @@ def handle_download(args) -> bool:
             "repo": args.hf_repo,
             "model": args.hf_file,
             "projector": args.mmproj,
+            "pattern": args.pattern,
         }
         success, local_path = asyncio.run(download_model_async(hf_data))
     
