@@ -1169,7 +1169,7 @@ def handle_check(args):
         local_path = DEFAULT_MODEL_DIR / args.hf_repo.replace("/", "_")
 
         if args.hf_file:
-            local_path = local_path / args.hf_file
+            local_path = DEFAULT_MODEL_DIR / args.hf_file
         elif args.pattern:
             pattern_dir =  DEFAULT_MODEL_DIR / args.hf_repo.replace("/", "_") + "_" + args.pattern / args.pattern
             if os.path.exists(pattern_dir) and os.path.isdir(pattern_dir):
@@ -1179,6 +1179,7 @@ def handle_check(args):
             else:
                 local_path = DEFAULT_MODEL_DIR / args.hf_repo.replace("/", "_") + "_" + args.pattern
             
+        print_info(f"Local path: {local_path}")
         if local_path.exists():
             print_success("True")
         else:
