@@ -339,6 +339,12 @@ def parse_args():
         description="Check if a model with the specified hash has been downloaded"
     )
     check_command.add_argument(
+        "model_name",
+        nargs='?',
+        help="🏷️  Model name(s) - single: qwen3-1.7b or multi: qwen3-14b,qwen3-4b (first is main, others on-demand)",
+        metavar="MODEL"
+    )
+    check_command.add_argument(
         "--model-name",
         help="🏷️  Model name(s) - single: qwen3-1.7b or multi: qwen3-14b,qwen3-4b (first is main, others on-demand)",
         metavar="MODEL"
@@ -1101,20 +1107,31 @@ def handle_preserve(args):
 
 def handle_check(args):
     """Handle model check with beautiful output"""
-    local_path = DEFAULT_MODEL_DIR / f"{args.hash}{POSTFIX_MODEL_PATH}"
-    is_downloaded = local_path.exists()
+    def _check_by_model_id(model_id: str):
+        # First, try via metadata which handles both IPFS and HF layouts
+        metadata_path = DEFAULT_MODEL_DIR / f"{model_id}.json"
+        if metadata_path.exists():
+            success, _ = load_model_metadata(model_id, is_main=True)
+            if success:
+                print_success("True")
+            else:
+                print_info("False")
+            return
 
-    if is_downloaded:
-        # For LoRA models, we need to do additional validation
+        # Fallback: direct file/folder presence check like original hash path
+        local_path = DEFAULT_MODEL_DIR / f"{model_id}{POSTFIX_MODEL_PATH}"
+        if not local_path.exists():
+            print_info("False")
+            return
+
+        # For LoRA models (folders), perform minimal validation
         if local_path.is_dir():
-            # This is likely a LoRA model - check if it has valid metadata and base model
             metadata_path = local_path / "metadata.json"
             if metadata_path.exists():
                 try:
                     with open(metadata_path, 'r') as f:
                         lora_metadata = json.load(f)
 
-                    # Check if base model is available
                     base_model_hash = lora_metadata.get("base_model")
                     if base_model_hash:
                         base_model_path = DEFAULT_MODEL_DIR / f"{base_model_hash}{POSTFIX_MODEL_PATH}"
@@ -1123,7 +1140,6 @@ def handle_check(args):
                             print_info("False")
                             return
 
-                    # Check if LoRA files exist
                     lora_paths = lora_metadata.get("lora_paths", [])
                     for lora_path in lora_paths:
                         if not os.path.isabs(lora_path):
@@ -1141,10 +1157,54 @@ def handle_check(args):
                 print_warning("LoRA model directory found but metadata.json is missing")
                 print_info("False")
         else:
-            # Regular model file
             print_success("True")
-    else:
-        print_info("False")
+
+    # Priority: hash > hf_repo > model_name
+    if getattr(args, 'hash', None):
+        _check_by_model_id(args.hash)
+        return
+
+    if getattr(args, 'hf_repo', None):
+        # Look for any metadata that matches this HF repo (and optional file/pattern)
+        found_any = False
+        for json_file in DEFAULT_MODEL_DIR.glob("*.json"):
+            try:
+                with open(json_file, 'r') as f:
+                    meta = json.load(f)
+            except Exception:
+                continue
+            hf_data = meta.get("hf_data")
+            if not hf_data:
+                continue
+            if hf_data.get("repo") != args.hf_repo:
+                continue
+            if getattr(args, 'hf_file', None) and hf_data.get("model") != args.hf_file:
+                continue
+            if getattr(args, 'pattern', None) and hf_data.get("pattern") != args.pattern:
+                continue
+
+            found_any = True
+            model_id = json_file.stem
+            success, _ = load_model_metadata(model_id, is_main=True)
+            if success:
+                print_success("True")
+                return
+
+        # If repo referenced but no matching metadata or invalid files
+        if not found_any:
+            print_info("False")
+        else:
+            print_info("False")
+        return
+
+    model_name = getattr(args, 'model_name', None)
+    if model_name:
+        model_id = MODEL_TO_HASH.get(model_name, model_name)
+        _check_by_model_id(model_id)
+        return
+
+    # Nothing to check
+    print_info("False")
 
 def main():
     """Main CLI entry point with enhanced error handling"""
