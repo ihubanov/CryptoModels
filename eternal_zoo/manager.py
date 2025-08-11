@@ -835,8 +835,10 @@ class EternalZooManager:
             "-c", str(context_length),
             "--embeddings",
             "--jinja",
-            "--reasoning-format", "none"
         ]
+
+        if model_family == "gpt-oss":
+            command.extend(["--reasoning-format", "none"])
 
         if projector is not None:
             if os.path.exists(projector):
