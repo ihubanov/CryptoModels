@@ -584,6 +584,7 @@ def handle_download(args) -> bool:
                 "multimodal": bool(projector_path and os.path.exists(projector_path)),
                 "lora": False,
                 "architecture": None,
+                "hf_data": hf_data,
             }
             model_metadata_path = os.path.join(DEFAULT_MODEL_DIR, f"{model_id}.json")
             with open(model_metadata_path, "w") as f:
@@ -874,6 +875,23 @@ def load_model_metadata(model_id, is_main=False) -> tuple[bool, dict | None]:
 
     # Optimize path checking - check both paths at once
     local_path = model_dir / model_id
+    hf_data = metadata.get("hf_data", None)
+    if hf_data:
+        repo = hf_data["repo"]
+        local_path = model_dir / f"{repo.replace('/', '_')}"
+        model = hf_data.get("model", None)
+        pattern = hf_data.get("pattern", None)
+        if model:
+            local_path = model_dir / model
+        elif pattern:
+            pattern_dir = model_dir / f"{repo.replace('/', '_')}_{pattern}"
+            if pattern_dir.exists() and pattern_dir.is_dir():
+                gguf_files = find_gguf_files(pattern_dir)
+                if gguf_files:
+                    local_path = pattern_dir / gguf_files[0]
+            else:
+                local_path = model_dir / f"{repo.replace('/', '_')}_{pattern}"
+        
     if not local_path.exists():
         local_path = model_dir / f"{model_id}{POSTFIX_MODEL_PATH}"
         if not local_path.exists():
