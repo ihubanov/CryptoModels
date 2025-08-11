@@ -1009,7 +1009,7 @@ def handle_serve(args):
         if args.hf_file:
             main_model_id = args.hf_file
         elif args.pattern:
-            pattern_dir = os.path.join(str(DEFAULT_MODEL_DIR), args.hf_repo.replace("/", "_") + args.pattern,  args.pattern)
+            pattern_dir = os.path.join(str(DEFAULT_MODEL_DIR), args.hf_repo.replace("/", "_") + "_" + args.pattern,  args.pattern)
             if os.path.exists(pattern_dir) and os.path.isdir(pattern_dir):
                 gguf_files = find_gguf_files(pattern_dir)
                 if gguf_files:
