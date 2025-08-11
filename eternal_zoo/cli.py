@@ -1171,13 +1171,13 @@ def handle_check(args):
         if args.hf_file:
             local_path = DEFAULT_MODEL_DIR / args.hf_file
         elif args.pattern:
-            pattern_dir =  DEFAULT_MODEL_DIR / args.hf_repo.replace("/", "_") + "_" + args.pattern / args.pattern
+            pattern_dir =  DEFAULT_MODEL_DIR / (args.hf_repo.replace("/", "_") + "_" + args.pattern) / args.pattern
             if os.path.exists(pattern_dir) and os.path.isdir(pattern_dir):
                 gguf_files = find_gguf_files(pattern_dir)
                 if gguf_files:
                     local_path = pattern_dir / gguf_files[0]
             else:
-                local_path = DEFAULT_MODEL_DIR / args.hf_repo.replace("/", "_") + "_" + args.pattern
+                local_path = DEFAULT_MODEL_DIR / (args.hf_repo.replace("/", "_") + "_" + args.pattern)
             
         print_info(f"Local path: {local_path}")
         if local_path.exists():
