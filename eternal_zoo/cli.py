@@ -1005,11 +1005,37 @@ def handle_serve(args):
     elif args.main_model:
         main_model_id = args.main_model
     elif args.hf_repo:
-        hf_data = {
-            "repo": args.hf_repo,
-            "model": args.hf_file,
-            "pattern": args.pattern,
-        }
+        # Determine main model id from hf_repo consistent with how metadata files are named
+        candidate_model_ids = []
+        # 1) If a specific file is given, metadata id is its basename
+        if args.hf_file:
+            candidate_model_ids.append(os.path.basename(args.hf_file))
+        # 2) If pattern is used, try to pick the first gguf file in the expected directory
+        base_repo_dir = os.path.join(str(DEFAULT_MODEL_DIR), args.hf_repo.replace("/", "_"))
+        search_dir = base_repo_dir
+        if args.pattern:
+            pattern_dir = os.path.join(base_repo_dir, args.pattern)
+            if os.path.exists(pattern_dir) and os.path.isdir(pattern_dir):
+                search_dir = pattern_dir
+        if os.path.exists(search_dir) and os.path.isdir(search_dir):
+            gguf_files = find_gguf_files(search_dir)
+            if gguf_files:
+                candidate_model_ids.append(os.path.basename(gguf_files[0]))
+        # 3) Fallback to the repo folder name when no file/pattern deduced
+        candidate_model_ids.append(os.path.basename(base_repo_dir))
+
+        # Pick the first candidate that exists among downloaded models
+        main_model_id = None
+        for candidate in candidate_model_ids:
+            if candidate in downloaded_models:
+                main_model_id = candidate
+                break
+        if not main_model_id:
+            print_error(
+                "Could not resolve main model from hf_repo; none of the expected IDs exist: "
+                + ", ".join(candidate_model_ids)
+            )
+            sys.exit(1)
         
     else:
         main_model_id = downloaded_models[0]  # Default to first model instead of random
