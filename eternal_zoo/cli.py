@@ -1107,90 +1107,55 @@ def handle_preserve(args):
 
 def handle_check(args):
     """Handle model check with beautiful output"""
-    def _check_by_model_id(model_id: str):
-        # First, try via metadata which handles both IPFS and HF layouts
-        metadata_path = DEFAULT_MODEL_DIR / f"{model_id}.json"
-        if metadata_path.exists():
-            success, _ = load_model_metadata(model_id, is_main=True)
-            if success:
-                print_success("True")
-            else:
-                print_info("False")
-            return
-
-        # Fallback: direct file/folder presence check like original hash path
-        local_path = DEFAULT_MODEL_DIR / f"{model_id}{POSTFIX_MODEL_PATH}"
-        if not local_path.exists():
-            print_info("False")
-            return
-
-        # For LoRA models (folders), perform minimal validation
-        if local_path.is_dir():
-            metadata_path = local_path / "metadata.json"
-            if metadata_path.exists():
-                try:
-                    with open(metadata_path, 'r') as f:
-                        lora_metadata = json.load(f)
-
-                    base_model_hash = lora_metadata.get("base_model")
-                    if base_model_hash:
-                        base_model_path = DEFAULT_MODEL_DIR / f"{base_model_hash}{POSTFIX_MODEL_PATH}"
-                        if not base_model_path.exists():
-                            print_warning(f"LoRA model found but base model missing: {base_model_hash}")
-                            print_info("False")
-                            return
-
-                    lora_paths = lora_metadata.get("lora_paths", [])
-                    for lora_path in lora_paths:
-                        if not os.path.isabs(lora_path):
-                            lora_path = os.path.join(local_path, lora_path)
-                        if not os.path.exists(lora_path):
-                            print_warning(f"LoRA model found but LoRA file missing: {lora_path}")
-                            print_info("False")
-                            return
-
-                    print_success("True")
-                except (json.JSONDecodeError, KeyError, Exception) as e:
-                    print_warning(f"LoRA model found but metadata is invalid: {str(e)}")
-                    print_info("False")
-            else:
-                print_warning("LoRA model directory found but metadata.json is missing")
-                print_info("False")
-        else:
-            print_success("True")
-
-    # Priority: hash > hf_repo > model_name
     if getattr(args, 'hash', None):
-        _check_by_model_id(args.hash)
-        return
-
-    if getattr(args, 'hf_repo', None):
-        # Look for any metadata that matches this HF repo (and optional file/pattern)
-        local_path = DEFAULT_MODEL_DIR / args.hf_repo.replace("/", "_")
-
-        if args.hf_file:
-            local_path = DEFAULT_MODEL_DIR / args.hf_file
-        elif args.pattern:
-            pattern_dir =  DEFAULT_MODEL_DIR / (args.hf_repo.replace("/", "_") + "_" + args.pattern) / args.pattern
-            if os.path.exists(pattern_dir) and os.path.isdir(pattern_dir):
-                gguf_files = find_gguf_files(pattern_dir)
-                if gguf_files:
-                    local_path = pattern_dir / gguf_files[0]
-            else:
-                local_path = DEFAULT_MODEL_DIR / (args.hf_repo.replace("/", "_") + "_" + args.pattern)
-            
-        print_info(f"Local path: {local_path}")
+        model_hash = args.hash
+        local_path = DEFAULT_MODEL_DIR / (model_hash + POSTFIX_MODEL_PATH)
         if local_path.exists():
             print_success("True")
         else:
             print_info("False")
         return
 
-    model_name = getattr(args, 'model_name', None)
-    if model_name:
-        model_id = MODEL_TO_HASH.get(model_name, model_name)
-        _check_by_model_id(model_id)
-        return
+    hf_data = {
+        "repo": args.hf_repo,
+        "model": args.hf_file,
+        "pattern": args.pattern,
+        "mmproj": args.mmproj,
+    }
+    
+    if getattr(args, 'model_name', None):
+        model_name = args.model_name
+        if model_name not in FEATURED_MODELS:
+            print_error(f"Model name {model_name} not found in FEATURED_MODELS")
+            sys.exit(1)
+        if model_name in MODEL_TO_HASH:
+            model_hash = MODEL_TO_HASH[model_name]
+            local_path = DEFAULT_MODEL_DIR / (model_hash + POSTFIX_MODEL_PATH)
+            if local_path.exists():
+                print_success("True")
+            else:
+                print_info("False")
+            return
+        else:
+            hf_data = FEATURED_MODELS[model_name]
+        
+    if hf_data["model"]:
+        local_path = DEFAULT_MODEL_DIR / hf_data["model"]
+    elif hf_data["pattern"]:
+        pattern_dir =  DEFAULT_MODEL_DIR / (hf_data["repo"].replace("/", "_") + "_" + hf_data["pattern"]) / hf_data["pattern"]
+        if os.path.exists(pattern_dir) and os.path.isdir(pattern_dir):
+            gguf_files = find_gguf_files(pattern_dir)
+            if gguf_files:
+                local_path = pattern_dir / gguf_files[0]
+        else:
+            local_path = DEFAULT_MODEL_DIR / (hf_data["repo"].replace("/", "_") + "_" + hf_data["pattern"])
+        
+    print_info(f"Local path: {local_path}")
+    if local_path.exists():
+        print_success("True")
+    else:
+        print_info("False")
+    return
 
     # Nothing to check
     print_info("False")
