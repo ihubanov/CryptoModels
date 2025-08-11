@@ -884,7 +884,7 @@ def load_model_metadata(model_id, is_main=False) -> tuple[bool, dict | None]:
         if model:
             local_path = model_dir / model
         elif pattern:
-            pattern_dir = model_dir / f"{repo.replace('/', '_')}_{pattern}"
+            pattern_dir = model_dir / f"{repo.replace('/', '_')}_{pattern}" / pattern
             if pattern_dir.exists() and pattern_dir.is_dir():
                 gguf_files = find_gguf_files(pattern_dir)
                 if gguf_files:
