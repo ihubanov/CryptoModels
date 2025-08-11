@@ -499,6 +499,7 @@ def handle_download(args) -> bool:
                           if existing_meta.get("lora") is not None else (fetched_meta or {}).get("lora", hf_data.get("lora", False))),
                 "architecture": existing_meta.get("architecture") or hf_data.get("architecture", None),
                 "multimodal": bool(os.path.exists(projector_path)),
+                "hf_data": None
             }
             merged = {**(fetched_meta or {}), **existing_meta, **updates}
             with open(model_metadata_path, "w") as f:
@@ -548,6 +549,7 @@ def handle_download(args) -> bool:
                           if existing_meta.get("lora") is not None else (fetched_meta or {}).get("lora", hf_data.get("lora", False))),
                 "architecture": existing_meta.get("architecture") or hf_data.get("architecture", None),
                 "multimodal": bool(os.path.exists(projector_path)),
+                "hf_data": None if args.hash else hf_data,
             }
             merged = {**(fetched_meta or {}), **existing_meta, **updates}
             with open(model_metadata_path, "w") as f:
