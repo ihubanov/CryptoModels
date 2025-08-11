@@ -1110,6 +1110,7 @@ def handle_check(args):
     if getattr(args, 'hash', None):
         model_hash = args.hash
         local_path = DEFAULT_MODEL_DIR / (model_hash + POSTFIX_MODEL_PATH)
+        print_info(f"Local path: {local_path}")
         if local_path.exists():
             print_success("True")
         else:
@@ -1131,6 +1132,7 @@ def handle_check(args):
         if model_name in MODEL_TO_HASH:
             model_hash = MODEL_TO_HASH[model_name]
             local_path = DEFAULT_MODEL_DIR / (model_hash + POSTFIX_MODEL_PATH)
+            print_info(f"Local path: {local_path}")
             if local_path.exists():
                 print_success("True")
             else:
