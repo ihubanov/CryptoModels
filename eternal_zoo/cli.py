@@ -1166,33 +1166,21 @@ def handle_check(args):
 
     if getattr(args, 'hf_repo', None):
         # Look for any metadata that matches this HF repo (and optional file/pattern)
-        found_any = False
-        for json_file in DEFAULT_MODEL_DIR.glob("*.json"):
-            try:
-                with open(json_file, 'r') as f:
-                    meta = json.load(f)
-            except Exception:
-                continue
-            hf_data = meta.get("hf_data")
-            if not hf_data:
-                continue
-            if hf_data.get("repo") != args.hf_repo:
-                continue
-            if getattr(args, 'hf_file', None) and hf_data.get("model") != args.hf_file:
-                continue
-            if getattr(args, 'pattern', None) and hf_data.get("pattern") != args.pattern:
-                continue
+        local_path = DEFAULT_MODEL_DIR / args.hf_repo.replace("/", "_")
 
-            found_any = True
-            model_id = json_file.stem
-            success, _ = load_model_metadata(model_id, is_main=True)
-            if success:
-                print_success("True")
-                return
-
-        # If repo referenced but no matching metadata or invalid files
-        if not found_any:
-            print_info("False")
+        if args.hf_file:
+            local_path = local_path / args.hf_file
+        elif args.pattern:
+            pattern_dir =  DEFAULT_MODEL_DIR / args.hf_repo.replace("/", "_") + "_" + args.pattern / args.pattern
+            if os.path.exists(pattern_dir) and os.path.isdir(pattern_dir):
+                gguf_files = find_gguf_files(pattern_dir)
+                if gguf_files:
+                    local_path = pattern_dir / gguf_files[0]
+            else:
+                local_path = DEFAULT_MODEL_DIR / args.hf_repo.replace("/", "_") + "_" + args.pattern
+            
+        if local_path.exists():
+            print_success("True")
         else:
             print_info("False")
         return
