@@ -104,6 +104,7 @@ class ChatTemplateKwargs(BaseModel):
     Represents the arguments for a chat template.
     """
     enable_thinking: bool = Field(True, description="Whether to enable thinking mode")
+    reasoning_effort: Optional[Literal["low", "medium", "high"]] = Field("medium", description="The effort of the reasoning")
 
 # Common request base for both streaming and non-streaming
 class ChatCompletionRequestBase(BaseModel):
