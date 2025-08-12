@@ -1139,9 +1139,6 @@ def handle_check(args):
         print_info("False")
     return
 
-    # Nothing to check
-    print_info("False")
-
 def main():
     """Main CLI entry point with enhanced error handling"""
     # Show banner
