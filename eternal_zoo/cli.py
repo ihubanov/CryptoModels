@@ -1009,17 +1009,17 @@ def handle_serve(args):
     elif args.main_model:
         main_model_id = args.main_model
     elif args.hf_repo:
-        main_model_id = args.hf_repo
+        main_model_id = args.hf_repo.replace("/", "_")
         if args.hf_file:
             main_model_id = args.hf_file
         elif args.pattern:
-            pattern_dir = os.path.join(str(DEFAULT_MODEL_DIR), args.hf_repo.replace("/", "_") + "_" + args.pattern,  args.pattern)
+            pattern_dir = os.path.join(str(DEFAULT_MODEL_DIR), main_model_id + "_" + args.pattern,  args.pattern)
             if os.path.exists(pattern_dir) and os.path.isdir(pattern_dir):
                 gguf_files = find_gguf_files(pattern_dir)
                 if gguf_files:
                     main_model_id = os.path.basename(gguf_files[0])
             else:
-                main_model_id = args.hf_repo.replace("/", "_") + "_" + args.pattern
+                main_model_id = main_model_id + "_" + args.pattern
     else:
         main_model_id = downloaded_models[0]  # Default to first model instead of random
 
