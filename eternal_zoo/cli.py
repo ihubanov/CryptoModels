@@ -331,6 +331,14 @@ def parse_args():
         help="🎯 Model task type (default: chat)",
         metavar="TYPE"
     )
+    download_command.add_argument(
+        "--backend",
+        type=str,
+        default="gguf",
+        choices=["gguf", "mlx-flux", "mlx-lm"],
+        help="🔍 Tensor backend for the model (default: gguf)",
+        metavar="BACKEND"
+    )
 
     # Model check command
     check_command = model_subparsers.add_parser(
@@ -561,6 +569,7 @@ def handle_download(args) -> bool:
             "model": args.hf_file,
             "projector": args.mmproj,
             "pattern": args.pattern,
+            "backend": args.backend
         }
         success, local_path = asyncio.run(download_model_async(hf_data))
 
