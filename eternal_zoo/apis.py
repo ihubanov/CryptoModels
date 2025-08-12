@@ -192,6 +192,10 @@ class ServiceHandler:
         # Make a non-streaming API call
         logger.debug(f"Making non-streaming request for model {request.model}")
         response_data = await ServiceHandler._make_api_call(host, port, "/v1/chat/completions", request_dict)
+        # bring reasoning_content to content
+        reasoning_content = "<think>\n\n" + response_data.get("choices", [])[0].get("message", {}).get("reasoning_content", "") + "</think>\n\n"
+        response_data["choices"][0]["message"]["content"] = reasoning_content
+        response_data["choices"][0]["message"]["reasoning_content"] = None
         return ChatCompletionResponse(
             id=response_data.get("id", generate_chat_completion_id()),
             object=response_data.get("object", "chat.completion"),
@@ -387,7 +391,7 @@ class ServiceHandler:
                                 continue
                             
                             try:
-                                chunk_obj = ChatCompletionChunk.parse_raw(json_str)
+                                chunk_obj = ChatCompletionChunk.model_validate_json(json_str)
                                 choice = chunk_obj.choices[0]
 
                                 if choice.delta.reasoning_content:
@@ -395,28 +399,28 @@ class ServiceHandler:
                                         # move reasoning_content to content
                                         chunk_obj.choices[0].delta.content = choice.delta.reasoning_content
                                         chunk_obj.choices[0].delta.reasoning_content = None
-                                        yield f"data: {chunk_obj.json()}\n\n"
+                                        yield f"data: {chunk_obj.model_dump_json()}\n\n"
                                         continue
                                     else:
                                         thinking_mode = True
                                         # first chunk of thinking mode
-                                        first_think_chunk = chunk_obj.copy()
+                                        first_think_chunk = chunk_obj.model_copy(deep=True)
                                         first_think_chunk.choices[0].delta.content = "<think>\n\n"
                                         yield f"data: {first_think_chunk.json()}\n\n"
 
                                         # remove reasoning_content from chunk_obj
                                         chunk_obj.choices[0].delta.content = choice.delta.reasoning_content
                                         chunk_obj.choices[0].delta.reasoning_content = None
-                                        yield f"data: {chunk_obj.json()}\n\n"
+                                        yield f"data: {chunk_obj.model_dump_json()}\n\n"
                                         continue
                                 
                                 if thinking_mode and choice.delta.content:
-                                    print(f"thinking_mode: {thinking_mode}")
                                     thinking_mode = False
-                                    copy_chunk_obj = chunk_obj.copy()
-                                    copy_chunk_obj.choices[0].delta.content = "</think>\n\n" 
-                                    yield f"data: {copy_chunk_obj.json()}\n\n"
-                                
+                                    # copy a chunk with </think>
+                                    copy_chunk_obj = chunk_obj.model_copy(deep=True)
+                                    copy_chunk_obj.choices[0].delta.content = "</think>\n\n"
+                                    yield f"data: {copy_chunk_obj.model_dump_json()}\n\n"
+
                                 # Handle finish reason - output accumulated tool calls
                                 if choice.finish_reason and tool_calls:
                                     for tool_call_chunk in _create_tool_call_chunks(tool_calls, chunk_obj):
@@ -429,7 +433,7 @@ class ServiceHandler:
                                 if choice.delta.tool_calls:
                                     _process_tool_call_delta(choice.delta.tool_calls[0], tool_calls)
                                 else:
-                                    yield f"data: {chunk_obj.json()}\n\n"
+                                    yield f"data: {chunk_obj.model_dump_json()}\n\n"
                                         
                             except Exception as e:
                                 logger.error(f"Failed to parse streaming chunk in {stream_id}: {e}")
@@ -442,8 +446,8 @@ class ServiceHandler:
                         json_str = _extract_json_data(buffer)
                         if json_str and json_str != '[DONE]':
                             try:
-                                chunk_obj = ChatCompletionChunk.parse_raw(json_str)
-                                yield f"data: {chunk_obj.json()}\n\n"
+                                chunk_obj = ChatCompletionChunk.model_validate_json(json_str)
+                                yield f"data: {chunk_obj.model_dump_json()}\n\n"
                             except Exception as e:
                                 logger.error(f"Failed to parse trailing chunk in {stream_id}: {e}")
                         elif json_str == '[DONE]':                        
