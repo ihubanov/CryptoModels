@@ -251,6 +251,7 @@ class ChatCompletionRequest(ChatCompletionRequestBase):
                 non_system_messages.append(message)
             
         self.messages = system_messages + non_system_messages
+        print(self.messages)
 
     def enhance_tool_messages(self) -> None:
         """
