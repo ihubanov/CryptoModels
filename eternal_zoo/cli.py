@@ -279,6 +279,14 @@ def parse_args():
         help="🔍 Tensor backend for the model (default: gguf)",
         metavar="BACKEND"
     )
+    serve_command.add_argument(
+        "--task",
+        type=str,
+        default="chat",
+        choices=["chat", "embed", "image-generation", "image-edit"],
+        help="🎯 Model task type (default: chat)",
+        metavar="TYPE"
+    )
 
     # Model stop command
     stop_command = model_subparsers.add_parser(
