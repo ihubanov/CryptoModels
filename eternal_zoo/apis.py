@@ -401,14 +401,19 @@ class ServiceHandler:
                                     else:
                                         thinking_mode = True
                                         # first chunk of thinking mode
-                                        chunk_obj.choices[0].delta.content = "<think>" + choice.delta.reasoning_content
+                                        first_think_chunk = chunk_obj.copy()
+                                        first_think_chunk.choices[0].delta.content = "<think>\n\n"
+                                        yield f"data: {first_think_chunk.json()}\n\n"
+
+                                        # remove reasoning_content from chunk_obj
+                                        chunk_obj.choices[0].delta.content = choice.delta.reasoning_content
                                         chunk_obj.choices[0].delta.reasoning_content = None
                                         yield f"data: {chunk_obj.json()}\n\n"
                                         continue
                                 
                                 if thinking_mode:
                                     copy_chunk_obj = chunk_obj.copy()
-                                    copy_chunk_obj.choices[0].delta.content = "</think>" 
+                                    copy_chunk_obj.choices[0].delta.content = "</think>\n\n" 
                                     yield f"data: {copy_chunk_obj.json()}\n\n"
                                     thinking_mode = False
                                 
