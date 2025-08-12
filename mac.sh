@@ -246,6 +246,69 @@ show_package_status() {
     fi
 }
 
+# Install mlx-openai-server using pip with specific version
+install_mlx_openai_server_pip() {
+    local version="$1"
+    local package_name="mlx-openai-server"
+    
+    log_message "Checking $package_name installation..."
+    
+    if [ -n "$version" ]; then
+        log_message "Will install $package_name version: $version"
+        
+        # Check if already installed with the correct version
+        if pip show "$package_name" &>/dev/null; then
+            local installed_version=$(pip show "$package_name" | grep Version | awk '{print $2}')
+            log_message "Current $package_name version: $installed_version"
+            
+            if [ "$installed_version" = "$version" ]; then
+                log_message "$package_name is already installed with the correct version ($version). No update needed."
+                return 0
+            else
+                log_message "Version mismatch detected. Updating $package_name from $installed_version to $version..."
+                pip uninstall "$package_name" -y || {
+                    log_error "Failed to uninstall $package_name"
+                    return 1
+                }
+            fi
+        fi
+        
+        # Install specific version
+        local install_cmd="pip install ${package_name}==${version}"
+        log_message "Installing with command: $install_cmd"
+        
+        if eval "$install_cmd"; then
+            log_message "$package_name installed successfully with version $version."
+            return 0
+        else
+            log_error "Failed to install $package_name version $version."
+            return 1
+        fi
+    else
+        log_message "No version specified for $package_name. Installing latest version..."
+        
+        # Check if already installed
+        if pip show "$package_name" &>/dev/null; then
+            local installed_version=$(pip show "$package_name" | grep Version | awk '{print $2}')
+            log_message "Current $package_name version: $installed_version"
+            log_message "$package_name is already installed. No update needed."
+            return 0
+        fi
+        
+        # Install latest version
+        local install_cmd="pip install ${package_name}"
+        log_message "Installing with command: $install_cmd"
+        
+        if eval "$install_cmd"; then
+            log_message "$package_name installed successfully with latest version."
+            return 0
+        else
+            log_error "Failed to install $package_name."
+            return 1
+        fi
+    fi
+}
+
 # Configuration section for package versions
 # 
 # USAGE:
@@ -264,6 +327,7 @@ show_package_status() {
 
 # Use environment variable if set, otherwise use default (empty means latest)
 : "${MLX_FLUX_TAG:=}"         # Leave empty for latest, or set specific tag
+: "${MLX_OPENAI_SERVER_TAG:=}" # Leave empty for latest, or set specific tag
 : "${ETERNAL_ZOO_TAG:=}"     # Leave empty for latest, or set specific tag
 
 # Uncomment the lines below to see available tags before installation
@@ -283,9 +347,16 @@ else
     log_message "Will install eternal-zoo from latest version"
 fi
 
+if [ -n "$MLX_OPENAI_SERVER_TAG" ]; then
+    log_message "Will install mlx-openai-server version: $MLX_OPENAI_SERVER_TAG"
+else
+    log_message "Will install mlx-openai-server from latest version"
+fi
+
 # Show current installation status
 log_message "Current installation status:"
 show_package_status "mlx-flux" "$MLX_FLUX_TAG"
+show_package_status "mlx-openai-server" "$MLX_OPENAI_SERVER_TAG"
 show_package_status "eternal-zoo" "$ETERNAL_ZOO_TAG"
 
 # Error handling function
@@ -382,13 +453,17 @@ fi
 # Step 6: Create and activate virtual environment
 
 VENV_PATH=".eternal-zoo"
+log_message "Checking if virtual environment exists..."
+if [ -d "$VENV_PATH" ]; then
+    log_message "Removing existing virtual environment..."
+    rm -rf $VENV_PATH
+fi
 log_message "Creating virtual environment 'eternal-zoo'..."
 "$PYTHON_CMD" -m venv $VENV_PATH || handle_error $? "Failed to create virtual environment"
 
 log_message "Activating virtual environment..."
 source $VENV_PATH/bin/activate || handle_error $? "Failed to activate virtual environment"
 log_message "Virtual environment activated."
-
 
 # Step 7: Install mlx-flux dependencies
 if update_package "mlx-flux" "https://github.com/0x9334/mlx-flux.git" "https://raw.githubusercontent.com/0x9334/mlx-flux/main/setup.py" "version=\"[0-9.]*\"" "pip install git+https://github.com/0x9334/mlx-flux.git" "$MLX_FLUX_TAG"; then
@@ -397,7 +472,14 @@ else
     log_error "mlx-flux installation failed. This may happen on Intel Macs or due to compatibility issues. Continuing with installation..."
 fi
 
-# Step 8: Install eternal-zoo toolkit
+# Step 8: Install mlx-openai-server dependencies
+if install_mlx_openai_server_pip "$MLX_OPENAI_SERVER_TAG"; then
+    log_message "mlx-openai-server installation completed successfully."
+else
+    log_error "mlx-openai-server installation failed. This may happen on Intel Macs or due to compatibility issues. Continuing with installation..."
+fi
+
+# Step 9: Install eternal-zoo toolkit
 update_package "eternal-zoo" "https://github.com/eternalai-org/eternal-zoo.git" "https://raw.githubusercontent.com/eternalai-org/eternal-zoo/main/eternal_zoo/__init__.py" "__version__ = \"[0-9.]*\"" "pip install git+https://github.com/eternalai-org/eternal-zoo.git" "$ETERNAL_ZOO_TAG"
 
 log_message "Setup completed successfully."

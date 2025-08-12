@@ -16,6 +16,7 @@ download:
 
 # Package versions
 MLX_FLUX_TAG=1.0.5
+MLX_OPENAI_SERVER_TAG=1.2.7
 ETERNAL_ZOO_TAG=2.0.18
 
 # Default target
@@ -23,9 +24,10 @@ ETERNAL_ZOO_TAG=2.0.18
 install-macos:
 	@echo "Installing EternalZoo with specific versions:"
 	@echo "  MLX_FLUX_TAG: $(MLX_FLUX_TAG)"
+	@echo "  MLX_OPENAI_SERVER_TAG: $(MLX_OPENAI_SERVER_TAG)"
 	@echo "  ETERNAL_ZOO_TAG: $(ETERNAL_ZOO_TAG)"
 	@echo ""
-	MLX_FLUX_TAG=$(MLX_FLUX_TAG) ETERNAL_ZOO_TAG=$(ETERNAL_ZOO_TAG) bash mac.sh
+	MLX_FLUX_TAG=$(MLX_FLUX_TAG) MLX_OPENAI_SERVER_TAG=$(MLX_OPENAI_SERVER_TAG) ETERNAL_ZOO_TAG=$(ETERNAL_ZOO_TAG) bash mac.sh
 
 # Clean target to remove virtual environment
 .PHONY: clean
@@ -44,4 +46,5 @@ help:
 	@echo ""
 	@echo "Package versions:"
 	@echo "  MLX_FLUX_TAG: $(MLX_FLUX_TAG)"
+	@echo "  MLX_OPENAI_SERVER_TAG: $(MLX_OPENAI_SERVER_TAG)"
 	@echo "  ETERNALZOO_TAG: $(ETERNAL_ZOO_TAG)" 
