@@ -390,14 +390,19 @@ class ServiceHandler:
                                 chunk_obj = ChatCompletionChunk.parse_raw(json_str)
                                 choice = chunk_obj.choices[0]
 
+
                                 if choice.delta.reasoning_content:
                                     if thinking_mode:
+                                        # move reasoning_content to content
+                                        chunk_obj.choices[0].delta.content = choice.delta.reasoning_content
+                                        chunk_obj.choices[0].delta.reasoning_content = None
                                         yield f"data: {chunk_obj.json()}\n\n"
                                         continue
                                     else:
                                         thinking_mode = True
                                         # first chunk of thinking mode
                                         chunk_obj.choices[0].delta.content = "<think>" + choice.delta.reasoning_content
+                                        chunk_obj.choices[0].delta.reasoning_content = None
                                         yield f"data: {chunk_obj.json()}\n\n"
                                         continue
                                 
