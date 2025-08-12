@@ -186,20 +186,62 @@ class ChatCompletionRequest(ChatCompletionRequestBase):
             elif isinstance(message.content, str):
                 message.content = clean_special_box_text(message.content)
             elif isinstance(message.content, list):
-                # Remove None items and clean any text entries inside list content
+                # Remove None items and clean/validate multimodal entries
                 cleaned_items = []
                 for item in message.content:
                     if item is None:
                         continue
-                    if isinstance(item, dict) and item.get("type") == "text" and "text" in item:
-                        item["text"] = clean_special_box_text(item["text"]).strip()
+                    
+                    # Handle dict-shaped content items
+                    if isinstance(item, dict):
+                        item_type = item.get("type", None)
+                        # Drop items with missing or invalid type to avoid backend parser errors
+                        if not isinstance(item_type, str) or not item_type:
+                            continue
+                        if item_type == "text":
+                            text_val = item.get("text", "")
+                            if not isinstance(text_val, str):
+                                text_val = ""
+                            item["text"] = clean_special_box_text(text_val)
+                            cleaned_items.append(item)
+                        elif item_type == "image_url":
+                            image_url_obj = item.get("image_url")
+                            url_val = None
+                            if hasattr(image_url_obj, "url"):
+                                url_val = getattr(image_url_obj, "url")
+                            elif isinstance(image_url_obj, dict):
+                                url_val = image_url_obj.get("url")
+                            # Keep only if URL is a non-empty string
+                            if isinstance(url_val, str) and url_val:
+                                cleaned_items.append(item)
+                            # else drop the item
+                        elif item_type == "input_audio":
+                            audio_obj = item.get("input_audio")
+                            if audio_obj is not None:
+                                cleaned_items.append(item)
+                            # else drop
+                        else:
+                            # Unknown type: keep as-is (backend may support more types)
+                            cleaned_items.append(item)
+                        continue
+                    
+                    # Handle pydantic model content items (MultimodalContentItem)
+                    if hasattr(item, "type"):
+                        item_type = getattr(item, "type", None)
+                        if not isinstance(item_type, str) or not item_type:
+                            continue
+                        if item_type == "text":
+                            text_val = getattr(item, "text", None)
+                            if text_val is None:
+                                item.text = ""
+                            elif isinstance(text_val, str):
+                                item.text = clean_special_box_text(text_val)
                         cleaned_items.append(item)
-                    elif hasattr(item, "type") and getattr(item, "type", None) == "text" and hasattr(item, "text") and getattr(item, "text", None) is not None:
-                        # Support pydantic MultimodalContentItem instances
-                        item.text = clean_special_box_text(item.text).strip()
-                        cleaned_items.append(item)
-                    else:
-                        cleaned_items.append(item)
+                        continue
+                    
+                    # Fallback: if item is neither dict nor has a type attribute, drop it
+                    # to avoid malformed content entries
+                    continue
                 message.content = cleaned_items
             
             # Sort messages in the same loop to avoid second iteration
