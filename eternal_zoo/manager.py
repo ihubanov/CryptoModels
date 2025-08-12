@@ -816,14 +816,17 @@ class EternalZooManager:
         if model_path is None:
             raise ValueError("Model path is required to start the service")
         
-        backend = config.get("backend", "gguf")
+        hf_data = config.get("hf_data", None)
         model_name = config.get("model_name", None)
         model_family = self._get_model_family(model_name)
         template_path = self._get_model_template_path(model_family)
         best_practice_path = self._get_model_best_practice_path(model_family)
-
         projector = config.get("projector", None)
         context_length = config.get("context_length", 32768)
+        backend = "gguf"
+
+        if hf_data is not None:
+            backend = hf_data.get("backend", "gguf")
 
         if backend == "gguf":
             command = [
