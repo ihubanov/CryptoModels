@@ -219,6 +219,37 @@ def parse_args():
         metavar="MODEL"
     )
     serve_command.add_argument(
+        "--hf-repo",
+        type=str,
+        help="🤗 Hugging Face model repository",
+        metavar="REPO"
+    )
+    serve_command.add_argument(
+        "--hf-file",
+        type=str,
+        help="🤗 Hugging Face model file",
+        metavar="FILE"
+    )
+    serve_command.add_argument(
+        "--mmproj",
+        type=str,
+        help="🔍 Multimodal Projector File",
+        metavar="MMProj"
+    )
+    serve_command.add_argument(
+        "--pattern",
+        type=str,
+        help="🔍 Pattern to download from Hugging Face",
+        metavar="PATTERN"
+    )
+    serve_command.add_argument(
+        "--context-length",
+        type=int,
+        default=DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH,
+        help=f"📏 Context length for the model (default: {DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH})",
+        metavar="LENGTH"
+    )
+    serve_command.add_argument(
         "--port",
         type=int,
         default=DEFAULT_CONFIG.network.DEFAULT_PORT,
@@ -292,12 +323,26 @@ def parse_args():
         help="🔍 Pattern to download from Hugging Face",
         metavar="PATTERN"
     )
+    download_command.add_argument(
+        "--task",
+        type=str,
+        default="chat",
+        choices=["chat", "embed", "image-generation", "image-edit"],
+        help="🎯 Model task type (default: chat)",
+        metavar="TYPE"
+    )
 
     # Model check command
     check_command = model_subparsers.add_parser(
         "check",
         help="🔍 Check if model is downloaded",
         description="Check if a model with the specified hash has been downloaded"
+    )
+    check_command.add_argument(
+        "model_name",
+        nargs='?',
+        help="🏷️  Model name(s) - single: qwen3-1.7b or multi: qwen3-14b,qwen3-4b (first is main, others on-demand)",
+        metavar="MODEL"
     )
     check_command.add_argument(
         "--model-name",
@@ -422,6 +467,43 @@ def handle_download(args) -> bool:
         model_name = HASH_TO_MODEL[args.hash]
         hf_data = FEATURED_MODELS[model_name]
         success, local_path = asyncio.run(download_model_async(hf_data, args.hash))
+        # Prepare and persist model metadata JSON (merge with fetched metadata if exists)
+        if success:
+            try:
+                # Try to fetch gateway metadata to enrich saved file
+                meta_success, fetched_meta = asyncio.run(fetch_model_metadata_async(args.hash))
+            except Exception:
+                meta_success, fetched_meta = False, None
+
+            projector_path = f"{local_path}-projector"
+            model_metadata_path = os.path.join(DEFAULT_MODEL_DIR, f"{args.hash}.json")
+            existing_meta = {}
+            if os.path.exists(model_metadata_path):
+                try:
+                    with open(model_metadata_path, "r") as f:
+                        existing_meta = json.load(f)
+                except Exception:
+                    existing_meta = {}
+
+            updates = {
+                "task": (existing_meta.get("task")
+                          or (fetched_meta or {}).get("task")
+                          or hf_data.get("task")
+                          or getattr(args, "task", None)
+                          or "chat"),
+                "model_id": args.hash,
+                "model_name": (existing_meta.get("model_name")
+                                or (fetched_meta or {}).get("folder_name")
+                                or HASH_TO_MODEL.get(args.hash, args.hash)),
+                "lora": (existing_meta.get("lora")
+                          if existing_meta.get("lora") is not None else (fetched_meta or {}).get("lora", hf_data.get("lora", False))),
+                "architecture": existing_meta.get("architecture") or hf_data.get("architecture", None),
+                "multimodal": bool(os.path.exists(projector_path)),
+                "hf_data": None
+            }
+            merged = {**(fetched_meta or {}), **existing_meta, **updates}
+            with open(model_metadata_path, "w") as f:
+                json.dump(merged, f)
     elif args.model_name:
         if args.model_name in MODEL_TO_HASH:
             args.hash = MODEL_TO_HASH[args.model_name]
@@ -430,6 +512,48 @@ def handle_download(args) -> bool:
             sys.exit(1)
         hf_data = FEATURED_MODELS[args.model_name]
         success, local_path = asyncio.run(download_model_async(hf_data, args.hash))
+        # Save metadata for named featured models
+        if success:
+            projector_path = f"{local_path}-projector"
+            model_id = args.hash if getattr(args, 'hash', None) else args.model_name
+            model_metadata_path = os.path.join(DEFAULT_MODEL_DIR, f"{model_id}.json")
+            existing_meta = {}
+            if os.path.exists(model_metadata_path):
+                try:
+                    with open(model_metadata_path, "r") as f:
+                        existing_meta = json.load(f)
+                except Exception:
+                    existing_meta = {}
+
+            # Enrich with gateway metadata if we have a hash
+            fetched_meta = None
+            if getattr(args, 'hash', None):
+                try:
+                    meta_success, fetched_meta = asyncio.run(fetch_model_metadata_async(args.hash))
+                    if not meta_success:
+                        fetched_meta = None
+                except Exception:
+                    fetched_meta = None
+
+            updates = {
+                "task": (existing_meta.get("task")
+                          or (fetched_meta or {}).get("task")
+                          or hf_data.get("task")
+                          or getattr(args, "task", None)
+                          or "chat"),
+                "model_id": model_id,
+                "model_name": (existing_meta.get("model_name")
+                                or (fetched_meta or {}).get("folder_name")
+                                or args.model_name),
+                "lora": (existing_meta.get("lora")
+                          if existing_meta.get("lora") is not None else (fetched_meta or {}).get("lora", hf_data.get("lora", False))),
+                "architecture": existing_meta.get("architecture") or hf_data.get("architecture", None),
+                "multimodal": bool(os.path.exists(projector_path)),
+                "hf_data": None if args.hash else hf_data,
+            }
+            merged = {**(fetched_meta or {}), **existing_meta, **updates}
+            with open(model_metadata_path, "w") as f:
+                json.dump(merged, f)
     else:
         # Download from Hugging Face
         hf_data = {
@@ -439,6 +563,40 @@ def handle_download(args) -> bool:
             "pattern": args.pattern,
         }
         success, local_path = asyncio.run(download_model_async(hf_data))
+
+        # Save metadata for HF downloads
+        if success:
+            projector_path = f"{local_path}-projector"
+            final_local_path = local_path
+            # If pattern is provided, try to resolve to a specific GGUF file like in handle_run
+            if getattr(args, 'pattern', None):
+                base_dir = os.path.dirname(local_path) if os.path.isfile(local_path) else local_path
+                pattern_dir = os.path.join(base_dir, args.pattern)
+                gguf_path = None
+                if os.path.exists(pattern_dir) and os.path.isdir(pattern_dir):
+                    gguf_files = find_gguf_files(pattern_dir)
+                    if gguf_files:
+                        gguf_path = os.path.join(pattern_dir, gguf_files[0])
+                if not gguf_path:
+                    gguf_files = find_gguf_files(base_dir)
+                    if gguf_files:
+                        gguf_path = os.path.join(base_dir, gguf_files[0])
+                if gguf_path:
+                    final_local_path = gguf_path
+
+            model_id = os.path.basename(final_local_path)
+            model_metadata = {
+                "task": getattr(args, "task", "chat"),
+                "model_id": model_id,
+                "model_name": model_id,
+                "multimodal": bool(projector_path and os.path.exists(projector_path)),
+                "lora": False,
+                "architecture": None,
+                "hf_data": hf_data,
+            }
+            model_metadata_path = os.path.join(DEFAULT_MODEL_DIR, f"{model_id}.json")
+            with open(model_metadata_path, "w") as f:
+                json.dump(model_metadata, f)
     
     # Handle download result
     if success:
@@ -599,59 +757,38 @@ def handle_run(args):
     
     # Handle Hugging Face repository case separately
     if args.hf_repo:
-        hf_data = {
-            "repo": args.hf_repo,
-            "model": args.hf_file,
-            "projector": args.mmproj,
-            "pattern": args.pattern
-        }
-        success, local_path = asyncio.run(download_model_async(hf_data))
-        if not success:
-            print_error(f"Failed to download model {args.hf_repo}")
-            sys.exit(1)
-        
-        model_id = os.path.basename(local_path)
+        # Ensure model and metadata are downloaded via the download flow
+        handle_download(args)
+
+        # Reconstruct local path similarly to the previous logic
+        if args.hf_file:
+            local_path = os.path.join(str(DEFAULT_MODEL_DIR), args.hf_file)
+        else:
+            base_dir = os.path.join(str(DEFAULT_MODEL_DIR), args.hf_repo.replace("/", "_"))
+            if args.pattern:
+                base_dir = f"{base_dir}_{args.pattern}"
+            local_path = base_dir
 
         projector_path = None
-        if args.mmproj:
-            mmproj_path = local_path + "-projector"
-            if os.path.exists(mmproj_path):
-                projector_path = mmproj_path
+        mmproj_path = f"{local_path}-projector"
+        if os.path.exists(mmproj_path):
+            projector_path = mmproj_path
 
-        if args.pattern:
-            # Validate that local_path is a directory
-            if not os.path.isdir(local_path):
-                print_error(f"Path {local_path} is not a directory")
-                sys.exit(1)
-            
-            pattern_dir = os.path.join(local_path, args.pattern)
-            
-            # First try to find GGUF files in the pattern directory
-            if os.path.exists(pattern_dir) and os.path.isdir(pattern_dir):
-                print_info(f"Searching for GGUF files in pattern directory: {pattern_dir}")
-                gguf_files = find_gguf_files(pattern_dir)
-                
-                if gguf_files:
-                    selected_file = gguf_files[0]  # Use the first (sorted) file
-                    local_path = os.path.join(pattern_dir, selected_file)
-                    print_success(f"Found GGUF file: {selected_file}")
-                else:
-                    print_error(f"No GGUF files found in {pattern_dir}")
-                    sys.exit(1)
+        # If a directory, attempt to pick a GGUF file when pattern is specified or none found at top level
+        if os.path.isdir(local_path):
+            search_dir = local_path
+            if args.pattern:
+                pattern_dir = os.path.join(local_path, args.pattern)
+                if os.path.exists(pattern_dir) and os.path.isdir(pattern_dir):
+                    search_dir = pattern_dir
+            gguf_files = find_gguf_files(search_dir)
+            if gguf_files:
+                local_path = os.path.join(search_dir, gguf_files[0])
             else:
-                # Pattern directory doesn't exist, search in base directory
-                print_info(f"Pattern directory not found: {pattern_dir}")
-                print_info(f"Searching for GGUF files in base directory: {local_path}")
-                
-                gguf_files = find_gguf_files(local_path)
-                if gguf_files:
-                    selected_file = gguf_files[0]
-                    local_path = os.path.join(local_path, selected_file)
-                    print_success(f"Found GGUF file: {selected_file}")
-                else:
-                    print_error(f"No GGUF files found in {local_path}")
-                    sys.exit(1)
+                print_error(f"No GGUF files found in {search_dir}")
+                sys.exit(1)
 
+        model_id = os.path.basename(local_path)
         config = {
             "model_id": model_id,
             "model": local_path,
@@ -664,22 +801,11 @@ def handle_run(args):
             "multimodal": bool(projector_path),
         }
 
-        success =  manager.start([config], args.port, args.host)
+        success = manager.start([config], args.port, args.host)
 
         if not success:
             print_error(f"Failed to start model {model_id}")
             sys.exit(1)
-
-        model_metadata = {
-            "task": args.task,
-            "model_id": model_id,
-            "model_name": model_id,
-            "multimodal": bool(projector_path),
-        }
-        model_metadata_path = os.path.join(DEFAULT_MODEL_DIR, model_id + ".json")
-        with open(model_metadata_path, "w") as f:
-            json.dump(model_metadata, f)
-        print_success(f"Model metadata file {model_metadata_path} created")
         return success
 
     # Handle hash or model_name cases
@@ -699,121 +825,34 @@ def handle_run(args):
         print_error("Either hash, model_name, or hf_repo must be provided")
         sys.exit(1)
 
-    hf_data = FEATURED_MODELS[model_name]
-    success, local_path = asyncio.run(download_model_async(hf_data, getattr(args, 'hash', None)))
-    if not success:
-        print_error(f"Failed to download model {model_name}")
+    # Resolve model_id and ensure download+metadata exist, then start
+    # Determine model name and model_id
+    if args.hash:
+        model_id = args.hash
+    elif args.model_name:
+        model_id = MODEL_TO_HASH.get(args.model_name, args.model_name)
+    else:
+        print_error("Either hash, model_name, or hf_repo must be provided")
         sys.exit(1)
 
-    architecture = hf_data.get("architecture", "flux-dev")
-    is_lora = False
-    lora_config = None
-    projector_path = None
-    task = "chat"
-    model_name_from_metadata = model_name
+    # If metadata not present, perform download (also writes metadata)
+    metadata_path = os.path.join(DEFAULT_MODEL_DIR, f"{model_id}.json")
+    if not os.path.exists(metadata_path):
+        handle_download(args)
 
-    # Fetch metadata if hash is available
-    if getattr(args, 'hash', None):
-        success, metadata = asyncio.run(fetch_model_metadata_async(args.hash))
-        if not success:
-            print_error(f"Failed to fetch model metadata for {args.hash}")
-            sys.exit(1)
-        is_lora = metadata.get("lora", False)
-        task = metadata.get("task", "chat")
-        model_name_from_metadata = metadata.get("folder_name", model_name)
-    else:
-        is_lora = hf_data.get("lora", False)
-        task = hf_data.get("task", "chat")
+    success, config = load_model_metadata(model_id, is_main=True)
+    if not success:
+        print_error(f"Failed to load model {model_id}")
+        sys.exit(1)
 
-    # Handle LoRA configuration
-    if is_lora:
-        metadata_path = os.path.join(local_path, "metadata.json")
-        if not os.path.exists(metadata_path):
-            print_error("LoRA model found but metadata.json is missing")
-            sys.exit(1)
-        with open(metadata_path, "r") as f:
-            lora_metadata = json.load(f)
-        lora_config = {}
-        lora_paths = lora_metadata.get("lora_paths", [])
-        lora_scales = lora_metadata.get("lora_scales", [])
-        for i, lora_path in enumerate(lora_paths):
-            lora_name = os.path.basename(lora_path)
-            lora_config[lora_name] = {
-                "path": os.path.join(local_path, lora_path),
-                "scale": lora_scales[i]
-            }
-        base_model_hash = lora_metadata.get("base_model")
-        if base_model_hash not in HASH_TO_MODEL:
-            print_error(f"Base model hash {base_model_hash} not found")
-            sys.exit(1)
-        base_model_name = HASH_TO_MODEL[base_model_hash]
-        base_model_hf_data = FEATURED_MODELS[base_model_name]
-        success, base_model_local_path = asyncio.run(download_model_async(base_model_hf_data, base_model_hash))
-
-        print(f"base_model_local_path: {base_model_local_path}")
-        if not success:
-            print_error(f"Failed to download base model {base_model_hash}")
-            sys.exit(1)
-        local_path = base_model_local_path
-        model_name_from_metadata = base_model_name
-            
-    # Determine projector path
-    projector_candidates = [
-        f"{local_path}-projector",
-        os.path.join(local_path, hf_data.get("projector", "")) if "projector" in hf_data else None
-    ]
-    for candidate in projector_candidates:
-        if candidate and os.path.exists(candidate):
-            projector_path = candidate
-            break
-
-    model_id = args.hash if getattr(args, 'hash', None) else model_name
-    pattern = hf_data.get("pattern", None)
-    if pattern:
-        if not os.path.isdir(local_path):
-            print_error(f"Path {local_path} is not a folder")
-            sys.exit(1)
-        gguf_files = find_gguf_files(local_path)
-        if len(gguf_files) == 0:
-            print_error(f"No GGUF files found in {local_path}")
-            sys.exit(1)
-        local_path = os.path.join(local_path, gguf_files[0])
-
-    # Build configuration
-    config = {
-        "model_id": model_id,
-        "hash": getattr(args, 'hash', None),
-        "model": local_path,
-        "context_length": args.context_length,
-        "model_name": model_name_from_metadata,
-        "task": task,
-        "projector": projector_path,
-        "multimodal": bool(projector_path),
-        "on_demand": False,
-        "is_lora": is_lora,
-        "architecture": architecture,
-        "lora_config": lora_config,
-    }
+    # Respect provided context length
+    if getattr(args, 'context_length', None):
+        config["context_length"] = args.context_length
 
     success = manager.start([config], args.port, args.host)
-
     if not success:
         print_error(f"Failed to start model {model_id}")
         sys.exit(1)
-
-    model_metadata = {
-        "task": task,
-        "model_id": model_id,
-        "model_name": model_name_from_metadata,
-        "lora": is_lora,
-        "architecture": architecture,
-        "multimodal": bool(projector_path),
-    }
-    model_metadata_path = os.path.join(DEFAULT_MODEL_DIR, model_id + ".json")
-
-    with open(model_metadata_path, "w") as f:
-        json.dump(model_metadata, f)
-    print_success(f"Model metadata file {model_metadata_path} created")
     return success
 
 
@@ -844,6 +883,23 @@ def load_model_metadata(model_id, is_main=False) -> tuple[bool, dict | None]:
 
     # Optimize path checking - check both paths at once
     local_path = model_dir / model_id
+    hf_data = metadata.get("hf_data", None)
+    if hf_data:
+        repo = hf_data["repo"]
+        local_path = model_dir / f"{repo.replace('/', '_')}"
+        model = hf_data.get("model", None)
+        pattern = hf_data.get("pattern", None)
+        if model:
+            local_path = model_dir / model
+        elif pattern:
+            pattern_dir = model_dir / f"{repo.replace('/', '_')}_{pattern}" / pattern
+            if pattern_dir.exists() and pattern_dir.is_dir():
+                gguf_files = find_gguf_files(pattern_dir)
+                if gguf_files:
+                    local_path = pattern_dir / gguf_files[0]
+            else:
+                local_path = model_dir / f"{repo.replace('/', '_')}_{pattern}"
+        
     if not local_path.exists():
         local_path = model_dir / f"{model_id}{POSTFIX_MODEL_PATH}"
         if not local_path.exists():
@@ -974,6 +1030,18 @@ def handle_serve(args):
         main_model_id = args.main_hash
     elif args.main_model:
         main_model_id = args.main_model
+    elif args.hf_repo:
+        main_model_id = args.hf_repo
+        if args.hf_file:
+            main_model_id = args.hf_file
+        elif args.pattern:
+            pattern_dir = os.path.join(str(DEFAULT_MODEL_DIR), args.hf_repo.replace("/", "_") + "_" + args.pattern,  args.pattern)
+            if os.path.exists(pattern_dir) and os.path.isdir(pattern_dir):
+                gguf_files = find_gguf_files(pattern_dir)
+                if gguf_files:
+                    main_model_id = os.path.basename(gguf_files[0])
+            else:
+                main_model_id = args.hf_repo.replace("/", "_") + "_" + args.pattern
     else:
         main_model_id = downloaded_models[0]  # Default to first model instead of random
 
@@ -1041,50 +1109,60 @@ def handle_preserve(args):
 
 def handle_check(args):
     """Handle model check with beautiful output"""
-    local_path = DEFAULT_MODEL_DIR / f"{args.hash}{POSTFIX_MODEL_PATH}"
-    is_downloaded = local_path.exists()
-
-    if is_downloaded:
-        # For LoRA models, we need to do additional validation
-        if local_path.is_dir():
-            # This is likely a LoRA model - check if it has valid metadata and base model
-            metadata_path = local_path / "metadata.json"
-            if metadata_path.exists():
-                try:
-                    with open(metadata_path, 'r') as f:
-                        lora_metadata = json.load(f)
-
-                    # Check if base model is available
-                    base_model_hash = lora_metadata.get("base_model")
-                    if base_model_hash:
-                        base_model_path = DEFAULT_MODEL_DIR / f"{base_model_hash}{POSTFIX_MODEL_PATH}"
-                        if not base_model_path.exists():
-                            print_warning(f"LoRA model found but base model missing: {base_model_hash}")
-                            print_info("False")
-                            return
-
-                    # Check if LoRA files exist
-                    lora_paths = lora_metadata.get("lora_paths", [])
-                    for lora_path in lora_paths:
-                        if not os.path.isabs(lora_path):
-                            lora_path = os.path.join(local_path, lora_path)
-                        if not os.path.exists(lora_path):
-                            print_warning(f"LoRA model found but LoRA file missing: {lora_path}")
-                            print_info("False")
-                            return
-
-                    print_success("True")
-                except (json.JSONDecodeError, KeyError, Exception) as e:
-                    print_warning(f"LoRA model found but metadata is invalid: {str(e)}")
-                    print_info("False")
-            else:
-                print_warning("LoRA model directory found but metadata.json is missing")
-                print_info("False")
-        else:
-            # Regular model file
+    if getattr(args, 'hash', None):
+        model_hash = args.hash
+        local_path = DEFAULT_MODEL_DIR / (model_hash + POSTFIX_MODEL_PATH)
+        print_info(f"Local path: {local_path}")
+        if local_path.exists():
             print_success("True")
+        else:
+            print_info("False")
+        return
+
+    hf_data = {
+        "repo": args.hf_repo,
+        "model": args.hf_file,
+        "pattern": args.pattern,
+        "mmproj": args.mmproj,
+    }
+    
+    if getattr(args, 'model_name', None):
+        model_name = args.model_name
+        if model_name not in FEATURED_MODELS:
+            print_error(f"Model name {model_name} not found in FEATURED_MODELS")
+            sys.exit(1)
+        if model_name in MODEL_TO_HASH:
+            model_hash = MODEL_TO_HASH[model_name]
+            local_path = DEFAULT_MODEL_DIR / (model_hash + POSTFIX_MODEL_PATH)
+            print_info(f"Local path: {local_path}")
+            if local_path.exists():
+                print_success("True")
+            else:
+                print_info("False")
+            return
+        else:
+            hf_data = FEATURED_MODELS[model_name]
+        
+    if hf_data["model"]:
+        local_path = DEFAULT_MODEL_DIR / hf_data["model"]
+    elif hf_data["pattern"]:
+        pattern_dir =  DEFAULT_MODEL_DIR / (hf_data["repo"].replace("/", "_") + "_" + hf_data["pattern"]) / hf_data["pattern"]
+        if os.path.exists(pattern_dir) and os.path.isdir(pattern_dir):
+            gguf_files = find_gguf_files(pattern_dir)
+            if gguf_files:
+                local_path = pattern_dir / gguf_files[0]
+        else:
+            local_path = DEFAULT_MODEL_DIR / (hf_data["repo"].replace("/", "_") + "_" + hf_data["pattern"])
+        
+    print_info(f"Local path: {local_path}")
+    if local_path.exists():
+        print_success("True")
     else:
         print_info("False")
+    return
+
+    # Nothing to check
+    print_info("False")
 
 def main():
     """Main CLI entry point with enhanced error handling"""
