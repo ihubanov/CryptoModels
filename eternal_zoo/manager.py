@@ -823,10 +823,7 @@ class EternalZooManager:
         best_practice_path = self._get_model_best_practice_path(model_family)
         projector = config.get("projector", None)
         context_length = config.get("context_length", 32768)
-        backend = "gguf"
-
-        if hf_data is not None:
-            backend = hf_data.get("backend", "gguf")
+        backend = config.get("backend", "gguf")
 
         if backend == "gguf":
             command = [

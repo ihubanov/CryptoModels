@@ -916,7 +916,7 @@ def load_model_metadata(model_id, is_main=False) -> tuple[bool, dict | None]:
         "architecture": metadata.get("architecture", "flux-dev"),
         "lora_config": lora_config,
         "context_length": DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH,
-        "backend": metadata.get("backend", "gguf")
+        "backend": hf_data.get("backend", "gguf") if hf_data else "gguf"
     }
     return True, config
 
