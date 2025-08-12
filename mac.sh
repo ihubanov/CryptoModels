@@ -465,18 +465,18 @@ log_message "Activating virtual environment..."
 source $VENV_PATH/bin/activate || handle_error $? "Failed to activate virtual environment"
 log_message "Virtual environment activated."
 
-# Step 7: Install mlx-flux dependencies
-if update_package "mlx-flux" "https://github.com/0x9334/mlx-flux.git" "https://raw.githubusercontent.com/0x9334/mlx-flux/main/setup.py" "version=\"[0-9.]*\"" "pip install git+https://github.com/0x9334/mlx-flux.git" "$MLX_FLUX_TAG"; then
-    log_message "mlx-flux installation completed successfully."
-else
-    log_error "mlx-flux installation failed. This may happen on Intel Macs or due to compatibility issues. Continuing with installation..."
-fi
-
-# Step 8: Install mlx-openai-server dependencies
+# Step 7: Install mlx-openai-server dependencies
 if install_mlx_openai_server_pip "$MLX_OPENAI_SERVER_TAG"; then
     log_message "mlx-openai-server installation completed successfully."
 else
     log_error "mlx-openai-server installation failed. This may happen on Intel Macs or due to compatibility issues. Continuing with installation..."
+fi
+
+# Step 8: Install mlx-flux dependencies
+if update_package "mlx-flux" "https://github.com/0x9334/mlx-flux.git" "https://raw.githubusercontent.com/0x9334/mlx-flux/main/setup.py" "version=\"[0-9.]*\"" "pip install git+https://github.com/0x9334/mlx-flux.git" "$MLX_FLUX_TAG"; then
+    log_message "mlx-flux installation completed successfully."
+else
+    log_error "mlx-flux installation failed. This may happen on Intel Macs or due to compatibility issues. Continuing with installation..."
 fi
 
 # Step 9: Install eternal-zoo toolkit
