@@ -199,6 +199,14 @@ def parse_args():
         help="🎯 Model task type (default: chat)",
         metavar="TYPE"
     )
+    run_command.add_argument(
+        "--backend",
+        type=str,
+        default="gguf",
+        choices=["gguf", "mlx-flux", "mlx-lm"],
+        help="🔍 Tensor backend for the model (default: gguf)",
+        metavar="BACKEND"
+    )
 
     # Model serve command
     serve_command = model_subparsers.add_parser(
@@ -262,6 +270,14 @@ def parse_args():
         default=DEFAULT_CONFIG.network.DEFAULT_HOST,
         help=f"🏠 Host address for the server (default: {DEFAULT_CONFIG.network.DEFAULT_HOST})",
         metavar="HOST"
+    )
+    serve_command.add_argument(
+        "--backend",
+        type=str,
+        default="gguf",
+        choices=["gguf", "mlx-flux", "mlx-lm"],
+        help="🔍 Tensor backend for the model (default: gguf)",
+        metavar="BACKEND"
     )
 
     # Model stop command
@@ -330,6 +346,14 @@ def parse_args():
         choices=["chat", "embed", "image-generation", "image-edit"],
         help="🎯 Model task type (default: chat)",
         metavar="TYPE"
+    )
+    download_command.add_argument(
+        "--backend",
+        type=str,
+        default="gguf",
+        choices=["gguf", "mlx-flux", "mlx-lm"],
+        help="🔍 Tensor backend for the model (default: gguf)",
+        metavar="BACKEND"
     )
 
     # Model check command
@@ -499,7 +523,7 @@ def handle_download(args) -> bool:
                           if existing_meta.get("lora") is not None else (fetched_meta or {}).get("lora", hf_data.get("lora", False))),
                 "architecture": existing_meta.get("architecture") or hf_data.get("architecture", None),
                 "multimodal": bool(os.path.exists(projector_path)),
-                "hf_data": None
+                "hf_data": hf_data
             }
             merged = {**(fetched_meta or {}), **existing_meta, **updates}
             with open(model_metadata_path, "w") as f:
@@ -549,7 +573,7 @@ def handle_download(args) -> bool:
                           if existing_meta.get("lora") is not None else (fetched_meta or {}).get("lora", hf_data.get("lora", False))),
                 "architecture": existing_meta.get("architecture") or hf_data.get("architecture", None),
                 "multimodal": bool(os.path.exists(projector_path)),
-                "hf_data": None if args.hash else hf_data,
+                "hf_data": hf_data
             }
             merged = {**(fetched_meta or {}), **existing_meta, **updates}
             with open(model_metadata_path, "w") as f:
@@ -561,6 +585,7 @@ def handle_download(args) -> bool:
             "model": args.hf_file,
             "projector": args.mmproj,
             "pattern": args.pattern,
+            "backend": args.backend
         }
         success, local_path = asyncio.run(download_model_async(hf_data))
 
@@ -592,7 +617,7 @@ def handle_download(args) -> bool:
                 "multimodal": bool(projector_path and os.path.exists(projector_path)),
                 "lora": False,
                 "architecture": None,
-                "hf_data": hf_data,
+                "hf_data": hf_data
             }
             model_metadata_path = os.path.join(DEFAULT_MODEL_DIR, f"{model_id}.json")
             with open(model_metadata_path, "w") as f:
@@ -606,6 +631,45 @@ def handle_download(args) -> bool:
         print_error("Download failed")
         sys.exit(1)
 
+def _determine_model_id_from_args(args) -> str:
+    """Determine the model_id used for metadata after a download.
+
+    This mirrors the logic used when saving metadata in `handle_download`.
+    Assumes the download for the given args has already completed.
+    """
+    # Hash or featured model name cases
+    if getattr(args, 'hash', None):
+        return args.hash
+    if getattr(args, 'model_name', None):
+        return MODEL_TO_HASH.get(args.model_name, args.model_name)
+
+    # HF repo case
+    if getattr(args, 'hf_repo', None):
+        # Reconstruct local path similarly to the existing logic
+        if getattr(args, 'hf_file', None):
+            local_path = os.path.join(str(DEFAULT_MODEL_DIR), args.hf_file)
+        else:
+            base_dir = os.path.join(str(DEFAULT_MODEL_DIR), args.hf_repo.replace("/", "_"))
+            if getattr(args, 'pattern', None):
+                base_dir = f"{base_dir}_{args.pattern}"
+            local_path = base_dir
+
+        # If a directory, attempt to pick a GGUF file when pattern is specified or none found at top level
+        if os.path.isdir(local_path):
+            search_dir = local_path
+            if getattr(args, 'pattern', None):
+                pattern_dir = os.path.join(local_path, args.pattern)
+                if os.path.exists(pattern_dir) and os.path.isdir(pattern_dir):
+                    search_dir = pattern_dir
+            gguf_files = find_gguf_files(search_dir)
+            if gguf_files:
+                local_path = os.path.join(search_dir, gguf_files[0])
+
+        return os.path.basename(local_path)
+
+    # Fallback
+    raise ValueError("Insufficient arguments to determine model_id")
+
 def handle_run(args):
     """Handle model loading and configuration based on provided arguments."""
     # Handle config file case with multi-model support
@@ -617,141 +681,84 @@ def handle_run(args):
         host = config.get("host", "0.0.0.0")
         models = config.get("models", {})
         
-        # Build configurations for all models
+        # Build configurations for all models by reusing handle_download + load_model_metadata
         configs = []
-        main_model_id = None
+        main_model_key = None
 
         # First pass: find the main model (on_demand=False)
-        for model_name, model_config in models.items():
+        for model_key, model_config in models.items():
             on_demand = model_config.get("on_demand", False)
             if not on_demand:
-                main_model_id = model_name
+                main_model_key = model_key
                 break
-        
-        if not main_model_id:
+        if not main_model_key:
             print_warning("No main model found in config file (on_demand=False), using first model")
-            main_model_id = list(models.keys())[0]
-        
-        # Second pass: create configurations for all models
-        for model_name, model_config in models.items():
-            lora_config = None
-            is_main = (model_name == main_model_id)
-            if "model" in model_config:
-                if model_config["model"] in FEATURED_MODELS:
-                    # Featured model by name
-                    featured_model_name = model_config["model"]
-                    if featured_model_name not in FEATURED_MODELS:
-                        print_error(f"Model {featured_model_name} not found in FEATURED_MODELS")
-                        continue
-                        
-                    hf_data = FEATURED_MODELS[featured_model_name]
-                    model_hash = MODEL_TO_HASH.get(featured_model_name)
-                    success, local_path = asyncio.run(download_model_async(hf_data, model_hash))
-                    if not success:
-                        print_error(f"Failed to download model {model_name}")
-                        continue
-                    projector = hf_data.get("projector", None)
-                    projector_path = None
-                    if projector:
-                        if os.path.exists(local_path + "-projector"):
-                            projector_path = local_path + "-projector"
-                        else:
-                            print_warning(f"Projector file {local_path + '-projector'} not found")
-                    
-                    is_lora = hf_data.get("lora", False)
-                    task = hf_data.get("task", "chat")
-                    if is_lora:
-                        if task == "image-generation":
-                            metadata_path = os.path.join(local_path, "metadata.json")
-                            if not os.path.exists(metadata_path):
-                                print_error("LoRA model found but metadata.json is missing")
-                                sys.exit(1)
-                            with open(metadata_path, "r") as f:
-                                lora_metadata = json.load(f)
-                            lora_config = {}
-                            lora_paths = lora_metadata.get("lora_paths", [])
-                            lora_scales = lora_metadata.get("lora_scales", [])
-                            for i, lora_path in enumerate(lora_paths):
-                                lora_name = os.path.basename(lora_path)
-                                lora_config[lora_name] = {
-                                    "path": os.path.join(local_path, lora_path),
-                                    "scale": lora_scales[i]
-                                }
-                            base_model = lora_metadata.get("base_model")
-                            if base_model in HASH_TO_MODEL:
-                                base_model_hash = base_model
-                                base_model = HASH_TO_MODEL[base_model]
-                            base_model_hf_data = FEATURED_MODELS[base_model]
-                            success, base_model_local_path = asyncio.run(download_model_async(base_model_hf_data, base_model_hash))
-                            if not success:
-                                print_error(f"Failed to download base model {base_model}")
-                                sys.exit(1)
-                            local_path = base_model_local_path
-                        else:
-                            print_warning(f"Lora model found but task {task} is not supported for lora")
-                            continue
-                        
-                    config_dict = {
-                        "model_id": model_name,
-                        "model": local_path,
-                        "context_length": DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH,
-                        "model_name": featured_model_name,
-                        "task": task,
-                        "on_demand": not is_main,
-                        "is_lora": is_lora,
-                        "projector": projector_path,
-                        "multimodal": bool(projector_path),
-                        "architecture": hf_data.get("architecture", None),
-                        "lora_config": lora_config,
-                    }
-                    configs.append(config_dict)
-                    continue
-                
-            if "hf_repo" in model_config:
-                # Download from Hugging Face
-                hf_data = {
-                    "repo": model_config["hf_repo"],
-                    "model": model_config["model"],
-                    "projector": model_config.get("mmproj"),
-                }
-                success, local_path = asyncio.run(download_model_async(hf_data))
-                if not success:
-                    print_error(f"Failed to download model {model_name}")
-                    continue
-                    
-                model_id = os.path.basename(local_path)
-                projector_path = None
-                if model_config.get("mmproj"):
-                    mmproj_path = local_path + "-projector"
-                    if os.path.exists(mmproj_path):
-                        projector_path = mmproj_path
-                        
-                config_dict = {
-                    "model_id": model_name,
-                    "model": local_path,
-                    "context_length": DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH,
-                    "model_name": model_id,
-                    "task": model_config.get("task", "chat"),
-                    "on_demand": not is_main,
-                    "is_lora": False,
-                    "projector": projector_path,
-                    "multimodal": bool(projector_path),
-                    "architecture": None,
-                    "lora_config": None,
-                }                
-                configs.append(config_dict)
+            main_model_key = list(models.keys())[0]
 
-        
+        # Second pass: ensure downloads and load configs from metadata
+        for model_key, model_config in models.items():
+            is_main = (model_key == main_model_key)
+
+            # Compose an args-like object for handle_download
+            # Priority: featured name in `model`, else `hf_repo`
+            if "model" in model_config and model_config["model"] in FEATURED_MODELS:
+                featured_model_name = model_config["model"]
+                temp_args = argparse.Namespace(
+                    hash=MODEL_TO_HASH.get(featured_model_name),
+                    model_name=featured_model_name,
+                    hf_repo=None,
+                    hf_file=None,
+                    mmproj=None,
+                    pattern=None,
+                    backend=model_config.get("backend"),
+                    task=model_config.get("task", FEATURED_MODELS[featured_model_name].get("task", "chat"))
+                )
+            elif "hf_repo" in model_config:
+                temp_args = argparse.Namespace(
+                    hash=None,
+                    model_name=None,
+                    hf_repo=model_config.get("hf_repo"),
+                    hf_file=model_config.get("model"),
+                    mmproj=model_config.get("mmproj"),
+                    pattern=model_config.get("pattern"),
+                    backend=model_config.get("backend"),
+                    task=model_config.get("task", "chat")
+                )
+            else:
+                print_warning(f"Model entry '{model_key}' missing required fields; skipping")
+                continue
+
+            # Ensure download + metadata
+            handle_download(temp_args)
+
+            # Determine model_id and load config from metadata
+            try:
+                model_id = _determine_model_id_from_args(temp_args)
+            except Exception as e:
+                print_warning(f"Failed to determine model_id for '{model_key}': {e}")
+                continue
+
+            success, cfg = load_model_metadata(model_id, is_main=is_main)
+            if not success or not cfg:
+                print_warning(f"Failed to load model '{model_key}' from metadata")
+                continue
+
+            # Allow per-model context_length override if provided
+            if "context_length" in model_config:
+                cfg["context_length"] = model_config["context_length"]
+
+            configs.append(cfg)
+
         if not configs:
             print_error("No valid models found in config file")
             sys.exit(1)
-            
+
         # Start the multi-model server
         success = manager.start(configs, port, host)
         if not success:
             print_error("Failed to start multi-model server")
             sys.exit(1)
-            
+
         print_success(f"Multi-model server started with {len(configs)} models")
         return success
     
@@ -760,46 +767,16 @@ def handle_run(args):
         # Ensure model and metadata are downloaded via the download flow
         handle_download(args)
 
-        # Reconstruct local path similarly to the previous logic
-        if args.hf_file:
-            local_path = os.path.join(str(DEFAULT_MODEL_DIR), args.hf_file)
-        else:
-            base_dir = os.path.join(str(DEFAULT_MODEL_DIR), args.hf_repo.replace("/", "_"))
-            if args.pattern:
-                base_dir = f"{base_dir}_{args.pattern}"
-            local_path = base_dir
+        # Determine model_id and load config from metadata
+        model_id = _determine_model_id_from_args(args)
+        success, config = load_model_metadata(model_id, is_main=True)
+        if not success:
+            print_error(f"Failed to load model {model_id}")
+            sys.exit(1)
 
-        projector_path = None
-        mmproj_path = f"{local_path}-projector"
-        if os.path.exists(mmproj_path):
-            projector_path = mmproj_path
-
-        # If a directory, attempt to pick a GGUF file when pattern is specified or none found at top level
-        if os.path.isdir(local_path):
-            search_dir = local_path
-            if args.pattern:
-                pattern_dir = os.path.join(local_path, args.pattern)
-                if os.path.exists(pattern_dir) and os.path.isdir(pattern_dir):
-                    search_dir = pattern_dir
-            gguf_files = find_gguf_files(search_dir)
-            if gguf_files:
-                local_path = os.path.join(search_dir, gguf_files[0])
-            else:
-                print_error(f"No GGUF files found in {search_dir}")
-                sys.exit(1)
-
-        model_id = os.path.basename(local_path)
-        config = {
-            "model_id": model_id,
-            "model": local_path,
-            "context_length": args.context_length,
-            "model_name": model_id,
-            "task": args.task,
-            "on_demand": False,
-            "is_lora": False,
-            "projector": projector_path,
-            "multimodal": bool(projector_path),
-        }
+        # Respect provided context length override
+        if getattr(args, 'context_length', None):
+            config["context_length"] = args.context_length
 
         success = manager.start([config], args.port, args.host)
 
@@ -939,6 +916,7 @@ def load_model_metadata(model_id, is_main=False) -> tuple[bool, dict | None]:
         "architecture": metadata.get("architecture", "flux-dev"),
         "lora_config": lora_config,
         "context_length": DEFAULT_CONFIG.model.DEFAULT_CONTEXT_LENGTH,
+        "backend": metadata.get("backend", "gguf")
     }
     return True, config
 
