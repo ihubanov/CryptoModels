@@ -411,11 +411,11 @@ class ServiceHandler:
                                         yield f"data: {chunk_obj.json()}\n\n"
                                         continue
                                 
-                                if thinking_mode:
+                                if thinking_mode and choice.delta.content:
+                                    thinking_mode = False
                                     copy_chunk_obj = chunk_obj.copy()
                                     copy_chunk_obj.choices[0].delta.content = "</think>\n\n" 
                                     yield f"data: {copy_chunk_obj.json()}\n\n"
-                                    thinking_mode = False
                                 
                                 # Handle finish reason - output accumulated tool calls
                                 if choice.finish_reason and tool_calls:
