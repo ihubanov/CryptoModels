@@ -119,17 +119,6 @@ class ChatCompletionRequestBase(BaseModel):
     seed: Optional[int] = Field(0, description="Random seed for generation")
     response_format: Optional[Dict[str, Any]] = Field(None, description="Format for the response")
 
-    def refine_messages(self) -> None:
-        """
-        Refines the messages to make sure the messages are in the correct format.
-        """
-        refined_messages = []
-        for message in self.messages:
-            # remove the None values
-            refined_message = {k: v for k, v in message.model_dump().items() if v is not None}
-            refined_messages.append(refined_message)
-        self.messages = refined_messages
-
     def is_vision_request(self) -> bool:
         """
         Determines if the request is a vision request according to the OpenAI API standard.
@@ -182,6 +171,10 @@ class ChatCompletionRequest(ChatCompletionRequestBase):
         def clean_special_box_text(input_text: str) -> str:
             return UNICODE_BOX_PATTERN.sub('', input_text).strip()
         
+        # Remove any None entries from the messages list early
+        if isinstance(self.messages, list):
+            self.messages = [message for message in self.messages if message is not None]
+        
         # Use a single pass with list comprehensions for better performance
         system_messages = []
         non_system_messages = []
@@ -193,10 +186,21 @@ class ChatCompletionRequest(ChatCompletionRequestBase):
             elif isinstance(message.content, str):
                 message.content = clean_special_box_text(message.content)
             elif isinstance(message.content, list):
-                # More efficient iteration with enumerate
+                # Remove None items and clean any text entries inside list content
+                cleaned_items = []
                 for item in message.content:
+                    if item is None:
+                        continue
                     if isinstance(item, dict) and item.get("type") == "text" and "text" in item:
-                        item["text"] = clean_special_box_text(item["text"])
+                        item["text"] = clean_special_box_text(item["text"]).strip()
+                        cleaned_items.append(item)
+                    elif hasattr(item, "type") and getattr(item, "type", None) == "text" and hasattr(item, "text") and getattr(item, "text", None) is not None:
+                        # Support pydantic MultimodalContentItem instances
+                        item.text = clean_special_box_text(item.text).strip()
+                        cleaned_items.append(item)
+                    else:
+                        cleaned_items.append(item)
+                message.content = cleaned_items
             
             # Sort messages in the same loop to avoid second iteration
             if message.role == "system":
