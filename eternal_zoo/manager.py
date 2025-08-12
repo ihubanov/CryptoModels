@@ -816,6 +816,7 @@ class EternalZooManager:
         if model_path is None:
             raise ValueError("Model path is required to start the service")
         
+        backend = config.get("backend", "gguf")
         model_name = config.get("model_name", None)
         model_family = self._get_model_family(model_name)
         template_path = self._get_model_template_path(model_family)
@@ -824,42 +825,52 @@ class EternalZooManager:
         projector = config.get("projector", None)
         context_length = config.get("context_length", 32768)
 
-        command = [
-            self.llama_server_path,
-            "--model", str(model_path),
-            "--pooling", "mean",
-            "--no-webui",
-            "--no-context-shift",
-            "-fa",
-            "-ngl", "9999",
-            "-c", str(context_length),
-            "--embeddings",
-            "--jinja",
-        ]
+        if backend == "gguf":
+            command = [
+                self.llama_server_path,
+                "--model", str(model_path),
+                "--pooling", "mean",
+                "--no-webui",
+                "--no-context-shift",
+                "-fa",
+                "-ngl", "9999",
+                "-c", str(context_length),
+                "--embeddings",
+                "--jinja",
+            ]
 
-        if model_family == "gpt-oss":
-            command.extend(["--reasoning-format", "none"])
+            if model_family == "gpt-oss":
+                command.extend(["--reasoning-format", "none"])
 
-        if projector is not None:
-            if os.path.exists(projector):
-                command.extend(["--mmproj", str(projector)])
-            else:
-                raise ValueError(f"Projector file not found: {projector}")
-        
-        if template_path is not None:
-            if os.path.exists(template_path):
-                command.extend(["--chat-template-file", template_path])
-            else:
-                raise ValueError(f"Template file not found: {template_path}")
-        
-        if best_practice_path is not None:
-            if os.path.exists(best_practice_path):
-                with open(best_practice_path, "r") as f:
-                    best_practice = json.load(f)
-                    for key, value in best_practice.items():
-                        command.extend([f"--{key}", str(value)])
-            else:
-                raise ValueError(f"Best practices file not found: {best_practice_path}")
+            if projector is not None:
+                if os.path.exists(projector):
+                    command.extend(["--mmproj", str(projector)])
+                else:
+                    raise ValueError(f"Projector file not found: {projector}")
+            
+            if template_path is not None:
+                if os.path.exists(template_path):
+                    command.extend(["--chat-template-file", template_path])
+                else:
+                    raise ValueError(f"Template file not found: {template_path}")
+            
+            if best_practice_path is not None:
+                if os.path.exists(best_practice_path):
+                    with open(best_practice_path, "r") as f:
+                        best_practice = json.load(f)
+                        for key, value in best_practice.items():
+                            command.extend([f"--{key}", str(value)])
+                else:
+                    raise ValueError(f"Best practices file not found: {best_practice_path}")
+        elif backend == "mlx-lm":
+            command = [
+                "mlx-openai-server",
+                "launch",
+                "--model-path", str(model_path),
+                "--model-type", "lm"
+            ]
+        else:
+            raise ValueError(f"Unsupported backend: {backend}")
 
         return command
 
