@@ -118,36 +118,17 @@ class ChatCompletionRequestBase(BaseModel):
     max_tokens: Optional[int] = Field(None, description="Maximum number of tokens to generate")
     seed: Optional[int] = Field(0, description="Random seed for generation")
     response_format: Optional[Dict[str, Any]] = Field(None, description="Format for the response")
-    
-    @validator("messages")
-    def check_messages_not_empty(cls, v: List[Message]) -> List[Message]:
-        """Ensure that the messages list is not empty and validate message structure."""
-        if not v:
-            raise ValueError("messages cannot be empty")
-        
-        msg_count = len(v)
-        if msg_count > 50:  # Local AI's limit is 50 messages
-            raise ValueError("message history too long")
-        
-        # Pre-define set for O(1) lookup instead of creating it in loop    
-        valid_roles = frozenset({"user", "assistant", "system", "tool"})
-        
-        # Use any() with generator expression for early exit on invalid role
-        if any(msg.role not in valid_roles for msg in v):
-            # Only find the specific invalid role if validation fails
-            invalid_roles = [msg.role for msg in v if msg.role not in valid_roles]
-            raise ValueError(f"invalid role(s): {invalid_roles[0]}")
-                
-        return v
 
-    @validator("max_tokens")
-    def validate_max_tokens(cls, v: Optional[int]) -> Optional[int]:
-        """Validate max_tokens - convert -1 to None and ensure positive values."""
-        if v is None or v == -1:
-            return None
-        if v < 1:
-            raise ValueError("max_tokens must be greater than or equal to 1")
-        return v
+    def refine_messages(self) -> None:
+        """
+        Refines the messages to make sure the messages are in the correct format.
+        """
+        refined_messages = []
+        for message in self.messages:
+            # remove the None values
+            refined_message = {k: v for k, v in message.model_dump().items() if v is not None}
+            refined_messages.append(refined_message)
+        self.messages = refined_messages
 
     def is_vision_request(self) -> bool:
         """
