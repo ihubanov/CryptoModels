@@ -192,9 +192,9 @@ class ServiceHandler:
         # Make a non-streaming API call
         logger.debug(f"Making non-streaming request for model {request.model}")
         response_data = await ServiceHandler._make_api_call(host, port, "/v1/chat/completions", request_dict)
-        # bring reasoning_content to content
         reasoning_content = "<think>\n\n" + response_data.get("choices", [])[0].get("message", {}).get("reasoning_content", "") + "</think>\n\n"
-        response_data["choices"][0]["message"]["content"] = reasoning_content
+        content = response_data["choices"][0]["message"]["content"]
+        response_data["choices"][0]["message"]["content"] = reasoning_content + content
         response_data["choices"][0]["message"]["reasoning_content"] = None
         return ChatCompletionResponse(
             id=response_data.get("id", generate_chat_completion_id()),
