@@ -112,8 +112,12 @@ def get_service_info() -> Dict[str, Any]:
         raise HTTPException(status_code=503, detail=str(e))
 
 def convert_request_to_dict(request) -> Dict[str, Any]:
-    """Convert request object to dictionary, supporting both Pydantic v1 and v2."""
-    return request.model_dump() if hasattr(request, "model_dump") else request.dict()
+    """Convert request object to dictionary while dropping all None values (Pydantic v1/v2)."""
+    if hasattr(request, "model_dump"):
+        # Pydantic v2
+        return request.model_dump(exclude_none=True)
+    # Pydantic v1
+    return request.dict(exclude_none=True)
 
 def generate_request_id() -> str:
     """Generate a short request ID for tracking."""
