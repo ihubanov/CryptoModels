@@ -390,7 +390,6 @@ class ServiceHandler:
                                 chunk_obj = ChatCompletionChunk.parse_raw(json_str)
                                 choice = chunk_obj.choices[0]
 
-
                                 if choice.delta.reasoning_content:
                                     if thinking_mode:
                                         # move reasoning_content to content
@@ -412,6 +411,7 @@ class ServiceHandler:
                                         continue
                                 
                                 if thinking_mode and choice.delta.content:
+                                    print(f"thinking_mode: {thinking_mode}")
                                     thinking_mode = False
                                     copy_chunk_obj = chunk_obj.copy()
                                     copy_chunk_obj.choices[0].delta.content = "</think>\n\n" 
