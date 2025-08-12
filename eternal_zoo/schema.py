@@ -15,12 +15,15 @@ from eternal_zoo.config import DEFAULT_CONFIG
 # Precompile regex patterns for better performance
 UNICODE_BOX_PATTERN = re.compile(r'\\u25[0-9a-fA-F]{2}')
 
-# Common models used in both streaming and non-streaming contexts
+# ============================================================================
+# Content Models
+# ============================================================================
+
 class ImageUrl(BaseModel):
     """
     Represents an image URL in a message.
     """
-    url: str = Field(..., description="URL of the image")
+    url: str = Field(..., description="The image URL")
 
     @validator("url")
     def validate_url(cls, v: str) -> str:
@@ -29,14 +32,25 @@ class ImageUrl(BaseModel):
             raise ValueError("URL must start with http://, https://, or data:")
         return v
 
-class VisionContentItem(BaseModel):
+class AudioInput(BaseModel):
     """
-    Represents a single content item in a message (text or image).
+    Represents an audio input in a message.
     """
-    type: Literal["text", "image_url"] = Field(..., description="Type of content")
-    text: Optional[str] = Field(None, description="Text content if type is text")
-    image_url: Optional[ImageUrl] = Field(None, description="Image URL if type is image_url")
-        
+    data: str = Field(..., description="The audio data")
+    format: Literal["mp3", "wav"] = Field(..., description="The audio format")
+
+class MultimodalContentItem(BaseModel):
+    """
+    Represents a single content item in a message (text, image, or audio).
+    """
+    type: str = Field(..., description="The type of content, e.g., 'text', 'image_url', or 'input_audio'")
+    text: Optional[str] = Field(None, description="The text content, if type is 'text'")
+    image_url: Optional[ImageUrl] = Field(None, description="The image URL object, if type is 'image_url'")
+    input_audio: Optional[AudioInput] = Field(None, description="The audio input object, if type is 'input_audio'")
+
+# ============================================================================
+# Function and Tool Call Models
+# ============================================================================
 
 class FunctionCall(BaseModel):
     """
@@ -60,20 +74,37 @@ class ChatCompletionMessageToolCall(BaseModel):
     """
     Represents a tool call in a message.
     """
-    id: str = Field(..., description="Unique identifier for the tool call")
-    function: FunctionCall = Field(..., description="Function call details")
-    type: Literal["function"] = Field("function", description="Type of tool call")
+    id: Optional[str] = Field(None, description="The ID of the tool call")
+    function: Optional[FunctionCall] = Field(None, description="Function call details")
+    type: Optional[Literal["function"]] = Field(None, description="Type of tool call")
+    index: Optional[int] = Field(None, description="The index of the tool call")
+
+# ============================================================================
+# Message Models
+# ============================================================================
 
 class Message(BaseModel):
     """
     Represents a message in a chat completion.
     """
-    content: Optional[Union[str, List[VisionContentItem]]] = Field(None, description="Message content")
+    content: Optional[Union[str, List[MultimodalContentItem]]] = Field(None, description="Message content")
     refusal: Optional[str] = Field(None, description="Refusal message if any")
     role: Literal["system", "user", "assistant", "tool"] = Field(..., description="Role of the message sender")
     function_call: Optional[FunctionCall] = Field(None, description="Function call if any")
     tool_calls: Optional[List[ChatCompletionMessageToolCall]] = Field(None, description="Tool calls if any")
-    
+    tool_call_id: Optional[str] = Field(None, description="Tool call ID if any")
+    reasoning_content: Optional[str] = Field(None, description="Reasoning content if any")
+
+# ============================================================================
+# Request Models
+# ============================================================================
+
+class ChatTemplateKwargs(BaseModel):
+    """
+    Represents the arguments for a chat template.
+    """
+    enable_thinking: bool = Field(True, description="Whether to enable thinking mode")
+
 # Common request base for both streaming and non-streaming
 class ChatCompletionRequestBase(BaseModel):
     """
@@ -85,7 +116,7 @@ class ChatCompletionRequestBase(BaseModel):
     tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(None, description="Tool choice configuration")
     max_tokens: Optional[int] = Field(None, description="Maximum number of tokens to generate")
     seed: Optional[int] = Field(0, description="Random seed for generation")
-    response_format: Optional[Dict[str, Any]] = Field(None, description="Format for the response.")
+    response_format: Optional[Dict[str, Any]] = Field(None, description="Format for the response")
     
     @validator("messages")
     def check_messages_not_empty(cls, v: List[Message]) -> List[Message]:
@@ -156,12 +187,6 @@ class ChatCompletionRequestBase(BaseModel):
 
         return False
     
-class ChatTemplateKwargs(BaseModel):
-    """
-    Represents the arguments for a chat template.
-    """
-    enable_thinking: bool = Field(True, description="Whether to enable thinking mode")
-
 # Non-streaming request and response
 class ChatCompletionRequest(ChatCompletionRequestBase):
     """
@@ -218,6 +243,10 @@ class ChatCompletionRequest(ChatCompletionRequestBase):
                 # Join all content with newlines for better formatting
                 message.content = "\n".join(merged_content) if merged_content else ""
 
+# ============================================================================
+# Response Models
+# ============================================================================
+
 class Choice(BaseModel):
     """
     Represents a choice in a chat completion response.
@@ -236,7 +265,10 @@ class ChatCompletionResponse(BaseModel):
     model: str = Field(..., description="Model used for completion")
     choices: List[Choice] = Field(..., description="Generated choices")
 
-# Embedding models
+# ============================================================================
+# Embedding Models
+# ============================================================================
+
 class EmbeddingRequest(BaseModel):
     """
     Model for embedding requests.
@@ -267,51 +299,59 @@ class EmbeddingResponse(BaseModel):
     data: List[Embedding] = Field(..., description="List of embeddings")
     model: str = Field(..., description="Model used for embedding")
 
+# ============================================================================
+# Streaming Models
+# ============================================================================
+
 class ChoiceDeltaFunctionCall(BaseModel):
     """
     Represents a function call delta in a streaming response.
     """
-    arguments: Optional[str] = Field(None, description="Arguments for the function call delta.")
-    name: Optional[str] = Field(None, description="Name of the function in the delta.")
+    arguments: Optional[str] = Field(None, description="Arguments for the function call delta")
+    name: Optional[str] = Field(None, description="Name of the function in the delta")
 
 class ChoiceDeltaToolCall(BaseModel):
     """
     Represents a tool call delta in a streaming response.
     """
-    index: Optional[int] = Field(None, description="Index of the tool call delta.")
-    id: Optional[str] = Field(None, description="ID of the tool call delta.")
-    function: Optional[ChoiceDeltaFunctionCall] = Field(None, description="Function call details in the delta.")
-    type: Optional[str] = Field(None, description="Type of the tool call delta.")
+    index: Optional[int] = Field(None, description="Index of the tool call delta")
+    id: Optional[str] = Field(None, description="ID of the tool call delta")
+    function: Optional[ChoiceDeltaFunctionCall] = Field(None, description="Function call details in the delta")
+    type: Optional[str] = Field(None, description="Type of the tool call delta")
 
 class Delta(BaseModel):
     """
     Represents a delta in a streaming response.
     """
-    content: Optional[str] = Field(None, description="Content of the delta.")
-    function_call: Optional[ChoiceDeltaFunctionCall] = Field(None, description="Function call delta, if any.")
-    refusal: Optional[str] = Field(None, description="Refusal reason, if any.")
-    role: Optional[Literal["system", "user", "assistant", "tool"]] = Field(None, description="Role in the delta.")
-    tool_calls: Optional[List[ChoiceDeltaToolCall]] = Field(None, description="List of tool call deltas, if any.")
-    reasoning_content: Optional[str] = Field(None, description="Reasoning content, if any.")
+    content: Optional[str] = Field(None, description="Content of the delta")
+    function_call: Optional[ChoiceDeltaFunctionCall] = Field(None, description="Function call delta, if any")
+    refusal: Optional[str] = Field(None, description="Refusal reason, if any")
+    role: Optional[Literal["system", "user", "assistant", "tool"]] = Field(None, description="Role in the delta")
+    tool_calls: Optional[List[ChoiceDeltaToolCall]] = Field(None, description="List of tool call deltas, if any")
+    reasoning_content: Optional[str] = Field(None, description="Reasoning content, if any")
 
 class StreamingChoice(BaseModel):
     """
     Represents a choice in a streaming response.
     """
-    delta: Delta = Field(..., description="The delta for this streaming choice.")
-    finish_reason: Optional[Literal["stop", "length", "tool_calls", "content_filter", "function_call"]] = Field(None, description="The reason for finishing, if any.")
-    index: int = Field(..., description="The index of the streaming choice.")
+    delta: Delta = Field(..., description="The delta for this streaming choice")
+    finish_reason: Optional[Literal["stop", "length", "tool_calls", "content_filter", "function_call"]] = Field(None, description="The reason for finishing, if any")
+    index: int = Field(..., description="The index of the streaming choice")
     
 class ChatCompletionChunk(BaseModel):
     """
     Represents a chunk in a streaming chat completion response.
     """
-    id: str = Field(..., description="The chunk ID.")
-    choices: List[StreamingChoice] = Field(..., description="List of streaming choices in the chunk.")
-    created: int = Field(..., description="The creation timestamp of the chunk.")
-    model: str = Field(..., description="The model used for the chunk.")
-    object: Literal["chat.completion.chunk"] = Field(..., description="The object type, always 'chat.completion.chunk'.")
+    id: str = Field(..., description="The chunk ID")
+    choices: List[StreamingChoice] = Field(..., description="List of streaming choices in the chunk")
+    created: int = Field(..., description="The creation timestamp of the chunk")
+    model: str = Field(..., description="The model used for the chunk")
+    object: Literal["chat.completion.chunk"] = Field(..., description="The object type, always 'chat.completion.chunk'")
     system_fingerprint: Optional[str] = Field(None, description="System fingerprint for the completion")
+
+# ============================================================================
+# Model Management Models
+# ============================================================================
 
 # OpenAI-compatible /v1/models endpoint schemas
 class ModelPermission(BaseModel):
@@ -340,7 +380,6 @@ class ModelCard(BaseModel):
     context_length: int
     lora_config: Optional[dict] = None
 
-
 class ModelList(BaseModel):
     object: str = "list"
     data: List[ModelCard] = [] 
@@ -353,6 +392,9 @@ class LoraConfigRequest(BaseModel):
     model: str
     lora_config: Dict[str, LoraItem]
 
+# ============================================================================
+# Image Generation Models
+# ============================================================================
 
 class ImageSize(str, Enum):
     SMALL_SQUARE = "256x256"
