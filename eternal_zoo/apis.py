@@ -406,7 +406,8 @@ class ServiceHandler:
                                         # first chunk of thinking mode
                                         first_think_chunk = chunk_obj.model_copy(deep=True)
                                         first_think_chunk.choices[0].delta.content = "<think>\n\n"
-                                        yield f"data: {first_think_chunk.json()}\n\n"
+                                        first_think_chunk.choices[0].delta.reasoning_content = None
+                                        yield f"data: {first_think_chunk.model_dump_json()}\n\n"
 
                                         # remove reasoning_content from chunk_obj
                                         chunk_obj.choices[0].delta.content = choice.delta.reasoning_content
