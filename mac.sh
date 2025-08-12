@@ -455,14 +455,37 @@ fi
 VENV_PATH=".eternal-zoo"
 log_message "Checking if virtual environment exists..."
 if [ -d "$VENV_PATH" ]; then
-    log_message "Removing existing virtual environment..."
-    rm -rf $VENV_PATH
+    # Determine Python version used by the existing venv
+    if [ -x "$VENV_PATH/bin/python3" ]; then
+        VENV_PYTHON="$VENV_PATH/bin/python3"
+    elif [ -x "$VENV_PATH/bin/python" ]; then
+        VENV_PYTHON="$VENV_PATH/bin/python"
+    else
+        VENV_PYTHON=""
+    fi
+
+    if [ -n "$VENV_PYTHON" ]; then
+        VENV_PY_VERSION=$("$VENV_PYTHON" -c 'import sys; print(".".join(map(str, sys.version_info[:2])))' 2>/dev/null || echo "unknown")
+        if [ "$VENV_PY_VERSION" != "3.11" ]; then
+            log_message "Existing virtual environment uses Python $VENV_PY_VERSION. Removing..."
+            rm -rf "$VENV_PATH"
+        else
+            log_message "Existing virtual environment uses Python 3.11. Keeping it."
+        fi
+    else
+        log_message "Existing virtual environment has no valid Python executable. Removing..."
+        rm -rf "$VENV_PATH"
+    fi
 fi
-log_message "Creating virtual environment 'eternal-zoo'..."
-"$PYTHON_CMD" -m venv $VENV_PATH || handle_error $? "Failed to create virtual environment"
+
+# Create venv only if it does not exist (or was removed above)
+if [ ! -d "$VENV_PATH" ]; then
+    log_message "Creating virtual environment 'eternal-zoo'..."
+    "$PYTHON_CMD" -m venv "$VENV_PATH" || handle_error $? "Failed to create virtual environment"
+fi
 
 log_message "Activating virtual environment..."
-source $VENV_PATH/bin/activate || handle_error $? "Failed to activate virtual environment"
+source "$VENV_PATH/bin/activate" || handle_error $? "Failed to activate virtual environment"
 log_message "Virtual environment activated."
 
 # Step 7: Install mlx-openai-server dependencies
