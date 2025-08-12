@@ -84,7 +84,7 @@ class ChatCompletionRequestBase(BaseModel):
     tools: Optional[List[Dict[str, Any]]] = Field(None, description="Available tools for the model")
     tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(None, description="Tool choice configuration")
     max_tokens: Optional[int] = Field(None, description="Maximum number of tokens to generate")
-    seed: Optional[int] = Field(None, description="Random seed for generation")
+    seed: Optional[int] = Field(0, description="Random seed for generation")
     response_format: Optional[Dict[str, Any]] = Field(None, description="Format for the response.")
     
     @validator("messages")
