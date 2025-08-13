@@ -1112,7 +1112,7 @@ def handle_check(args):
         "mmproj": args.mmproj,
     }
     
-    if getattr(args, 'model_name', None):
+    if args.model_name:
         model_name = args.model_name
         if model_name not in FEATURED_MODELS:
             print_error(f"Model name {model_name} not found in FEATURED_MODELS")
