@@ -1163,6 +1163,8 @@ def handle_check(args):
         else:
             hf_data = FEATURED_MODELS[model_name]
 
+    local_path = DEFAULT_MODEL_DIR / hf_data["repo"]
+
     if hf_data["model"]:
         local_path = DEFAULT_MODEL_DIR / hf_data["model"]
     elif hf_data["pattern"]:
