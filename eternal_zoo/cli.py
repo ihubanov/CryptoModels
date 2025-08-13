@@ -488,7 +488,7 @@ def parse_args():
     
     # Get all known option strings from the parser
     known_options = set()
-    for action in parser._get_option_actions():
+    for action in parser._get_optional_actions():
         known_options.update(action.option_strings)
     
     # Process sys.argv to filter out unknown flag-value pairs
