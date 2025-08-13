@@ -697,6 +697,8 @@ class EternalZooManager:
 
         if "gpt-oss" in model_name:
             return "gpt-oss"
+        if "jan-v1" in model_name:
+            return "jan-v1"
         if "qwen3-coder" in model_name:
             return "qwen3-coder"
         if "qwen3" in model_name:
