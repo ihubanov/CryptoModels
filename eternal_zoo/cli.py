@@ -388,6 +388,8 @@ def parse_args():
     )
     check_command.add_argument(
         "--hf-file",
+        help="🤗 Hugging Face model file",
+        metavar="FILE"
     )
     check_command.add_argument(
         "--mmproj",
@@ -486,10 +488,20 @@ def parse_args():
     import sys
     from argparse import SUPPRESS
     
-    # Get all known option strings from the parser
+    # Get all known option strings from the parser and all subparsers
     known_options = set()
-    for action in parser._get_optional_actions():
-        known_options.update(action.option_strings)
+    
+    def collect_options(parser_obj):
+        for action in parser_obj._get_optional_actions():
+            known_options.update(action.option_strings)
+        # Recursively collect from subparsers
+        if hasattr(parser_obj, '_subparsers'):
+            for action in parser_obj._subparsers._actions:
+                if isinstance(action, argparse._SubParsersAction):
+                    for choice, subparser in action.choices.items():
+                        collect_options(subparser)
+    
+    collect_options(parser)
     
     # Process sys.argv to filter out unknown flag-value pairs
     filtered_argv = []
