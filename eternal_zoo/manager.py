@@ -839,9 +839,6 @@ class EternalZooManager:
                 "--jinja",
             ]
 
-            if model_family == "gpt-oss":
-                command.extend(["--reasoning-format", "none"])
-
             if projector is not None:
                 if os.path.exists(projector):
                     command.extend(["--mmproj", str(projector)])

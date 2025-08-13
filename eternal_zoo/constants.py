@@ -23,4 +23,3 @@ GATEWAY_URLS = [
 
 ETERNAL_AI_METADATA_GW = "https://agent.api.eternalai.org/api/vibe/model/"
 PREFIX_DOWNLOAD_LOG = "[CRYPTOAGENTS_LOGGER] [MODEL_INSTALL]"
-HARMONY_SERIES = ["gpt-oss-20b", "gpt-oss-120b", "bafkreiclhnqcjfbbusqmg73jcwasomv7tqchkqm3fea5wwzs5vavc2wzfq", "bafkreia4xtrb4vfsf7lblomjwh7cc3nlpci3fsqyeqpgqqflx4cnhwa3za"]

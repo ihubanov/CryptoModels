@@ -35,8 +35,7 @@ setup(
         "pydantic==2.11.7",
         "asyncio==3.4.3",
         "json_repair==0.47.6",
-        "msgpack==1.1.1",
-        "openai-harmony==0.0.3"
+        "msgpack==1.1.1"
     ],
     entry_points={
         "console_scripts": [
