@@ -388,8 +388,6 @@ def parse_args():
     )
     check_command.add_argument(
         "--hf-file",
-        help="🤗 Hugging Face model file",
-        metavar="FILE"
     )
     check_command.add_argument(
         "--mmproj",
@@ -400,6 +398,19 @@ def parse_args():
         "--pattern",
         help="🔍 Pattern to download from Hugging Face",
         metavar="PATTERN"
+    )
+    check_command.add_argument(
+        "--task",
+        type=str,
+        default="chat",
+        choices=["chat", "embed", "image-generation", "image-edit"],
+        help="🎯 Model task type (default: chat)",
+        metavar="TYPE"
+    )
+    check_command.add_argument(
+        "--backend",
+        type=str,
+        default="gguf",
     )
 
     # Model preserve command
@@ -484,56 +495,7 @@ def parse_args():
         metavar="GB"
     )
 
-    # Use a more robust approach to handle unknown args
-    import sys
-    from argparse import SUPPRESS
-    
-    # Get all known option strings from the parser and all subparsers
-    known_options = set()
-    
-    def collect_options(parser_obj):
-        for action in parser_obj._get_optional_actions():
-            known_options.update(action.option_strings)
-        # Recursively collect from subparsers
-        if hasattr(parser_obj, '_subparsers'):
-            for action in parser_obj._subparsers._actions:
-                if isinstance(action, argparse._SubParsersAction):
-                    for choice, subparser in action.choices.items():
-                        collect_options(subparser)
-    
-    collect_options(parser)
-    
-    # Process sys.argv to filter out unknown flag-value pairs
-    filtered_argv = []
-    i = 0
-    argv = sys.argv[1:]  # Skip script name
-    
-    while i < len(argv):
-        arg = argv[i]
-        
-        if arg.startswith('--'):
-            if arg in known_options:
-                # Known option, keep it
-                filtered_argv.append(arg)
-            else:
-                # Unknown option, skip it and potentially its value
-                if i + 1 < len(argv) and not argv[i + 1].startswith('-'):
-                    i += 1  # Skip the value
-        elif arg.startswith('-') and len(arg) > 1:
-            # Handle short options
-            if arg in known_options:
-                filtered_argv.append(arg)
-            else:
-                # Unknown short option, skip it and potentially its value
-                if i + 1 < len(argv) and not argv[i + 1].startswith('-'):
-                    i += 1  # Skip the value
-        else:
-            # Not an option, keep it (positional argument)
-            filtered_argv.append(arg)
-        
-        i += 1
-    
-    return parser.parse_known_args(filtered_argv)
+    return parser.parse_known_args()
 
 def handle_download(args) -> bool:
     """Handle model download with beautiful output"""
@@ -1158,7 +1120,7 @@ def handle_check(args):
         "mmproj": args.mmproj,
     }
     
-    if args.model_name:
+    if getattr(args, 'model_name', None):
         model_name = args.model_name
         if model_name not in FEATURED_MODELS:
             print_error(f"Model name {model_name} not found in FEATURED_MODELS")
@@ -1175,13 +1137,12 @@ def handle_check(args):
         else:
             hf_data = FEATURED_MODELS[model_name]
 
-    if hf_data["repo"]:
-        local_path = DEFAULT_MODEL_DIR / hf_data["repo"]
-
-    if hf_data["model"]:
+    local_path = DEFAULT_MODEL_DIR / hf_data.get("repo", "").replace("/", "_")
+        
+    if hf_data.get("model", None):
         local_path = DEFAULT_MODEL_DIR / hf_data["model"]
-
-    if hf_data["pattern"]:
+    
+    if hf_data.get("pattern", None):
         pattern_dir =  DEFAULT_MODEL_DIR / (hf_data["repo"].replace("/", "_") + "_" + hf_data["pattern"]) / hf_data["pattern"]
         if os.path.exists(pattern_dir) and os.path.isdir(pattern_dir):
             gguf_files = find_gguf_files(pattern_dir)
@@ -1203,11 +1164,13 @@ def main():
     print_banner()
 
     known_args, unknown_args = parse_args()
-    print_info(f"Known args: {known_args}")
 
-    # Ignore unknown arguments (don't exit)
+    # Handle unknown arguments
     if unknown_args:
-        print_info(f"Ignoring unknown arguments: {' '.join(unknown_args)}")
+        for arg in unknown_args:
+            print_error(f'Unknown command or argument: {arg}')
+        print_info("Use --help for available commands and options")
+        sys.exit(2)
 
     # Handle commands
     if known_args.command == "model":
