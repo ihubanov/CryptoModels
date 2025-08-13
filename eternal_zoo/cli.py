@@ -377,11 +377,6 @@ def parse_args():
         metavar="MODEL"
     )
     check_command.add_argument(
-        "--model-name",
-        help="🏷️  Model name(s) - single: qwen3-1.7b or multi: qwen3-14b,qwen3-4b (first is main, others on-demand)",
-        metavar="MODEL"
-    )
-    check_command.add_argument(
         "--hash",
         help="🔗 IPFS hash of the model to check",
         metavar="HASH"
@@ -1111,6 +1106,8 @@ def handle_check(args):
         "pattern": args.pattern,
         "mmproj": args.mmproj,
     }
+
+    print_info(f"HF data: {hf_data}")
     
     if args.model_name:
         model_name = args.model_name
