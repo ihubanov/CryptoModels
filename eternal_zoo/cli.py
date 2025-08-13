@@ -1163,11 +1163,13 @@ def handle_check(args):
         else:
             hf_data = FEATURED_MODELS[model_name]
 
-    local_path = DEFAULT_MODEL_DIR / hf_data["repo"]
+    if hf_data["repo"]:
+        local_path = DEFAULT_MODEL_DIR / hf_data["repo"]
 
     if hf_data["model"]:
         local_path = DEFAULT_MODEL_DIR / hf_data["model"]
-    elif hf_data["pattern"]:
+
+    if hf_data["pattern"]:
         pattern_dir =  DEFAULT_MODEL_DIR / (hf_data["repo"].replace("/", "_") + "_" + hf_data["pattern"]) / hf_data["pattern"]
         if os.path.exists(pattern_dir) and os.path.isdir(pattern_dir):
             gguf_files = find_gguf_files(pattern_dir)
@@ -1189,6 +1191,7 @@ def main():
     print_banner()
 
     known_args, unknown_args = parse_args()
+    print_info(f"Known args: {known_args}")
 
     # Ignore unknown arguments (don't exit)
     if unknown_args:
