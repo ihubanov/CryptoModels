@@ -700,7 +700,10 @@ class EternalZooManager:
         if "qwen3-coder" in model_name:
             return "qwen3-coder"
         if "qwen3" in model_name:
-            return "qwen3"
+            if "2507" in model_name:
+                return "qwen3-2507"
+            else:
+                return "qwen3"
         if "qwen2.5" in model_name:
             return "qwen2.5"
         if "lfm2" in model_name:
