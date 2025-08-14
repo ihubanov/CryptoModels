@@ -196,8 +196,14 @@ class ServiceHandler:
         if reasoning_content:
             reasoning_content = "<think>\n\n" + reasoning_content + "</think>\n\n"
 
-        content = response_data.get("choices", [])[0].get("message", {}).get("content", "")
-        response_data["choices"][0]["message"]["content"] = (reasoning_content + content) if reasoning_content else content
+        final_content = None
+        content = response_data.get("choices", [])[0].get("message", {}).get("content", None)
+        if reasoning_content:
+            final_content = reasoning_content
+        if content:
+            final_content = final_content + content
+
+        response_data["choices"][0]["message"]["content"] = final_content
         response_data["choices"][0]["message"]["reasoning_content"] = reasoning_content
 
         return ChatCompletionResponse(
