@@ -53,12 +53,18 @@ def check_valid_folder(infos: dict, folder_path: str) -> bool:
             continue
         file_path = os.path.join(folder_path, file_name)
         if not os.path.exists(file_path):
-            return False
+            return False, infos
         computed_sha256 = compute_file_hash(file_path)
         if computed_sha256 != file_info["sha256"]:
-            return False
+            # remove invalid file
+            try:
+                os.remove(file_path)
+                infos["files"].pop(file_name)
+            except Exception as e:
+                logger.error(f"Failed to remove invalid file {file_path}: {e}")
+            return False, infos
         logger.info(f"File {file_name} is valid")
-    return True
+    return True, infos
 
 
 async def pick_fastest_gateway(filecoin_hash: str, gateways: list[str], timeout: int = 5) -> str:
@@ -473,9 +479,8 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                         )
                         
                         res["model_path"] = tmp_dir
-                        if not check_valid_folder(infos, tmp_dir):
-                            # Should remove the file and try again
-                            await async_rmtree(tmp_dir)
+                        valid, infos = check_valid_folder(infos, tmp_dir)
+                        if not valid:
                             continue
 
                         if final_path:
@@ -490,9 +495,8 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                         )
 
                         res["model_path"] = tmp_dir
-                        if not check_valid_folder(infos, tmp_dir):
-                            # Should remove the file and try again
-                            await async_rmtree(tmp_dir)
+                        valid, infos = check_valid_folder(infos, tmp_dir)
+                        if not valid:
                             continue
                         
                         if final_path:
