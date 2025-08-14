@@ -192,10 +192,14 @@ class ServiceHandler:
         # Make a non-streaming API call
         logger.debug(f"Making non-streaming request for model {request.model}")
         response_data = await ServiceHandler._make_api_call(host, port, "/v1/chat/completions", request_dict)
-        reasoning_content = "<think>\n\n" + response_data.get("choices", [])[0].get("message", {}).get("reasoning_content", "") + "</think>\n\n"
-        content = response_data["choices"][0]["message"]["content"]
-        response_data["choices"][0]["message"]["content"] = reasoning_content + content
-        response_data["choices"][0]["message"]["reasoning_content"] = None
+        reasoning_content = response_data.get("choices", [])[0].get("message", {}).get("reasoning_content", None)
+        if reasoning_content:
+            reasoning_content = "<think>\n\n" + reasoning_content + "</think>\n\n"
+
+        content = response_data.get("choices", [])[0].get("message", {}).get("content", "")
+        response_data["choices"][0]["message"]["content"] = (reasoning_content + content) if reasoning_content else content
+        response_data["choices"][0]["message"]["reasoning_content"] = reasoning_content
+
         return ChatCompletionResponse(
             id=response_data.get("id", generate_chat_completion_id()),
             object=response_data.get("object", "chat.completion"),
@@ -320,13 +324,13 @@ class ServiceHandler:
                 if tool_call_index not in tool_calls:
                     tool_calls[tool_call_index] = {"arguments": ""}
                 
-                if delta_tool_call.id is not None:
+                if delta_tool_call.id:
                     tool_calls[tool_call_index]["id"] = delta_tool_call.id
                     
                 function = delta_tool_call.function
-                if function.name is not None:
+                if function.name:
                     tool_calls[tool_call_index]["name"] = function.name
-                if function.arguments is not None:
+                if function.arguments:
                     tool_calls[tool_call_index]["arguments"] += function.arguments
             
             def _create_tool_call_chunks(tool_calls: dict, chunk_obj):
@@ -415,12 +419,13 @@ class ServiceHandler:
                                         yield f"data: {chunk_obj.model_dump_json()}\n\n"
                                         continue
                                 
-                                if thinking_mode and choice.delta.content:
-                                    thinking_mode = False
-                                    # copy a chunk with </think>
-                                    copy_chunk_obj = chunk_obj.model_copy(deep=True)
-                                    copy_chunk_obj.choices[0].delta.content = "</think>\n\n"
-                                    yield f"data: {copy_chunk_obj.model_dump_json()}\n\n"
+                                if thinking_mode:
+                                    if choice.delta.content or choice.delta.tool_calls:
+                                        thinking_mode = False
+                                        # copy a chunk with </think>
+                                        copy_chunk_obj = chunk_obj.model_copy(deep=True)
+                                        copy_chunk_obj.choices[0].delta.content = "</think>\n\n"
+                                        yield f"data: {copy_chunk_obj.model_dump_json()}\n\n"
 
                                 # Handle finish reason - output accumulated tool calls
                                 if choice.finish_reason and tool_calls:
