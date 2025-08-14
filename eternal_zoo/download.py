@@ -474,7 +474,9 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
                         
                         res["model_path"] = tmp_dir
                         if not check_valid_folder(infos, tmp_dir):
-                            raise Exception("Model is not the same as the one on Hugging Face")
+                            # Should remove the file and try again
+                            await async_rmtree(tmp_dir)
+                            continue
 
                         if final_path:
                             await async_move(tmp_dir, final_path)
@@ -489,7 +491,9 @@ async def download_model_from_hf(data: dict, final_dir: str | None = None) -> tu
 
                         res["model_path"] = tmp_dir
                         if not check_valid_folder(infos, tmp_dir):
-                            raise Exception("Model is not the same as the one on Hugging Face")
+                            # Should remove the file and try again
+                            await async_rmtree(tmp_dir)
+                            continue
                         
                         if final_path:
                             await async_move(tmp_dir, final_path)
