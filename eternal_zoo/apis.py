@@ -204,7 +204,7 @@ class ServiceHandler:
             final_content = final_content + content
 
         response_data["choices"][0]["message"]["content"] = final_content
-        response_data["choices"][0]["message"]["reasoning_content"] = reasoning_content
+        response_data["choices"][0]["message"]["reasoning_content"] = None
 
         return ChatCompletionResponse(
             id=response_data.get("id", generate_chat_completion_id()),
