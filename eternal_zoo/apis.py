@@ -434,6 +434,8 @@ class ServiceHandler:
                                         # copy a chunk with </think>
                                         copy_chunk_obj = chunk_obj.model_copy(deep=True)
                                         copy_chunk_obj.choices[0].delta.content = "</think>\n\n"
+                                        copy_chunk_obj.choices[0].delta.reasoning_content = None
+                                        copy_chunk_obj.choices[0].delta.tool_calls = None
                                         yield f"data: {copy_chunk_obj.model_dump_json()}\n\n"
 
                                 # Handle finish reason - output accumulated tool calls
