@@ -201,7 +201,10 @@ class ServiceHandler:
         if reasoning_content:
             final_content = reasoning_content
         if content:
-            final_content = final_content + content
+            if final_content:
+                final_content = final_content + content
+            else:
+                final_content = content
 
         response_data["choices"][0]["message"]["content"] = final_content
         response_data["choices"][0]["message"]["reasoning_content"] = None
