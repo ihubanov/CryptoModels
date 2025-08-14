@@ -112,8 +112,8 @@ class EternalZooManager:
                 running_ai_command = self._build_chat_command(config)
             elif task == "image-generation":
                 logger.info(f"Starting image generation model: {config}")
-                if not shutil.which("mlx-flux"):
-                    raise EternalZooServiceError("mlx-flux command not found in PATH")
+                if not shutil.which("mlx-openai-server"):
+                    raise EternalZooServiceError("mlx-openai-server command not found in PATH")
                 running_ai_command = self._build_image_generation_command(config)
             elif task == "image-edit":
                 logger.warning(f"Image edit is not implemented yet: {config}")
@@ -908,10 +908,11 @@ class EternalZooManager:
                 lora_scales.append(value["scale"])
 
         command = [
-            "mlx-flux",
-            "serve",
+            "mlx-openai-server",
+            "launch",
             "--model-path", str(model_path),
             "--config-name", architecture,
+            "--model-type", "image-generation",
         ]
         
         # Validate LoRA parameters

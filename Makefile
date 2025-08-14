@@ -14,9 +14,7 @@ HASH=bafkreiclwlxc56ppozipczuwkmgnlrxrerrvaubc5uhvfs3g2hp3lftrwm
 download:
 	python eternal_zoo/download.py $(HASH)
 
-# Package versions
-MLX_FLUX_TAG=1.0.6
-MLX_OPENAI_SERVER_TAG=1.2.12
+MLX_OPENAI_SERVER_TAG=1.2.13
 ETERNAL_ZOO_TAG=2.0.27
 
 # Default target
