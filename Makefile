@@ -17,7 +17,7 @@ download:
 # Package versions
 MLX_FLUX_TAG=1.0.5
 MLX_OPENAI_SERVER_TAG=1.2.11
-ETERNAL_ZOO_TAG=2.0.24
+ETERNAL_ZOO_TAG=2.0.25
 
 # Default target
 .PHONY: install
