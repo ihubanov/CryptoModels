@@ -15,7 +15,7 @@ download:
 	python eternal_zoo/download.py $(HASH)
 
 # Package versions
-MLX_FLUX_TAG=1.0.5
+MLX_FLUX_TAG=1.0.6
 MLX_OPENAI_SERVER_TAG=1.2.12
 ETERNAL_ZOO_TAG=2.0.27
 
