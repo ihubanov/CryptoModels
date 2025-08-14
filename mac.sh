@@ -495,14 +495,7 @@ else
     log_error "mlx-openai-server installation failed. This may happen on Intel Macs or due to compatibility issues. Continuing with installation..."
 fi
 
-# Step 8: Install mlx-flux dependencies
-if update_package "mlx-flux" "https://github.com/0x9334/mlx-flux.git" "https://raw.githubusercontent.com/0x9334/mlx-flux/main/setup.py" "version=\"[0-9.]*\"" "pip install git+https://github.com/0x9334/mlx-flux.git" "$MLX_FLUX_TAG"; then
-    log_message "mlx-flux installation completed successfully."
-else
-    log_error "mlx-flux installation failed. This may happen on Intel Macs or due to compatibility issues. Continuing with installation..."
-fi
-
-# Step 9: Install eternal-zoo toolkit
+# Step 8: Install eternal-zoo toolkit
 update_package "eternal-zoo" "https://github.com/eternalai-org/eternal-zoo.git" "https://raw.githubusercontent.com/eternalai-org/eternal-zoo/main/eternal_zoo/__init__.py" "__version__ = \"[0-9.]*\"" "pip install git+https://github.com/eternalai-org/eternal-zoo.git" "$ETERNAL_ZOO_TAG"
 
 log_message "Setup completed successfully."
