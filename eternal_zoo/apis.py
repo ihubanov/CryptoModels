@@ -192,22 +192,25 @@ class ServiceHandler:
         # Make a non-streaming API call
         logger.debug(f"Making non-streaming request for model {request.model}")
         response_data = await ServiceHandler._make_api_call(host, port, "/v1/chat/completions", request_dict)
-        reasoning_content = response_data.get("choices", [])[0].get("message", {}).get("reasoning_content", None)
-        if reasoning_content:
-            reasoning_content = "<think>\n\n" + reasoning_content + "</think>\n\n"
+        # reasoning_content = response_data.get("choices", [])[0].get("message", {}).get("reasoning_content", None)
+        choices = response_data.get("choices", [])
+        if len(choices) > 0:
+            reasoning_content = choices[0].get("message", {}).get("reasoning_content", None)
+            if reasoning_content:
+                reasoning_content = "<think>\n\n" + reasoning_content + "</think>\n\n"
 
-        final_content = None
-        content = response_data.get("choices", [])[0].get("message", {}).get("content", None)
-        if reasoning_content:
-            final_content = reasoning_content
-        if content:
-            if final_content:
-                final_content = final_content + content
-            else:
-                final_content = content
+            final_content = None
+            content = choices[0].get("message", {}).get("content", None)
+            if reasoning_content:
+                final_content = reasoning_content
+            if content:
+                if final_content:
+                    final_content = final_content + content
+                else:
+                    final_content = content
 
-        response_data["choices"][0]["message"]["content"] = final_content
-        response_data["choices"][0]["message"]["reasoning_content"] = None
+            response_data["choices"][0]["message"]["content"] = final_content
+            response_data["choices"][0]["message"]["reasoning_content"] = None
 
         return ChatCompletionResponse(
             id=response_data.get("id", generate_chat_completion_id()),
