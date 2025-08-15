@@ -12,7 +12,7 @@
 {%- else %}
     {%- if messages[0].role == 'system' %}
         {{- '<|im_start|>system\n' + messages[0].content + '<|im_end|>\n' }}
-    {%- endif %}x
+    {%- endif %}
 {%- endif %}
 
 {%- set ns = namespace(multi_step_tool=true, last_query_index=0) %}
