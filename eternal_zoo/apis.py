@@ -318,9 +318,7 @@ class ServiceHandler:
             
             buffer = ""
             tool_calls = {}
-            
-            thinking_mode = False
-            
+                        
             def _extract_json_data(line: str) -> Optional[str]:
                 """Extract JSON data from SSE line, return None if not valid data."""
                 line = line.strip()
@@ -407,9 +405,9 @@ class ServiceHandler:
                                 continue
                             
                             try:
-                                chunk_obj = ChatCompletionChunk.model_validate(json_str)
+                                chunk_obj = ChatCompletionChunk.model_validate_json(json_str)
                                 choice = chunk_obj.choices[0]
-                                
+
                                 # Handle finish reason - output accumulated tool calls
                                 if choice.finish_reason and tool_calls:
                                     for tool_call_chunk in _create_tool_call_chunks(tool_calls, chunk_obj):
@@ -435,7 +433,7 @@ class ServiceHandler:
                         json_str = _extract_json_data(buffer)
                         if json_str and json_str != '[DONE]':
                             try:
-                                chunk_obj = ChatCompletionChunk.model_validate(json_str)
+                                chunk_obj = ChatCompletionChunk.model_validate_json(json_str)
                                 yield f"data: {chunk_obj.model_dump_json()}\n\n"
                             except Exception as e:
                                 logger.error(f"Failed to parse trailing chunk in {stream_id}: {e}")
